@@ -2,96 +2,6 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 const requireAuth =
-  (
-    req,
-    res,
-    next,
-  ) => {
-    // 1. Extract the Authorization header
-    const authHeader =
-      req
-        .headers
-        .authorization;
-
-    // 2. Format Check: Must exist and start with 'Bearer '
-    if (
-      !authHeader ||
-      !authHeader.startsWith(
-        "Bearer ",
-      )
-    ) {
-      return res
-        .status(
-          401,
-        )
-        .json(
-          {
-            error:
-              "Unauthorized: Missing or invalid token format",
-          },
-        );
-    }
-
-    // 3. Isolate the actual token string
-    const token =
-      authHeader.split(
-        " ",
-      )[1];
-
-    try {
-      // 4. Verify and Decode
-      // process.env.JWT_SECRET must be defined in your .env file
-      const decoded =
-        jwt.verify(
-          token,
-          process
-            .env
-            .JWT_SECRET,
-        );
-
-      // 5. Attach payload to the request
-      // Assuming your login route signs the token with { id: user._id }
-      req.user =
-        decoded;
-
-      // 6. Hand off to the next function (requestWithdrawal)
-      next();
-    } catch (error) {
-      // Distinguish between an expired token and a completely forged one
-      if (
-        error.name ===
-        "TokenExpiredError"
-      ) {
-        return res
-          .status(
-            401,
-          )
-          .json(
-            {
-              error:
-                "Unauthorized: Token has expired",
-            },
-          );
-      }
-      return res
-        .status(
-          403,
-        )
-        .json(
-          {
-            error:
-              "Forbidden: Invalid token",
-          },
-        );
-    }
-  };
-
-module.exports =
-  {
-    requireAuth,
-  };
-
-exports.protect =
   async (
     req,
     res,
@@ -112,6 +22,7 @@ exports.protect =
           req.headers.authorization.split(
             " ",
           )[1];
+
         const decoded =
           jwt.verify(
             token,
@@ -120,14 +31,52 @@ exports.protect =
               .JWT_SECRET,
           );
 
+        // Check how your login route signs the token. It's usually decoded.id or decoded.userId.
+        // This explicitly maps it to _id so MongoDB can use it.
+        const idToSearch =
+          decoded.id ||
+          decoded.userId ||
+          decoded._id;
+
         req.user =
           await User.findById(
-            decoded.id,
+            idToSearch,
           ).select(
             "-passwordHash",
           );
+
+        if (
+          !req.user
+        ) {
+          return res
+            .status(
+              401,
+            )
+            .json(
+              {
+                message:
+                  "Not authorized, user not found",
+              },
+            );
+        }
+
         next();
       } catch (error) {
+        if (
+          error.name ===
+          "TokenExpiredError"
+        ) {
+          return res
+            .status(
+              401,
+            )
+            .json(
+              {
+                error:
+                  "Unauthorized: Token has expired",
+              },
+            );
+        }
         return res
           .status(
             401,
@@ -151,14 +100,14 @@ exports.protect =
         .json(
           {
             message:
-              "Not authorized, no token",
+              "Not authorized, no token provided",
           },
         );
     }
   };
 
 // 18 U.S.C. § 2257 Enforcer
-exports.requireVerifiedCreator =
+const requireVerifiedCreator =
   (
     req,
     res,
@@ -202,4 +151,10 @@ exports.requireVerifiedCreator =
           },
         );
     }
+  };
+
+module.exports =
+  {
+    requireAuth,
+    requireVerifiedCreator,
   };

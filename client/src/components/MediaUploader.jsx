@@ -41,6 +41,13 @@ const MediaUploader =
           type: "",
         },
       );
+      const [
+        isNsfw,
+        setIsNsfw,
+      ] =
+        useState(
+          false,
+        );
     const [
       errorMessage,
       setErrorMessage,
@@ -104,7 +111,7 @@ const MediaUploader =
             // 1. Get Ticket
             const ticketRes =
               await axios.post(
-                "/api/media/upload-ticket",
+                "http://localhost:5000/api/media/upload-ticket",
                 {
                   fileName:
                     file.name,
@@ -218,19 +225,29 @@ const MediaUploader =
           const token = localStorage.getItem("nippy_token") || localStorage.getItem("token");
 
           await axios.post(
-            "/api/content/create",
+            "http://localhost:5000/api/content",
             {
               title,
               description,
-              priceInUSDT: priceInUSDT === "" ? 0 : Number(priceInUSDT),
-              fileKey: fileData.key,
-              fileType: fileData.type,
+              priceInUSDT:
+                priceInUSDT ===
+                ""
+                  ? 0
+                  : Number(
+                      priceInUSDT,
+                    ),
+              fileKey:
+                fileData.key,
+              fileType:
+                fileData.type,
+              isNsfw,
             },
             {
-              headers: {
-                Authorization: `Bearer ${token}`, // Use isolated token
-              },
-            }
+              headers:
+                {
+                  Authorization: `Bearer ${token}`, // Use isolated token
+                },
+            },
           );
 
           setStatus(
@@ -274,6 +291,9 @@ const MediaUploader =
             key: "",
             type: "",
           },
+        );
+        setIsNsfw(
+          false,
         );
       };
 
@@ -361,6 +381,7 @@ const MediaUploader =
                     {
                       progress
                     }
+
                     %
                   </span>
                 </div>
@@ -516,6 +537,49 @@ const MediaUploader =
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#FF5757]"
                   placeholder="Leave blank to use your Global PPV Default, or enter 0 for Free"
                 />
+              </div>
+              {/* NSFW Toggle */}
+              <div className="flex items-center justify-between bg-slate-950 border border-slate-700 p-4 rounded-lg">
+                <div>
+                  <p className="text-sm font-medium text-white">
+                    Contains
+                    Adult
+                    /
+                    NSFW
+                    Content
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Enforces
+                    §
+                    2257
+                    blur
+                    controls
+                    on
+                    public
+                    feeds.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setIsNsfw(
+                      !isNsfw,
+                    )
+                  }
+                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                    isNsfw
+                      ? "bg-[#FF5757]"
+                      : "bg-slate-700"
+                  }`}
+                >
+                  <div
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                      isNsfw
+                        ? "translate-x-6"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
               </div>
 
               <button

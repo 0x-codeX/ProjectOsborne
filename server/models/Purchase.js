@@ -20,7 +20,18 @@ const purchaseSchema =
             .ObjectId,
           ref: "Content",
           required: false,
-        }, // Made optional for subscriptions
+        },
+      // Expiration date for subscriptions; not needed for one-time purchases
+expiresAt: {
+  type: Date,
+  required: function() { return this.purchaseType === 'SUBSCRIPTION'; }
+},
+status: {
+  type: String,
+  enum: ['pending', 'completed', 'failed'], // Crucial for Web3/Crypto txHashes
+  default: 'completed'
+},
+        // Made optional for subscriptions
       creator:
         {
           type: mongoose

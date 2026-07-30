@@ -82,7 +82,8 @@ const requestWithdrawal =
             },
           },
           {
-            new: true,
+            returnDocument:
+              "after",
             session,
           },
         );

@@ -85,6 +85,17 @@ const userSchema =
           type: Boolean,
           default: false, // Flips to true once they submit the BioData form
         },
+      payoutAddress:
+        {
+          type: String,
+          default:
+            "",
+        },
+      hasCompletedBioData:
+        {
+          type: Boolean,
+          default: false,
+        },
 
       // --- WEB3 / PAYMENTS ---
       walletAddress:
@@ -198,6 +209,16 @@ const userSchema =
               ],
             },
         },
+      bookmarks:
+        [
+          {
+            type: mongoose
+              .Schema
+              .Types
+              .ObjectId,
+            ref: "Content",
+          },
+        ],
     },
     {
       timestamps: true,

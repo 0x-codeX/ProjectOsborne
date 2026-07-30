@@ -136,49 +136,135 @@ exports.generateUploadTicket =
 // GET /api/media/stream/:contentId
 exports.getSecureStreamUrl = async (req, res) => {
     try {
-        const { contentId } = req.params;
-        const viewerId = req.user._id;
+      const {
+        contentId,
+      } =
+        req.params;
+      const viewerId =
+        req
+          .user
+          ._id;
 
-        // 1. Fetch the Content
-        const content = await Content.findById(contentId).populate('creator');
-        if (!content) return res.status(404).json({ message: "Content not found." });
-
-        // 2. Perform the Zero-Trust Validation Check
-        const globalPPV = content.creator.monetizationSettings?.defaultPPVPrice || 0;
-        const actualPrice = content.priceInUSDT !== null ? content.priceInUSDT : globalPPV;
-        
-        const isCreator = content.creator._id.toString() === viewerId.toString();
-        const isFree = actualPrice === 0 && content.creator.monetizationSettings?.monthlySubscription === 0;
-        
-        const validPurchase = await Purchase.findOne({
-            user: viewerId,
-            $or: [
-                { content: contentId, purchaseType: 'PPV' },
-                { creator: content.creator._id, purchaseType: 'SUBSCRIPTION' }
-            ]
-        });
-
-        if (!isCreator && !isFree && !validPurchase) {
-            return res.status(403).json({ message: "Access denied. Paywall active." });
-        }
-
-        // 3. Generate the 15-Minute Self-Destructing URL
-        const command =
-          new GetObjectCommand(
+      // 1. Fetch the Content
+      const content =
+        await Content.findById(
+          contentId,
+        ).populate(
+          "creator",
+        );
+      if (
+        !content
+      )
+        return res
+          .status(
+            404,
+          )
+          .json(
             {
-              Bucket:
-                process
-                  .env
-                  .S3_BUCKET_NAME,
-              Key: content.fileKey,
+              message:
+                "Content not found.",
             },
           );
 
-        // 900 seconds = 15 minutes
-        const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+      // 2. Perform the Zero-Trust Validation Check
+      const globalPPV =
+        content
+          .creator
+          .monetizationSettings
+          ?.defaultPPVPrice ||
+        0;
+      const actualPrice =
+        content.priceInUSDT !==
+        null
+          ? content.priceInUSDT
+          : globalPPV;
 
-        res.status(200).json({ streamUrl: signedUrl });
+      const isCreator =
+        content.creator._id.toString() ===
+        viewerId.toString();
+      const isFree =
+        actualPrice ===
+        0; // Free posts unlock for everyone
 
+      // Check for PPV purchase OR an active (non-expired) subscription
+      const validPurchase =
+        await Purchase.findOne(
+          {
+            user: viewerId,
+            $or: [
+              {
+                content:
+                  contentId,
+                purchaseType:
+                  "PPV",
+              },
+              {
+                creator:
+                  content
+                    .creator
+                    ._id,
+                purchaseType:
+                  "SUBSCRIPTION",
+                expiresAt:
+                  {
+                    $gt: new Date(),
+                  }, // <-- ONLY VALID IF EXPIRATION IS IN THE FUTURE
+                status:
+                  "completed", // <-- MUST BE A VERIFIED TRANSACTION
+              },
+            ],
+          },
+        );
+
+      if (
+        !isCreator &&
+        !isFree &&
+        !validPurchase
+      ) {
+        return res
+          .status(
+            403,
+          )
+          .json(
+            {
+              message:
+                "Access denied. Paywall active.",
+            },
+          );
+      }
+
+      // 3. Generate the 15-Minute Self-Destructing URL
+      const command =
+        new GetObjectCommand(
+          {
+            Bucket:
+              process
+                .env
+                .S3_BUCKET_NAME,
+            Key: content.fileKey,
+          },
+        );
+
+      // 900 seconds = 15 minutes
+      const signedUrl =
+        await getSignedUrl(
+          s3Client,
+          command,
+          {
+            expiresIn: 900,
+          },
+        );
+
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            streamUrl:
+              signedUrl,
+          },
+        );
     } catch (error) {
         console.error("Stream generation error:", error);
         res.status(500).json({ message: 'Failed to generate secure stream.' });

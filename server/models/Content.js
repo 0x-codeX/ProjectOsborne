@@ -1,3 +1,4 @@
+// models/Content.js
 const mongoose = require("mongoose");
 
 const contentSchema =
@@ -11,6 +12,7 @@ const contentSchema =
             .ObjectId,
           ref: "User",
           required: true,
+          index: true, // Ensures fast querying when loading a creator's profile feed
         },
       title:
         {
@@ -18,6 +20,23 @@ const contentSchema =
           required: true,
           trim: true,
           maxLength: 100,
+        },
+      // Inside your models/Content.js schema
+      status:
+        {
+          type: String,
+          enum: [
+            "active",
+            "sunset",
+          ],
+          default:
+            "active",
+        },
+      sunsetAt:
+        {
+          type: Date,
+          default:
+            null,
         },
       description:
         {
@@ -33,22 +52,70 @@ const contentSchema =
             "Price cannot be negative",
           ], // 0 means free/teaser
         },
+
+      // -- THE MEDIA VAULT --
       fileKey:
         {
           type: String,
           required: true,
-          unique: true, // No two posts can share the exact same R2 file key
+          unique: true,
         },
       fileType:
         {
           type: String,
-          required: true, // 'video/mp4', 'image/jpeg', etc.
+          required: true, // e.g., 'video/mp4', 'image/jpeg'
+        },
+
+      // -- THE MISSING FEED LOGIC --
+      previewKey:
+        {
+          type: String,
+          // The public, heavily compressed/blurred thumbnail for the feed.
+          // Fans see this BEFORE they pay. No presigned URL required.
+        },
+      isNsfw:
+        {
+          type: Boolean,
+          default: false,
+          // Mandatory for your 18 U.S.C. § 2257 UI compliance gating
         },
       isActive:
         {
           type: Boolean,
           default: true,
         },
+      likes:
+        [
+          {
+            type: mongoose
+              .Schema
+              .Types
+              .ObjectId,
+            ref: "User",
+          },
+        ],
+      comments:
+        [
+          {
+            user: {
+              type: mongoose
+                .Schema
+                .Types
+                .ObjectId,
+              ref: "User",
+            },
+            text: {
+              type: String,
+              required: true,
+            },
+            createdAt:
+              {
+                type: Date,
+                default:
+                  Date.now,
+              },
+          },
+        ],
     },
     {
       timestamps: true,

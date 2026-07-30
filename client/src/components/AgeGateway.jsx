@@ -16,7 +16,7 @@ const AgeGateway =
           "true",
         );
         navigate(
-          "/home",
+          "/auth/login",
         );
       };
 

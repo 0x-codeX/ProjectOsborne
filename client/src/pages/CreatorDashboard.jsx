@@ -9,6 +9,8 @@ import {
   Users,
   ShieldAlert,
   User,
+  LogOut,
+  FolderKanban,
 } from "lucide-react";
 import { ethers } from "ethers";
 import MediaUploader from "../components/MediaUploader";
@@ -107,7 +109,6 @@ const CreatorDashboard =
                 },
               );
 
-            // STRESS-TEST FIX: Catch 401, 404, or any other failure
             if (
               !response.ok
             ) {
@@ -134,7 +135,6 @@ const CreatorDashboard =
               error.message,
             );
 
-            // Nuke the session if the token is bad OR the user was deleted
             if (
               error.message ===
                 "SESSION_INVALID" ||
@@ -149,7 +149,7 @@ const CreatorDashboard =
               );
               localStorage.removeItem(
                 "token",
-              ); // Catching both naming conventions just in case
+              );
               navigate(
                 "/auth/login",
               );
@@ -166,7 +166,6 @@ const CreatorDashboard =
       navigate,
     ]);
 
-    // 2. Fetch Web3 Wallet USDT Balance
     // 2. Fetch Web3 Wallet USDT Balance
     useEffect(() => {
       const fetchUsdtBalance =
@@ -194,7 +193,6 @@ const CreatorDashboard =
           let fetchedBalance =
             null;
 
-          // Option A: Try injected browser provider first if user has MetaMask connected
           if (
             window.ethereum
           ) {
@@ -217,7 +215,7 @@ const CreatorDashboard =
                 ethers.formatUnits(
                   rawBalance,
                   6,
-                ); // Polygon USDT is hardcoded 6 decimals
+                );
             } catch (e) {
               console.warn(
                 "Browser provider lookup failed, falling back to public RPCs:",
@@ -226,7 +224,6 @@ const CreatorDashboard =
             }
           }
 
-          // Option B: Fallback to reliable CORS-friendly Polygon public RPCs
           if (
             fetchedBalance ===
             null
@@ -241,7 +238,6 @@ const CreatorDashboard =
 
             for (const endpoint of rpcEndpoints) {
               try {
-                // Pass chainId 137 directly to bypass eth_chainId preflight RPC calls
                 const provider =
                   new ethers.JsonRpcProvider(
                     endpoint,
@@ -287,7 +283,7 @@ const CreatorDashboard =
                     rawBalance,
                     6,
                   );
-                break; // Success! Exit loop
+                break;
               } catch (e) {
                 console.warn(
                   `RPC failed (${endpoint}):`,
@@ -309,7 +305,6 @@ const CreatorDashboard =
               ),
             );
           } else {
-            // Fallback gracefully to 0.00 instead of breaking the UI with "ERR"
             setUsdtBalance(
               "0.00",
             );
@@ -346,7 +341,7 @@ const CreatorDashboard =
             );
           const userId =
             user?._id ||
-            user?.id; // Bulletproof ID resolution
+            user?.id;
 
           if (
             !userId
@@ -392,7 +387,6 @@ const CreatorDashboard =
           if (
             data.url
           ) {
-            // Hand off user directly to Didit verification portal
             window.location.href =
               data.url;
           } else {
@@ -416,6 +410,23 @@ const CreatorDashboard =
         }
       };
 
+    // 4. Secure Logout Handler
+    const handleLogout =
+      () => {
+        localStorage.removeItem(
+          "nippy_user",
+        );
+        localStorage.removeItem(
+          "nippy_token",
+        );
+        localStorage.removeItem(
+          "token",
+        );
+        navigate(
+          "/auth/login",
+        );
+      };
+
     if (
       isLoading
     ) {
@@ -431,58 +442,113 @@ const CreatorDashboard =
       <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans">
         {/* Top Header */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 border-b border-slate-800 pb-6 gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">
-              Creator
-              Vault
-            </h1>
-            <p className="text-slate-500 text-sm mt-1">
-              Authenticated
-              as:{" "}
-              <button
-                onClick={() =>
-                  navigate(
-                    user?.hasCompletedBioData
-                      ? "/creator/profile"
-                      : "/auth/creator/biodata",
-                  )
-                }
-                className="font-mono text-[#FF5757] hover:text-rose-400 hover:underline transition-colors"
-              >
-                {user?.username
-                  ? `@${user.username}`
-                  : user?.email
-                    ? user.email
-                    : user?.walletAddress
-                      ? `${user.walletAddress.slice(0, 6)}...${user.walletAddress.slice(-4)}`
-                      : "Profile Setup Pending"}
-              </button>
-            </p>
+          <div className="flex items-center gap-4">
+            {/* PROFILE PICTURE AVATAR (CLICKABLE -> CREATOR VAULT) */}
+            <button
+              onClick={() =>
+                navigate(
+                  "/creator/vault",
+                )
+              }
+              title="View My Creator Vault"
+              className="relative w-14 h-14 rounded-full bg-slate-800 border-2 border-slate-700 hover:border-[#FF5757] overflow-hidden flex items-center justify-center transition-all cursor-pointer flex-shrink-0 group shadow-lg"
+            >
+              {user?.profileImage ? (
+                <img
+                  src={
+                    user.profileImage
+                  }
+                  alt="Profile"
+                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200"
+                />
+              ) : (
+                <User className="w-7 h-7 text-slate-400 group-hover:text-white transition-colors" />
+              )}
+            </button>
+
+            <div>
+              <h1 className="text-3xl font-bold text-white tracking-tight">
+                Creator
+                Dashboard
+              </h1>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Authenticated
+                as:{" "}
+                <button
+                  onClick={() =>
+                    navigate(
+                      user?.hasCompletedBioData
+                        ? "/creator/profile"
+                        : "/auth/creator/biodata",
+                    )
+                  }
+                  className="font-mono text-[#FF5757] hover:text-rose-400 hover:underline transition-colors"
+                >
+                  {user?.username
+                    ? `@${user.username}`
+                    : user?.email
+                      ? user.email
+                      : user?.walletAddress
+                        ? `${user.walletAddress.slice(0, 6)}...${user.walletAddress.slice(-4)}`
+                        : "Profile Setup Pending"}
+                </button>
+              </p>
+            </div>
           </div>
 
-          {/* Balance Card */}
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 flex items-center shadow-lg">
-            <div className="bg-slate-800 p-2 rounded-lg mr-4">
-              <Wallet className="w-5 h-5 text-[#FF5757]" />
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
-                Available
-                Balance
-              </p>
-              <p className="text-xl font-mono font-bold text-white">
-                {isFetchingBalance ? (
-                  <span className="animate-pulse">
-                    ---
+          {/* Right Side Container: Vault Link, Balance & Logout */}
+          <div className="flex items-center gap-3 w-full md:w-auto flex-wrap sm:flex-nowrap">
+            {/* Dedicated Creator Vault Nav Button */}
+            <button
+              onClick={() =>
+                navigate(
+                  "/creator/vault",
+                )
+              }
+              className="bg-slate-900 border border-slate-700 hover:border-[#FF5757] text-slate-200 hover:text-white px-4 py-3 rounded-xl flex items-center gap-2 shadow-lg transition-all cursor-pointer text-sm font-bold group"
+            >
+              <FolderKanban className="w-5 h-5 text-[#FF5757] group-hover:scale-110 transition-transform" />
+              <span>
+                My
+                Vault
+              </span>
+            </button>
+
+            {/* Balance Card */}
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 flex items-center shadow-lg flex-grow md:flex-grow-0">
+              <div className="bg-slate-800 p-2 rounded-lg mr-4">
+                <Wallet className="w-5 h-5 text-[#FF5757]" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
+                  Available
+                  Balance
+                </p>
+                <p className="text-xl font-mono font-bold text-white">
+                  {isFetchingBalance ? (
+                    <span className="animate-pulse">
+                      ---
+                    </span>
+                  ) : (
+                    usdtBalance
+                  )}{" "}
+                  <span className="text-[#FF5757]">
+                    USDT
                   </span>
-                ) : (
-                  usdtBalance
-                )}{" "}
-                <span className="text-[#FF5757]">
-                  USDT
-                </span>
-              </p>
+                </p>
+              </div>
             </div>
+
+            {/* Logout Button */}
+            <button
+              onClick={
+                handleLogout
+              }
+              title="Sign Out"
+              className="bg-slate-900 border border-slate-700 rounded-xl p-4 flex items-center justify-center shadow-lg text-slate-400 hover:text-[#FF5757] hover:border-[#FF5757] transition-all cursor-pointer"
+            >
+              <LogOut className="w-6 h-6" />
+            </button>
           </div>
         </header>
 
@@ -521,7 +587,12 @@ const CreatorDashboard =
                 Status
               </h3>
               <ShieldAlert
-                className={`w-5 h-5 ${user?.kycStatus === "verified" ? "text-emerald-500" : "text-[#FF5757]"}`}
+                className={`w-5 h-5 ${
+                  user?.kycStatus ===
+                  "verified"
+                    ? "text-emerald-500"
+                    : "text-[#FF5757]"
+                }`}
               />
             </div>
             <p className="text-xl font-bold text-white capitalize">
@@ -640,10 +711,13 @@ const CreatorDashboard =
             <div className="mb-10">
               <MonetizationSettings />
             </div>
+            <div className="mb-10">
+              <EarningsDashboard />
+            </div>
           </>
         )}
       </div>
     );
-  };;
+  };
 
 export default CreatorDashboard;

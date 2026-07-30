@@ -151,7 +151,8 @@ exports.requestWithdrawal =
             },
           },
           {
-            new: true,
+            returnDocument:
+              "after",
           },
         );
 

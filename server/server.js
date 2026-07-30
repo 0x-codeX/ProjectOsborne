@@ -3,9 +3,15 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
+const withdrawalRoutes = require("./routes/withdrawalRoutes");
+const startReaper = require("./cron/reaper");
+const contentRoutes = require("./routes/contentRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
+const purchaseRoutes = require("./routes/purchaseRoutes.js");
+
+
 const app =
   express();
-const withdrawalRoutes = require("./routes/withdrawalRoutes");
 
 
 // Security & Middleware
@@ -45,6 +51,19 @@ app.use(
   "/api/withdraw",
   withdrawalRoutes,
 );
+app.use(
+  "/api/content",
+  contentRoutes,
+);
+app.use(
+  "/api/notifications",
+  notificationRoutes,
+);
+app.use(
+  "/api/purchases",
+  purchaseRoutes,
+);
+
 
 // Database Connection
 mongoose
@@ -111,4 +130,18 @@ app.listen(
     console.log(
       `Server running on port ${PORT}`,
     ),
+);
+
+app.listen(
+  process
+    .env
+    .PORT,
+  () => {
+    console.log(
+      `Server running on port ${process.env.PORT}`,
+    );
+
+    // Start the background cron jobs
+    startReaper();
+  },
 );

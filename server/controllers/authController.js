@@ -1,8 +1,9 @@
 // server/controllers/authController.js
+const crypto = require("crypto");
 const User = require("../models/User");
 const bcrypt = require("bcryptjs"); // For password hashing
 const jwt = require("jsonwebtoken"); // For token generation
-const crypto = require("crypto");
+
 
 
 // Generate JWT with a 30-day expiration
@@ -226,120 +227,102 @@ const {
   ethers,
 } = require("ethers");
 
-// @desc    Authenticate a user via Web3 Wallet Signature
-// @route   POST /api/auth/web3-login
-exports.web3Login =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const {
-        walletAddress,
-        signature,
-        role,
-      } =
-        req.body;
-
-      // ... signature verification logic here ...
-
-      let user =
-        await User.findOne(
-          {
-            walletAddress,
-          },
-        );
-      let isNewUser = false;
-
-      if (
-        !user
-      ) {
-        // Create brand new Web3 user
-        user =
-          await User.create(
-            {
-              walletAddress,
-              role,
-              hasCompletedBioData: false, // Crucial for routing
-            },
-          );
-        isNewUser = true;
-      }
-
-      const token =
-        jwt.sign(
-          {
-            id: user._id,
-          },
-          process
-            .env
-            .JWT_SECRET,
-          {
-            expiresIn:
-              "7d",
-          },
-        );
-
-      res
-        .status(
-          200,
-        )
-        .json(
-          {
-            token,
-            user,
-            isNewUser, // The frontend reads this flag!
-          },
-        );
-    } catch (error) {
-      res
-        .status(
-          500,
-        )
-        .json(
-          {
-            message:
-              "Server error during Web3 login.",
-          },
-        );
-    }
-  };
-
-// @desc    Generate a random nonce for Web3 login challenge
-// @route   GET /api/auth/web3-nonce?walletAddress=0x...
+// 1. Generate the Nonce and Sync the User
 exports.getWeb3Nonce = async (req, res) => {
   try {
     const { walletAddress } = req.query;
-    
     if (!walletAddress) {
       return res.status(400).json({ message: "Wallet address required" });
     }
 
-    // Generate a secure, one-time random string
-    const nonce = crypto.randomBytes(16).toString("hex");
-    const message = `Welcome to Nippy.\n\nSign this one-time challenge to securely log in. This costs zero gas.\n\nNonce: ${nonce}`;
-
-    // Find user or create a temporary record just to hold the nonce
-    let user = await User.findOne({ walletAddress: walletAddress.toLowerCase() });
+    const cleanAddress = walletAddress.toLowerCase();
     
+    // Generate a secure, random hex string (looks exactly like the one you posted)
+    const nonce = crypto.randomBytes(16).toString('hex');
+
+    let user = await User.findOne({ walletAddress: cleanAddress });
+
+    // CRITICAL FIX: If the user doesn't exist, we MUST create them now 
+    // so the nonce is saved in the database for the login route to verify.
     if (!user) {
-      // If they don't exist yet, we create a skeleton record to store the nonce.
-      // We will fill in the rest of their details during the actual login step.
       user = await User.create({
-        email: `${walletAddress.toLowerCase()}@web3.nippy.com`,
-        passwordHash: crypto.randomBytes(32).toString("hex"), // Dummy hash
-        walletAddress: walletAddress.toLowerCase(),
-        role: "fan", // Temporary default
-        nonce: message // <--- Ensure your MongoDB User schema has a 'nonce' String field
+        walletAddress: cleanAddress,
+        nonce: nonce,
+        role: 'fan', // Temporary default, updated during login
+        hasCompletedBioData: false
       });
     } else {
-      user.nonce = message;
+      user.nonce = nonce;
       await user.save();
     }
 
-    res.status(200).json({ message: user.nonce });
+    // This exact string will be sent to the frontend to sign
+    const message = `Welcome to Nippy.\n\nSign this one-time challenge to securely log in. This costs zero gas.\n\nNonce: ${nonce}`;
+    
+    res.status(200).json({ message });
   } catch (error) {
-    res.status(500).json({ message: "Error generating nonce", error: error.message });
+    console.error("Nonce generation error:", error);
+    res.status(500).json({ message: "Server error generating nonce" });
+  }
+};
+
+
+// 2. Verify the Signature
+exports.web3Login = async (req, res) => {
+  try {
+    const { walletAddress, signature, role } = req.body;
+
+    if (!walletAddress || !signature) {
+      return res.status(400).json({ message: "Wallet address and signature required." });
+    }
+
+    const cleanAddress = walletAddress.toLowerCase();
+    const user = await User.findOne({ walletAddress: cleanAddress });
+
+    if (!user || !user.nonce) {
+      return res.status(400).json({ message: "Invalid session. Please request a new signature challenge." });
+    }
+
+    // THE PERFECT MATCH: We reconstruct the exact same string from step 1 using the saved nonce
+    const expectedMessage = `Welcome to Nippy.\n\nSign this one-time challenge to securely log in. This costs zero gas.\n\nNonce: ${user.nonce}`;
+
+    // Recover the address from the signature
+    const recoveredAddress = ethers.verifyMessage(expectedMessage, signature);
+
+    if (recoveredAddress.toLowerCase() !== cleanAddress) {
+      return res.status(401).json({ message: "Cryptographic signature verification failed." });
+    }
+
+    // If we reach here, they are authenticated!
+    // 1. Rotate the nonce for security (prevents replay attacks)
+    user.nonce = crypto.randomBytes(16).toString('hex');
+    
+    // 2. If they just signed up via the modal, update their intended role
+    let isNewUser = false;
+    if (!user.hasCompletedBioData) {
+      isNewUser = true;
+      if (role && role !== user.role) {
+        user.role = role;
+      }
+    }
+    
+    await user.save();
+
+    // 3. Issue the JWT
+    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+      expiresIn: '7d',
+    });
+
+    res.status(200).json({
+      message: "Web3 Login successful",
+      token,
+      user,
+      isNewUser
+    });
+
+  } catch (error) {
+    console.error("Web3 Login Error:", error);
+    res.status(500).json({ message: "Server error verifying signature." });
   }
 };
 

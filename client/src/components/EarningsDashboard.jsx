@@ -1,3 +1,4 @@
+// client/src/components/EarningsDashboard.jsx
 import React, {
   useState,
   useEffect,
@@ -6,9 +7,7 @@ import axios from "axios";
 import WithdrawalModal from "./WithdrawalModal";
 
 const EarningsDashboard =
-  ({
-    userAddress,
-  }) => {
+  () => {
     const [
       dashboardData,
       setDashboardData,
@@ -58,7 +57,6 @@ const EarningsDashboard =
             "",
           );
 
-          // 1. Correctly retrieve the token directly from localStorage
           const token =
             localStorage.getItem(
               "nippy_token",
@@ -75,7 +73,6 @@ const EarningsDashboard =
             );
           }
 
-          // 2. Standardized to Axios
           const response =
             await axios.get(
               "/api/earnings/dashboard",
@@ -153,6 +150,19 @@ const EarningsDashboard =
     } =
       dashboardData;
 
+    // INJECTION: Extract the preferred payout address from local storage session
+    const storedUser =
+      JSON.parse(
+        localStorage.getItem(
+          "nippy_user",
+        ) ||
+          "{}",
+      );
+    const targetWithdrawalAddress =
+      storedUser.payoutAddress ||
+      storedUser.walletAddress ||
+      "";
+
     return (
       <div className="space-y-8">
         <div className="flex justify-between items-center">
@@ -205,7 +215,7 @@ const EarningsDashboard =
           </div>
         </div>
 
-        {/* 3. Passing the exact correct props down to your WithdrawalModal */}
+        {/* Passing the targeted payout address directly down to the modal */}
         <WithdrawalModal
           isOpen={
             isModalOpen
@@ -222,7 +232,7 @@ const EarningsDashboard =
             wallet.balanceUSDT
           }
           userAddress={
-            userAddress
+            targetWithdrawalAddress
           }
         />
 

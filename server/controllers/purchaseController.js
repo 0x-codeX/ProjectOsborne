@@ -282,7 +282,24 @@ exports.verifyPayment =
           );
       }
 
-      // 7. Save Purchase to Database
+      // 7. Calculate Subscription Expiration & Save Purchase
+      let expiresAt =
+        null;
+      if (
+        purchaseType ===
+        "SUBSCRIPTION"
+      ) {
+        const now =
+          new Date();
+        expiresAt =
+          new Date(
+            now.setDate(
+              now.getDate() +
+                30,
+            ),
+          ); // Sets expiration to 30 days from now
+      }
+
       const purchase =
         await Purchase.create(
           {
@@ -299,6 +316,9 @@ exports.verifyPayment =
                 actualAmount,
               ),
             purchaseType,
+            expiresAt, // <-- SAVES EXPIRATION DATE
+            status:
+              "completed", // <-- MARKED AS COMPLETED
           },
         );
 
@@ -334,7 +354,8 @@ exports.verifyPayment =
         },
         {
           upsert: true,
-          new: true,
+          returnDocument:
+            "after",
         },
       );
 
@@ -366,3 +387,39 @@ exports.verifyPayment =
         );
     }
   };
+
+// GET /api/purchases/dashboard
+exports.getFanDashboard = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Fetch all purchases by this fan, populating the creator and content details
+    const purchases = await Purchase.find({ user: userId })
+      .populate("creator", "username profileImage")
+      .populate("content", "title description fileKey") // Bring in the video details
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const subscriptions = [];
+    const ppv = [];
+    const subbedCreators = new Set(); // To prevent showing the same creator twice if they renewed
+
+    purchases.forEach((p) => {
+      if (p.purchaseType === "SUBSCRIPTION" && p.creator) {
+        const creatorId = p.creator._id.toString();
+        // Only push unique active subscriptions
+        if (!subbedCreators.has(creatorId)) {
+          subbedCreators.add(creatorId);
+          subscriptions.push(p);
+        }
+      } else if (p.purchaseType === "PPV" && p.content) {
+        ppv.push(p);
+      }
+    });
+
+    res.status(200).json({ subscriptions, ppv });
+  } catch (error) {
+    console.error("Dashboard error:", error);
+    res.status(500).json({ message: "Failed to load dashboard data" });
+  }
+};

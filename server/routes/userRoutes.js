@@ -4,31 +4,59 @@ const router =
 const {
   requireAuth,
 } = require("../middleware/authMiddleware");
-
-// Destructure exactly what you exported from the controller
 const {
   getMonetizationSettings,
   updateMonetizationSettings,
-  updateProfile, 
+  submitBioData,
+  updateProfile,
+  deleteProfile,
+  getProfile,
+  updateSettings,
 } = require("../controllers/userController");
 
-// Lock routes down
+
+
+// Get Routs
 router.get(
   "/settings/monetization",
   requireAuth,
   getMonetizationSettings,
 );
+router.get(
+  "/profile",
+  requireAuth,
+  getProfile,
+);
 
+
+//Put Route
 router.put(
   "/settings/monetization",
   requireAuth,
   updateMonetizationSettings,
 );
-
 router.put(
   "/profile",
   requireAuth,
-  updateProfile, 
+  submitBioData, 
+);
+router.put(
+  "/settings",
+  requireAuth,
+  updateSettings,
+);
+router.put(
+  "/settings",
+  requireAuth,
+  updateProfile,
+);
+
+
+// Delete Routes
+router.delete(
+  "/profile",
+  requireAuth,
+  deleteProfile,
 );
 
 module.exports =

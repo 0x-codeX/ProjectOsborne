@@ -6,6 +6,7 @@ const {
 } = require("../middleware/authMiddleware");
 const {
   verifyPayment,
+  getFanDashboard,
 } = require("../controllers/purchaseController");
 
 // POST /api/purchases/verify
@@ -15,6 +16,9 @@ router.post(
   requireAuth,
   verifyPayment,
 );
+
+// GET /api/purchases/dashboard
+router.get("/dashboard", requireAuth, getFanDashboard);
 
 module.exports =
   router;

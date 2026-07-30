@@ -9,6 +9,7 @@ import {
   Phone,
   MapPin,
   Users,
+  Camera,
 } from "lucide-react";
 import axios from "axios";
 
@@ -18,6 +19,13 @@ const BioDataSetup =
       useNavigate();
 
     // Form State
+    const [
+      profileImage,
+      setProfileImage,
+    ] =
+      useState(
+        "",
+      );
     const [
       username,
       setUsername,
@@ -98,6 +106,30 @@ const BioDataSetup =
       useState(
         false,
       );
+    React.useEffect(() => {
+      const storedUser =
+        JSON.parse(
+          localStorage.getItem(
+            "nippy_user",
+          ),
+        );
+      if (
+        storedUser
+      ) {
+        if (
+          storedUser.email
+        )
+          setEmail(
+            storedUser.email,
+          );
+        if (
+          storedUser.username
+        )
+          setUsername(
+            storedUser.username,
+          );
+      }
+    }, []);
 
     // Strict Validation: Required fields and mandatory legal checkboxes
     const isFormValid =
@@ -113,6 +145,44 @@ const BioDataSetup =
         "" &&
       agreedTerms &&
       confirmedAge;
+
+    // Handle native device file selection and create a base64 preview
+    const handleImageSelect =
+      (
+        e,
+      ) => {
+        const file =
+          e
+            .target
+            .files[0];
+        if (
+          file
+        ) {
+          if (
+            file.size >
+            2 *
+              1024 *
+              1024
+          ) {
+            alert(
+              "Image size must be less than 2MB.",
+            );
+            return;
+          }
+
+          const reader =
+            new FileReader();
+          reader.onloadend =
+            () => {
+              setProfileImage(
+                reader.result,
+              );
+            };
+          reader.readAsDataURL(
+            file,
+          );
+        }
+      };
 
     const handleSubmit =
       async (
@@ -149,6 +219,7 @@ const BioDataSetup =
               confirmedAge,
               subscribeEmails,
               hasCompletedBioData: true,
+              profileImage, // Save the base64 string directly
             },
             {
               headers:
@@ -210,6 +281,45 @@ const BioDataSetup =
             }
             className="space-y-6"
           >
+            {/* Avatar Upload Section */}
+            <div className="flex flex-col items-center mb-8">
+              <div className="relative group">
+                <div className="w-24 h-24 rounded-full bg-slate-950 border-2 border-slate-700 overflow-hidden flex items-center justify-center flex-shrink-0">
+                  {profileImage ? (
+                    <img
+                      src={
+                        profileImage
+                      }
+                      alt="Avatar Preview"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <User className="w-10 h-10 text-slate-500" />
+                  )}
+                </div>
+
+                <label
+                  htmlFor="avatar-upload"
+                  className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Camera className="w-6 h-6 text-white" />
+                  <input
+                    type="file"
+                    id="avatar-upload"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={
+                      handleImageSelect
+                    }
+                  />
+                </label>
+              </div>
+              <p className="text-xs text-slate-500 mt-3 font-semibold uppercase tracking-wider">
+                Profile
+                Image
+              </p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Username */}
               <div>
