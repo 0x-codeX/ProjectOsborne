@@ -8,6 +8,7 @@ const startReaper = require("./cron/reaper");
 const contentRoutes = require("./routes/contentRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const purchaseRoutes = require("./routes/purchaseRoutes.js");
+const messageRoutes = require("./routes/messageRoutes.js");
 
 
 const app =
@@ -60,8 +61,8 @@ app.use(
   notificationRoutes,
 );
 app.use(
-  "/api/purchases",
-  purchaseRoutes,
+  "/api/messages",
+  require("./routes/messageRoutes"),
 );
 
 

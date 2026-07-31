@@ -16,6 +16,7 @@ const {
   toggleBookmark,
   addComment,
   getBookmarks,
+  getCreatorPublicProfile,
 } = require("../controllers/contentController");
 
 
@@ -34,6 +35,11 @@ router.get(
   "/bookmarked",
   requireAuth,
   getBookmarks,
+);
+router.get(
+  "/creator/:id",
+  requireAuth,
+  getCreatorPublicProfile,
 );
 router.put("/:id", requireAuth, updateContentPost);
 router.delete("/:id", requireAuth, deleteContentPost);

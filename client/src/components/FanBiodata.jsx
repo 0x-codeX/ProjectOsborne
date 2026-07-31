@@ -57,7 +57,7 @@ const FanBiodata =
           // 1. Send the native fetch call
           const response =
             await fetch(
-              "http://localhost:5000/api/users/profile",
+              "http://localhost:5000/api/users/biodata",
               {
                 method:
                   "PUT",

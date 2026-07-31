@@ -20,6 +20,14 @@ import BookmarksFeed from "./components/BookmarksFeed";
 import FanDashboard from "./components/FanDashboard";
 import FanProfile from "./components/FanProfile";
 import FanSettings from "./components/FanSettings";
+import CreatorPublicProfile from "./components/CreatorPublicProfile";
+import FanInbox from "./components/FanInbox";
+import FanChatWindow from "./components/FanChatWindow";
+
+
+
+
+
 
 // Dummy components to prevent white-screen crashes on new fan routes
 const Placeholder =
@@ -86,6 +94,12 @@ function App() {
             }
           />
           <Route
+            path="messages"
+            element={
+              <FanInbox />
+            }
+          />
+          <Route
             path="/notifications"
             element={
               <NotificationsFeed />
@@ -116,7 +130,20 @@ function App() {
               <BookmarksFeed />
             }
           />
+          <Route
+            path="/creator/:id"
+            element={
+              <CreatorPublicProfile />
+            }
+          />
         </Route>
+        
+        <Route
+          path="/messages/:id"
+          element={
+            <FanChatWindow />
+          }
+        />
 
         {/* CREATOR ZONE */}
         <Route

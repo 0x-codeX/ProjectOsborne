@@ -206,7 +206,7 @@ const BioDataSetup =
 
           // Update the user in MongoDB
           await axios.put(
-            "http://localhost:5000/api/users/profile",
+            "http://localhost:5000/api/users/biodata",
             {
               username,
               email,

@@ -12,6 +12,7 @@ import {
   Lock,
   BadgeDollarSign,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const USDT_ABI =
   [
@@ -458,12 +459,15 @@ const FanFeed =
                 }
                 className="mb-10 bg-nippy-obsidian border border-gray-800 rounded-2xl overflow-hidden shadow-xl"
               >
-                {/* Header */}
+                {/* UPDATED: Clickable Creator Header */}
                 <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center overflow-hidden border border-gray-600">
-                      {/* Fallback avatar if no profile picture exists */}
-                      <span className="font-bold text-gray-300">
+                  {/* WRAPPED IN A LINK WITH HOVER EFFECTS */}
+                  <Link
+                    to={`/creator/${post.creator?._id}`}
+                    className="flex items-center gap-3 group cursor-pointer"
+                  >
+                    <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center overflow-hidden border border-gray-600 group-hover:border-nippy-coral transition-colors">
+                      <span className="font-bold text-gray-300 group-hover:text-white">
                         {post.creator?.username
                           ?.charAt(
                             0,
@@ -473,11 +477,11 @@ const FanFeed =
                       </span>
                     </div>
                     <div>
-                      <div className="font-bold text-slate-200">
+                      <div className="font-bold text-slate-200 group-hover:text-nippy-coral transition-colors">
                         {post
                           .creator
                           ?.username ||
-                          "Unknown Creator"}
+                          "Unknown"}
                       </div>
                       <div className="text-xs text-gray-500">
                         {new Date(
@@ -485,9 +489,8 @@ const FanFeed =
                         ).toLocaleDateString()}
                       </div>
                     </div>
-                  </div>
+                  </Link>
 
-                  {/* Premium Badge for PPV content */}
                   {post.actualPrice >
                     0 && (
                     <div className="flex items-center gap-1 bg-nippy-coral/10 text-nippy-coral px-3 py-1 rounded-full border border-nippy-coral/20 text-xs font-bold">
@@ -495,7 +498,7 @@ const FanFeed =
                         size={
                           14
                         }
-                      />
+                      />{" "}
                       PPV
                     </div>
                   )}

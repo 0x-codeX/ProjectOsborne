@@ -209,11 +209,11 @@ const FanDashboard =
                   you will change this Link to point to `/creator/${sub.creator._id}` 
                 */}
                     <Link
-                      to="/feed"
+                      to={`/creator/${sub.creator._id}`}
                       className="flex items-center gap-1 text-sm font-medium text-gray-400 hover:text-white transition-colors"
                     >
                       View
-                      Feed{" "}
+                      Profile{" "}
                       <ChevronRight
                         size={
                           16

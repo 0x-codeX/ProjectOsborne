@@ -13,6 +13,7 @@ import {
   BadgeDollarSign,
   BookmarkMinus,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 // Minimal ABI and Address for USDT
 const USDT_ABI =
@@ -450,9 +451,12 @@ const BookmarksFeed =
               >
                 {/* Same UI layout as FanFeed.jsx */}
                 <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center overflow-hidden border border-gray-600">
-                      <span className="font-bold text-gray-300">
+                  <Link
+                    to={`/creator/${post.creator?._id}`}
+                    className="flex items-center gap-3 group cursor-pointer"
+                  >
+                    <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center overflow-hidden border border-gray-600 group-hover:border-nippy-coral transition-colors">
+                      <span className="font-bold text-gray-300 group-hover:text-white">
                         {post.creator?.username
                           ?.charAt(
                             0,
@@ -462,7 +466,7 @@ const BookmarksFeed =
                       </span>
                     </div>
                     <div>
-                      <div className="font-bold text-slate-200">
+                      <div className="font-bold text-slate-200 group-hover:text-nippy-coral transition-colors">
                         {post
                           .creator
                           ?.username ||
@@ -474,7 +478,7 @@ const BookmarksFeed =
                         ).toLocaleDateString()}
                       </div>
                     </div>
-                  </div>
+                  </Link>
 
                   {post.actualPrice >
                     0 && (

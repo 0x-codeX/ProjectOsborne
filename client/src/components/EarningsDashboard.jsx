@@ -1,10 +1,13 @@
-// client/src/components/EarningsDashboard.jsx
 import React, {
   useState,
   useEffect,
 } from "react";
 import axios from "axios";
 import WithdrawalModal from "./WithdrawalModal";
+import {
+  Users,
+  Video,
+} from "lucide-react"; // Added icons for the new stats
 
 const EarningsDashboard =
   () => {
@@ -23,6 +26,8 @@ const EarningsDashboard =
             [],
           recentSales:
             [],
+          activeSubscribers: 0,
+          ppvSalesCount: 0,
         },
       );
     const [
@@ -85,7 +90,39 @@ const EarningsDashboard =
             );
 
           setDashboardData(
-            response.data,
+            {
+              wallet:
+                response
+                  .data
+                  .wallet || {
+                  balanceUSDT: 0,
+                  totalEarnedUSDT: 0,
+                },
+              withdrawals:
+                response
+                  .data
+                  .withdrawals ||
+                [],
+              // BULLETPROOFING: Handles both names just in case, and falls back to empty array
+              recentSales:
+                response
+                  .data
+                  .recentSales ||
+                response
+                  .data
+                  .recentTransactions ||
+                [],
+              activeSubscribers:
+                response
+                  .data
+                  .activeSubscribers ||
+                0,
+              ppvSalesCount:
+                response
+                  .data
+                  .ppvSalesCount ||
+                0,
+            },
           );
         } catch (err) {
           console.error(
@@ -147,10 +184,11 @@ const EarningsDashboard =
       wallet,
       withdrawals,
       recentSales,
+      activeSubscribers,
+      ppvSalesCount,
     } =
       dashboardData;
 
-    // INJECTION: Extract the preferred payout address from local storage session
     const storedUser =
       JSON.parse(
         localStorage.getItem(
@@ -183,6 +221,7 @@ const EarningsDashboard =
           </button>
         </div>
 
+        {/* TOP ROW: FINANCIALS */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-sm hover:border-slate-700 transition-colors">
             <h3 className="text-slate-400 text-sm font-medium mb-1">
@@ -215,7 +254,52 @@ const EarningsDashboard =
           </div>
         </div>
 
-        {/* Passing the targeted payout address directly down to the modal */}
+        {/* BOTTOM ROW: PLATFORM METRICS */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-sm flex items-center justify-between">
+            <div>
+              <h3 className="text-slate-400 text-sm font-medium mb-1">
+                Active
+                Subscribers
+              </h3>
+              <p className="text-3xl font-bold text-white">
+                {
+                  activeSubscribers
+                }
+              </p>
+            </div>
+            <div className="p-3 bg-blue-500/10 text-blue-500 rounded-xl">
+              <Users
+                size={
+                  24
+                }
+              />
+            </div>
+          </div>
+
+          <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-sm flex items-center justify-between">
+            <div>
+              <h3 className="text-slate-400 text-sm font-medium mb-1">
+                Total
+                PPV
+                Unlocks
+              </h3>
+              <p className="text-3xl font-bold text-white">
+                {
+                  ppvSalesCount
+                }
+              </p>
+            </div>
+            <div className="p-3 bg-purple-500/10 text-purple-500 rounded-xl">
+              <Video
+                size={
+                  24
+                }
+              />
+            </div>
+          </div>
+        </div>
+
         <WithdrawalModal
           isOpen={
             isModalOpen
@@ -236,6 +320,7 @@ const EarningsDashboard =
           }
         />
 
+        {/* LEDGER TABLES */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-slate-800 bg-slate-950">
@@ -267,13 +352,15 @@ const EarningsDashboard =
                         {sale
                           .content
                           ?.title ||
-                          "Unknown Item"}
+                          (sale.purchaseType ===
+                          "SUBSCRIPTION"
+                            ? "Subscription"
+                            : "Unknown Item")}
                       </span>
                       <span className="font-medium text-emerald-500 font-mono">
                         +
-                        {
-                          sale.amount
-                        }{" "}
+                        {sale.amountPaid ||
+                          sale.amount}{" "}
                         USDT
                       </span>
                     </li>
@@ -317,14 +404,9 @@ const EarningsDashboard =
                           USDT
                         </p>
                         <p className="text-xs text-slate-500 font-mono">
-                          {w.payoutAddress.substring(
-                            0,
-                            6,
-                          )}
-                          ...
-                          {w.payoutAddress.slice(
-                            -4,
-                          )}
+                          {w.payoutAddress
+                            ? `${w.payoutAddress.substring(0, 6)}...${w.payoutAddress.slice(-4)}`
+                            : "External Wallet"}
                         </p>
                       </div>
                       <span

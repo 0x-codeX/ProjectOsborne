@@ -22,16 +22,30 @@ const purchaseSchema =
           required: false,
         },
       // Expiration date for subscriptions; not needed for one-time purchases
-expiresAt: {
-  type: Date,
-  required: function() { return this.purchaseType === 'SUBSCRIPTION'; }
-},
-status: {
-  type: String,
-  enum: ['pending', 'completed', 'failed'], // Crucial for Web3/Crypto txHashes
-  default: 'completed'
-},
-        // Made optional for subscriptions
+      expiresAt:
+        {
+          type: Date,
+          required:
+            function () {
+              return (
+                this
+                  .purchaseType ===
+                "SUBSCRIPTION"
+              );
+            },
+        },
+      status:
+        {
+          type: String,
+          enum: [
+            "pending",
+            "completed",
+            "failed",
+          ], // Crucial for Web3/Crypto txHashes
+          default:
+            "completed",
+        },
+      // Made optional for subscriptions
       creator:
         {
           type: mongoose
@@ -58,6 +72,26 @@ status: {
           enum: [
             "PPV",
             "SUBSCRIPTION",
+          ],
+          required: true,
+        },
+      message:
+        {
+          type: mongoose
+            .Schema
+            .Types
+            .ObjectId,
+          ref: "Message",
+          default:
+            null,
+        },
+      purchaseType:
+        {
+          type: String,
+          enum: [
+            "SUBSCRIPTION",
+            "PPV",
+            "DM_UNLOCK",
           ],
           required: true,
         },

@@ -23,6 +23,7 @@ const FanLayout =
     const navigate =
       useNavigate();
 
+    // 1. UPDATED NAV ARRAY: Added Messages, Removed Settings
     const navItems =
       [
         {
@@ -32,16 +33,22 @@ const FanLayout =
           icon: PlaySquare,
         },
         {
+          path: "/bookmarks",
+          label:
+            "Bookmarks",
+          icon: Bookmark,
+        },
+        {
           path: "/notifications",
           label:
             "Notifications",
           icon: Bell,
         },
         {
-          path: "/bookmarks",
+          path: "/messages", // Added Messages exactly where you wanted it
           label:
-            "Bookmarks",
-          icon: Bookmark,
+            "Messages",
+          icon: MessageCircle,
         },
         {
           path: "/fan/dashboard",
@@ -55,12 +62,6 @@ const FanLayout =
             "Profile",
           icon: User,
         },
-        {
-          path: "/fan/settings",
-          label:
-            "Settings",
-          icon: Settings,
-        },
       ];
 
     const handleLogout =
@@ -73,7 +74,7 @@ const FanLayout =
         );
         navigate(
           "/auth/login",
-        ); // Send them back to the landing page
+        );
       };
 
     return (
@@ -108,11 +109,71 @@ const FanLayout =
               (
                 item,
               ) => {
+                // Keep Profile highlighted if they are inside Settings
                 const isActive =
                   location.pathname ===
-                  item.path;
+                    item.path ||
+                  (item.label ===
+                    "Profile" &&
+                    location.pathname ===
+                      "/fan/settings");
                 const Icon =
                   item.icon;
+
+                // 2. THE DROPDOWN INJECTION FOR PROFILE
+                if (
+                  item.label ===
+                  "Profile"
+                ) {
+                  return (
+                    <div
+                      key={
+                        item.path
+                      }
+                      className="relative group flex items-center"
+                    >
+                      <Link
+                        to={
+                          item.path
+                        }
+                        className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
+                          isActive
+                            ? "bg-gray-800 text-nippy-coral font-semibold"
+                            : "text-gray-400 hover:text-white hover:bg-gray-800/50"
+                        }`}
+                      >
+                        <Icon
+                          size={
+                            18
+                          }
+                        />
+                        <span className="text-sm">
+                          {
+                            item.label
+                          }
+                        </span>
+                      </Link>
+
+                      {/* Hover Dropdown for Settings (Desktop Only) */}
+                      <div className="absolute top-full right-0 mt-2 w-40 bg-nippy-obsidian border border-gray-800 rounded-xl shadow-xl opacity-0 group-hover:opacity-100 transition-opacity invisible group-hover:visible z-50 overflow-hidden">
+                        <Link
+                          to="/fan/settings"
+                          className="flex items-center px-4 py-3 text-sm text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+                        >
+                          <Settings
+                            size={
+                              16
+                            }
+                            className="mr-2"
+                          />{" "}
+                          Settings
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Standard render for everything else
                 return (
                   <Link
                     key={
@@ -163,54 +224,62 @@ const FanLayout =
 
         {/* MAIN CONTENT AREA */}
         <main className="flex-grow pb-20 md:pb-0">
-          {/* This is where your nested routes (like FanFeed) will render */}
           <Outlet />
         </main>
 
         {/* MOBILE BOTTOM NAV (Hidden on Desktop) */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-nippy-obsidian/95 backdrop-blur-md border-t border-gray-800 z-50 flex justify-around items-center py-3 px-2 pb-safe">
-          {navItems.map(
-            (
-              item,
-            ) => {
-              const isActive =
-                location.pathname ===
-                item.path;
-              const Icon =
-                item.icon;
-              return (
-                <Link
-                  key={
-                    item.path
-                  }
-                  to={
-                    item.path
-                  }
-                  className={`flex flex-col items-center p-2 rounded-xl transition-all ${
-                    isActive
-                      ? "text-nippy-coral"
-                      : "text-gray-500 hover:text-gray-300"
-                  }`}
-                >
-                  <Icon
-                    size={
-                      24
+          {navItems
+            .filter(
+              (
+                item,
+              ) =>
+                item.label !==
+                "Dashboard",
+            )
+            .map(
+              (
+                item,
+              ) => {
+                const isActive =
+                  location.pathname ===
+                  item.path;
+                const Icon =
+                  item.icon;
+
+                return (
+                  <Link
+                    key={
+                      item.path
                     }
-                    className={
+                    to={
+                      item.path
+                    }
+                    className={`flex flex-col items-center p-2 rounded-xl transition-all ${
                       isActive
-                        ? "fill-nippy-coral/20"
-                        : ""
-                    }
-                  />
-                  <span className="text-[10px] mt-1 font-medium">
-                    {
-                      item.label
-                    }
-                  </span>
-                </Link>
-              );
-            },
-          )}
+                        ? "text-nippy-coral"
+                        : "text-gray-500 hover:text-gray-300"
+                    }`}
+                  >
+                    <Icon
+                      size={
+                        24
+                      }
+                      className={
+                        isActive
+                          ? "fill-nippy-coral/20"
+                          : ""
+                      }
+                    />
+                    <span className="text-[10px] mt-1 font-medium">
+                      {
+                        item.label
+                      }
+                    </span>
+                  </Link>
+                );
+              },
+            )}
         </nav>
       </div>
     );

@@ -839,3 +839,87 @@ exports.getBookmarks = async (req, res) => {
     res.status(500).json({ message: "Failed to load bookmarks" });
   }
 };
+
+// GET /api/content/creator/:id
+exports.getCreatorPublicProfile = async (req, res) => {
+  try {
+    const creatorId = req.params.id;
+    const viewerId = req.user._id;
+
+    // 1. Fetch the Creator's public info
+    const creator = await User.findById(creatorId)
+      .select("username profileImage monetizationSettings")
+      .lean();
+
+    if (!creator) {
+      return res.status(404).json({ message: "Creator not found" });
+    }
+
+    // 2. Fetch all active/sunset content by this creator
+    const creatorContent = await Content.find({ 
+      creator: creatorId,
+      status: { $in: ["active", "sunset"] } 
+    })
+      .populate("comments.user", "username")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // 3. Fetch Viewer's purchases related ONLY to this creator
+    const viewerPurchases = await Purchase.find({ 
+      user: viewerId,
+      creator: creatorId 
+    }).lean();
+
+    let hasActiveSub = false;
+    const unlockedPPV = new Set();
+
+    viewerPurchases.forEach((p) => {
+      if (p.purchaseType === "SUBSCRIPTION") hasActiveSub = true;
+      if (p.purchaseType === "PPV" && p.content) unlockedPPV.add(p.content.toString());
+    });
+
+    const secureContent = [];
+
+    // 4. THE BOUNCER: Evaluate access
+    for (const post of creatorContent) {
+      const globalPPV = creator.monetizationSettings?.defaultPPVPrice || 0;
+      const actualPrice = post.priceInUSDT !== null ? post.priceInUSDT : globalPPV;
+
+      const isFree = actualPrice === 0 && creator.monetizationSettings?.monthlySubscription === 0;
+      const hasPurchasedPPV = unlockedPPV.has(post._id.toString());
+
+      let hasAccess = isFree || hasPurchasedPPV || hasActiveSub;
+
+      // Sunset Escrow Gatekeeper (Fans can only view sunsetted content if they already bought it)
+      if (post.status === "sunset") {
+        if (!hasPurchasedPPV && !hasActiveSub) continue; 
+      }
+
+      // Lock it down if no access
+      if (!hasAccess) {
+        delete post.fileKey; 
+        post.isLocked = true;
+      } else {
+        post.isLocked = false;
+      }
+
+      const likesArray = post.likes || [];
+      secureContent.push({
+        ...post,
+        actualPrice,
+        isLiked: likesArray.some(id => id.toString() === viewerId.toString()),
+        likesCount: likesArray.length,
+        commentsCount: post.comments ? post.comments.length : 0
+      });
+    }
+
+    res.status(200).json({ 
+      creator, 
+      isSubscribed: hasActiveSub,
+      content: secureContent 
+    });
+  } catch (error) {
+    console.error("Public profile error:", error);
+    res.status(500).json({ message: "Failed to load creator profile" });
+  }
+};
