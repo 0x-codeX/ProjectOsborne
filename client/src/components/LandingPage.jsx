@@ -4,33 +4,39 @@ import React, {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  PlayCircle,
   Wallet,
   Mail,
   Lock,
   ArrowRight,
-  X,
+  ArrowLeft,
+  User,
+  Star,
 } from "lucide-react";
 import { ethers } from "ethers";
+import { useGoogleLogin } from "@react-oauth/google";
+import landingBackground from "../assets/background7.jpg"; // Ensure this path is correct
 
 const LandingPage =
   () => {
     const navigate =
       useNavigate();
+
+    // View states: 'login' | 'signup-select' | 'signup-form'
     const [
-      authModalRole,
-      setAuthModalRole,
+      view,
+      setView,
+    ] =
+      useState(
+        "login",
+      );
+    const [
+      selectedRole,
+      setSelectedRole,
     ] =
       useState(
         null,
-      ); // 'fan' | 'creator' | null
-    const [
-      isLogin,
-      setIsLogin,
-    ] =
-      useState(
-        true,
-      );
+      ); // 'fan' | 'creator'
+
     const [
       email,
       setEmail,
@@ -60,7 +66,19 @@ const LandingPage =
         false,
       );
 
-    // Handle Email Auth inside Modal
+    const resetForm =
+      () => {
+        setEmail(
+          "",
+        );
+        setPassword(
+          "",
+        );
+        setError(
+          "",
+        );
+      };
+
     const handleEmailSubmit =
       async (
         e,
@@ -73,6 +91,9 @@ const LandingPage =
           "",
         );
 
+        const isLogin =
+          view ===
+          "login";
         const endpoint =
           isLogin
             ? "/api/auth/login"
@@ -86,7 +107,7 @@ const LandingPage =
             : {
                 email,
                 password,
-                role: authModalRole,
+                role: selectedRole,
               };
 
         try {
@@ -131,8 +152,6 @@ const LandingPage =
               userObj.role ===
               "creator"
             ) {
-              // THE FIX: If they are registering OR explicitly flagged as incomplete, go to biodata.
-              // Otherwise, default to dashboard. This prevents the infinite redirect trap.
               if (
                 !isLogin ||
                 userObj.hasCompletedBioData ===
@@ -177,7 +196,6 @@ const LandingPage =
         }
       };
 
-    // Handle Web3 MetaMask Auth inside Modal
     const handleWeb3Auth =
       async () => {
         try {
@@ -196,6 +214,10 @@ const LandingPage =
           setLoading(
             true,
           );
+          const isLogin =
+            view ===
+            "login";
+
           let targetProvider =
             window.ethereum;
           if (
@@ -243,11 +265,19 @@ const LandingPage =
             "string"
               ? nonceData
               : nonceData.message;
-
           const signature =
             await signer.signMessage(
               serverMessage,
             );
+
+          const payload =
+            {
+              walletAddress,
+              signature,
+              ...(!isLogin && {
+                role: selectedRole,
+              }),
+            };
 
           const response =
             await fetch(
@@ -261,13 +291,7 @@ const LandingPage =
                       "application/json",
                   },
                 body: JSON.stringify(
-                  {
-                    walletAddress,
-                    signature,
-                    role:
-                      authModalRole ||
-                      "fan",
-                  },
+                  payload,
                 ),
               },
             );
@@ -296,7 +320,6 @@ const LandingPage =
               userObj.role ===
               "creator"
             ) {
-              // THE FIX: Same protective logic for Web3 users.
               if (
                 data.isNewUser ||
                 userObj.hasCompletedBioData ===
@@ -312,7 +335,7 @@ const LandingPage =
               }
             } else {
               if (
-                !isLogin ||
+                data.isNewUser ||
                 !userObj.isAgeVerified
               ) {
                 navigate(
@@ -346,377 +369,702 @@ const LandingPage =
         }
       };
 
-    return (
-      <div className="min-h-screen bg-nippy-onyx flex flex-col font-sans relative text-slate-200">
-        {/* Navbar */}
-        <header className="flex justify-between items-center py-6 px-10 border-b border-gray-800 bg-nippy-obsidian/50 backdrop-blur-md sticky top-0 z-40">
-          <div
-            className="flex items-center gap-2 cursor-pointer"
-            onClick={() =>
-              navigate(
-                "/feed",
-              )
-            }
-          >
-            <div className="w-10 h-10 bg-gradient-to-tr from-nippy-coral to-nippy-coralHover rounded-lg flex items-center justify-center shadow-lg shadow-nippy-coral/20">
-              <span className="text-white font-bold text-2xl italic tracking-tighter">
-                n
-              </span>
-            </div>
-            <span className="text-nippy-blush font-bold text-2xl tracking-tight">
-              nippy
-              <span className="text-nippy-coral">
-                .
-              </span>
-            </span>
-          </div>
-          <div className="flex gap-4">
-            <button
-              onClick={() => {
-                setAuthModalRole(
-                  "fan",
-                );
-                setIsLogin(
+    const loginWithGoogle =
+      useGoogleLogin(
+        {
+          onSuccess:
+            async (
+              tokenResponse,
+            ) => {
+              try {
+                setLoading(
                   true,
                 );
-              }}
-              className="px-6 py-2 rounded-full text-nippy-blush font-medium hover:text-nippy-coral transition-colors"
-            >
-              Log
-              In
-            </button>
-            <button
-              onClick={() => {
-                setAuthModalRole(
-                  "creator",
+                setError(
+                  "",
                 );
-                setIsLogin(
+                const isLogin =
+                  view ===
+                  "login";
+
+                // Google returns an access_token here. We send it to our backend.
+                const payload =
+                  {
+                    credential:
+                      tokenResponse.access_token,
+                    ...(!isLogin && {
+                      role: selectedRole,
+                    }),
+                  };
+
+                const response =
+                  await fetch(
+                    "http://localhost:5000/api/auth/google",
+                    {
+                      method:
+                        "POST",
+                      headers:
+                        {
+                          "Content-Type":
+                            "application/json",
+                        },
+                      body: JSON.stringify(
+                        payload,
+                      ),
+                    },
+                  );
+
+                const data =
+                  await response.json();
+
+                if (
+                  response.ok
+                ) {
+                  localStorage.setItem(
+                    "nippy_token",
+                    data.token,
+                  );
+                  const userObj =
+                    data.user ||
+                    data;
+                  localStorage.setItem(
+                    "nippy_user",
+                    JSON.stringify(
+                      userObj,
+                    ),
+                  );
+
+                  // Exact same routing logic as your Web3 setup
+                  if (
+                    userObj.role ===
+                    "creator"
+                  ) {
+                    if (
+                      data.isNewUser ||
+                      userObj.hasCompletedBioData ===
+                        false
+                    ) {
+                      navigate(
+                        "/auth/creator/biodata",
+                      );
+                    } else {
+                      navigate(
+                        "/creator/dashboard",
+                      );
+                    }
+                  } else {
+                    if (
+                      data.isNewUser ||
+                      !userObj.isAgeVerified
+                    ) {
+                      navigate(
+                        "/fan-setup",
+                      );
+                    } else {
+                      navigate(
+                        "/feed",
+                      );
+                    }
+                  }
+                } else {
+                  setError(
+                    data.message ||
+                      "Google Authentication failed on server",
+                  );
+                }
+              } catch (err) {
+                setError(
+                  "Network error communicating with server.",
+                );
+              } finally {
+                setLoading(
                   false,
                 );
-              }}
-              className="px-6 py-2 rounded-full bg-nippy-coral text-white font-bold hover:bg-nippy-coralHover transition-colors shadow-lg shadow-nippy-coral/20"
-            >
-              Get
-              Started
-            </button>
-          </div>
-        </header>
+              }
+            },
+          onError:
+            () =>
+              setError(
+                "Google login popup failed or was closed.",
+              ),
+        },
+      );
 
-        {/* Hero Section */}
-        <main className="flex-grow flex flex-col md:flex-row max-w-7xl mx-auto w-full px-6 py-12 gap-8 items-center justify-center">
-          {/* Fan Pitch */}
-          <div className="flex-1 bg-nippy-obsidian p-10 rounded-3xl border border-gray-800 hover:border-nippy-coral/30 transition-colors group">
-            <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mb-6 group-hover:bg-nippy-coral/10 transition-colors">
-              <PlayCircle
-                className="text-nippy-blush group-hover:text-nippy-coral"
-                size={
-                  24
-                }
-              />
-            </div>
-            <h2 className="text-4xl font-bold text-nippy-blush mb-4 leading-tight">
-              Unlock
-              Moments
-              with{" "}
-              <br />{" "}
-              Your
-              Favorite
-              Creators.
-            </h2>
-            <p className="text-gray-400 mb-8 text-lg">
-              Connect,
-              support,
-              and
-              enjoy
-              exclusive
-              high-quality
-              content
-              directly
-              from
-              top
-              African
-              creators.
-              Private
-              streams,
-              PPV,
-              and
-              audio
-              drops.
-            </p>
-            <button
-              onClick={() => {
-                setAuthModalRole(
-                  "fan",
-                );
-                setIsLogin(
-                  true,
-                );
-              }}
-              className="w-full sm:w-auto px-8 py-4 bg-gray-800 text-nippy-blush font-bold rounded-full hover:bg-gray-700 transition-colors"
-            >
-              Explore
-              Content
-              (Fan)
-            </button>
-          </div>
+    // Social Auth Handlers
+    const handleGoogleAuth =
+      () => {
+        window.location.href =
+          "http://localhost:5000/api/auth/google";
+      };
 
-          {/* Creator Pitch */}
-          <div className="flex-1 bg-gradient-to-br from-nippy-obsidian to-gray-900 p-10 rounded-3xl border border-gray-800 hover:border-nippy-mint/30 transition-colors group relative overflow-hidden">
-            <div className="absolute -right-20 -top-20 w-64 h-64 bg-nippy-mint/5 rounded-full blur-3xl"></div>
-            <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mb-6 group-hover:bg-nippy-mint/10 transition-colors relative z-10">
-              <Wallet
-                className="text-nippy-blush group-hover:text-nippy-mint"
-                size={
-                  24
-                }
-              />
-            </div>
-            <h2 className="text-4xl font-bold text-nippy-blush mb-4 leading-tight relative z-10">
-              Keep
-              up
-              to
-              85%
-              of
+    const handleXAuth =
+      () => {
+        window.location.href =
+          "http://localhost:5000/api/auth/x";
+      };
+
+    return (
+      <div className="h-screen w-full flex overflow-hidden bg-slate-900 font-sans text-slate-100">
+        {/* Background - Visible on ALL screens, perfectly static */}
+        <div className="absolute inset-0 z-0">
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-900/80 to-slate-900/40 z-10"></div>
+          {/* Drop your actual image URL here */}
+          <img
+            src={
+              landingBackground
+            }
+            alt="Creator Background"
+            className="w-full h-full object-cover grayscale-[20%]"
+          />
+        </div>
+
+        {/* Main Content Container */}
+        <div className="relative z-10 w-full h-full flex items-center justify-center lg:justify-between lg:pl-16 lg:pr-6">
+          {/* Left Side - Hero Text (Hidden on small screens) */}
+          <div className="hidden lg:block w-1/2">
+            <span className="text-4xl font-black tracking-tighter text-emerald-500 block mb-6">
+              NIPPY.
+            </span>
+            <h1 className="text-6xl font-black text-white mb-4 tracking-tight drop-shadow-2xl leading-tight">
+              Own
               your
-              earnings.
-              Paid
-              in
-              USDT.
-            </h2>
-            <p className="text-gray-400 mb-8 text-lg relative z-10">
-              No
-              bank
-              freezes.
-              No
-              rolling
-              reserves.
-              Instant
+              audience.{" "}
+              <br />{" "}
+              Keep
+              your
+              revenue.
+            </h1>
+            <p className="text-lg text-slate-300 font-medium max-w-md drop-shadow-md">
+              The
               Web3
+              monetization
+              platform
+              built
+              for
+              creators
+              who
+              want
+              instant
               payouts
               and
               total
-              ownership
-              of
-              your
-              Nigerian
-              &
-              global
-              audience.
+              control.
             </p>
-            <button
-              onClick={() => {
-                setAuthModalRole(
-                  "creator",
-                );
-                setIsLogin(
-                  false,
-                );
-              }}
-              className="w-full sm:w-auto px-8 py-4 bg-nippy-coral text-white font-bold rounded-full hover:bg-nippy-coralHover shadow-lg shadow-nippy-coral/20 transition-all relative z-10"
-            >
-              Get
-              Started
-              (Creator)
-            </button>
           </div>
-        </main>
 
-        {/* Unified Authentication Modal Overlay */}
-        {authModalRole && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-8 relative shadow-2xl animate-in fade-in zoom-in duration-200">
-              <button
-                onClick={() =>
-                  setAuthModalRole(
-                    null,
-                  )
-                }
-                className="absolute top-6 right-6 text-slate-400 hover:text-white"
-              >
-                <X
-                  size={
-                    24
-                  }
-                />
-              </button>
+          {/* Right Side - Auth Panel */}
+          <div className="w-[92%] sm:w-[450px] h-auto max-h-[90vh] bg-slate-900/80 backdrop-blur-2xl border border-slate-700/50 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col justify-center px-6 sm:px-12 py-8 lg:translate-x-4 overflow-y-auto">
+            {/* Mobile Logo */}
+            <div className="lg:hidden mb-6 text-center">
+              <span className="text-3xl font-black tracking-tighter text-emerald-500">
+                NIPPY.
+              </span>
+            </div>
 
-              <div className="mb-6">
-                <span className="text-xs uppercase tracking-widest text-nippy-coral font-bold block mb-1">
-                  Portal:{" "}
-                  {authModalRole.toUpperCase()}
-                </span>
-                <h3 className="text-2xl font-bold text-white">
-                  {isLogin
-                    ? "Welcome Back"
-                    : "Create Account"}
-                </h3>
-              </div>
+            <div className="w-full">
+              {/* ---------------- LOGIN VIEW ---------------- */}
+              {view ===
+                "login" && (
+                <div className="animate-in fade-in zoom-in-95 duration-300">
+                  <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+                    Welcome
+                    Back
+                  </h2>
+                  <p className="text-slate-400 mb-6">
+                    Log
+                    in
+                    to
+                    access
+                    your
+                    account.
+                  </p>
 
-              {error && (
-                <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-3 rounded-lg mb-4 text-sm">
-                  {
-                    error
-                  }
+                  {error && (
+                    <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-3 rounded-xl mb-6 text-sm">
+                      {
+                        error
+                      }
+                    </div>
+                  )}
+
+                  <form
+                    onSubmit={
+                      handleEmailSubmit
+                    }
+                    className="space-y-4"
+                  >
+                    <div className="relative">
+                      <Mail
+                        className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+                        size={
+                          18
+                        }
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email address"
+                        value={
+                          email
+                        }
+                        onChange={(
+                          e,
+                        ) =>
+                          setEmail(
+                            e
+                              .target
+                              .value,
+                          )
+                        }
+                        className="w-full bg-slate-950/50 border border-slate-700 text-white rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
+                        required
+                      />
+                    </div>
+                    <div className="relative">
+                      <Lock
+                        className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+                        size={
+                          18
+                        }
+                      />
+                      <input
+                        type="password"
+                        placeholder="Password"
+                        value={
+                          password
+                        }
+                        onChange={(
+                          e,
+                        ) =>
+                          setPassword(
+                            e
+                              .target
+                              .value,
+                          )
+                        }
+                        className="w-full bg-slate-950/50 border border-slate-700 text-white rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
+                        required
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={
+                        loading
+                      }
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                    >
+                      {loading
+                        ? "Processing..."
+                        : "Log In"}
+                      {!loading && (
+                        <ArrowRight
+                          size={
+                            18
+                          }
+                        />
+                      )}
+                    </button>
+                  </form>
+
+                  {/* Web2 Socials Grouped with Email */}
+                  <div className="flex gap-3 mt-3">
+                    <button
+                      type="button"
+                      onClick={
+                        handleGoogleAuth
+                      }
+                      disabled={
+                        loading
+                      }
+                      className="flex-1 bg-slate-800/50 hover:bg-slate-700/80 border border-slate-700 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                          fill="#4285F4"
+                        />
+                        <path
+                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                          fill="#34A853"
+                        />
+                        <path
+                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                          fill="#FBBC05"
+                        />
+                        <path
+                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                          fill="#EA4335"
+                        />
+                      </svg>
+                      Google
+                    </button>
+                  </div>
+
+                  <div className="my-6 flex items-center text-slate-500 text-xs font-bold tracking-widest before:flex-1 before:border-t before:border-slate-700 before:mr-4 after:flex-1 after:border-t after:border-slate-700 after:ml-4">
+                    OR
+                  </div>
+
+                  {/* Web3 Isolated */}
+                  <button
+                    onClick={
+                      handleWeb3Auth
+                    }
+                    disabled={
+                      loading
+                    }
+                    className="w-full bg-slate-800/50 hover:bg-slate-700/80 border border-slate-700 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-3"
+                  >
+                    <Wallet
+                      size={
+                        20
+                      }
+                      className="text-emerald-400"
+                    />
+                    Continue
+                    with
+                    Web3
+                  </button>
+
+                  <p className="mt-6 text-center text-slate-400 text-sm">
+                    Don't
+                    have
+                    an
+                    account?{" "}
+                    <button
+                      onClick={() => {
+                        setView(
+                          "signup-select",
+                        );
+                        resetForm();
+                      }}
+                      className="text-emerald-500 font-bold hover:underline"
+                    >
+                      Sign
+                      up
+                    </button>
+                  </p>
                 </div>
               )}
 
-              <form
-                onSubmit={
-                  handleEmailSubmit
-                }
-                className="space-y-4"
-              >
-                <div className="relative">
-                  <Mail
-                    className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
-                    size={
-                      18
-                    }
-                  />
-                  <input
-                    type="email"
-                    placeholder="Email address"
-                    value={
-                      email
-                    }
-                    onChange={(
-                      e,
-                    ) =>
-                      setEmail(
-                        e
-                          .target
-                          .value,
-                      )
-                    }
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-nippy-coral"
-                    required
-                  />
-                </div>
+              {/* ---------------- SIGNUP: ROLE SELECTION VIEW ---------------- */}
+              {view ===
+                "signup-select" && (
+                <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+                  <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+                    Join
+                    Nippy
+                  </h2>
+                  <p className="text-slate-400 mb-6">
+                    How
+                    do
+                    you
+                    want
+                    to
+                    use
+                    the
+                    platform?
+                  </p>
 
-                <div className="relative">
-                  <Lock
-                    className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
-                    size={
-                      18
-                    }
-                  />
-                  <input
-                    type="password"
-                    placeholder="Password"
-                    value={
-                      password
-                    }
-                    onChange={(
-                      e,
-                    ) =>
-                      setPassword(
-                        e
-                          .target
-                          .value,
-                      )
-                    }
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-nippy-coral"
-                    required
-                  />
-                </div>
+                  <div className="space-y-4">
+                    <button
+                      onClick={() => {
+                        setSelectedRole(
+                          "fan",
+                        );
+                        setView(
+                          "signup-form",
+                        );
+                      }}
+                      className="w-full bg-slate-950/40 hover:bg-slate-800/80 border border-slate-700 text-white p-5 rounded-2xl transition-all flex items-center justify-between group"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="bg-slate-800/50 p-3 rounded-xl group-hover:text-emerald-500 group-hover:bg-emerald-500/10 transition-colors">
+                          <User
+                            size={
+                              24
+                            }
+                          />
+                        </div>
+                        <div className="text-left">
+                          <h3 className="font-bold text-lg">
+                            Sign
+                            up
+                            as
+                            a
+                            Fan
+                          </h3>
+                          <p className="text-sm text-slate-400">
+                            Unlock
+                            exclusive
+                            content.
+                          </p>
+                        </div>
+                      </div>
+                      <ArrowRight
+                        size={
+                          20
+                        }
+                        className="text-slate-600 group-hover:text-emerald-500 transition-colors"
+                      />
+                    </button>
 
-                <button
-                  type="submit"
-                  disabled={
-                    loading
-                  }
-                  className="w-full bg-nippy-coral hover:bg-nippy-coralHover text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
-                >
-                  {loading
-                    ? "Processing..."
-                    : isLogin
-                      ? "Sign In"
-                      : "Register Account"}
-                  {!loading && (
-                    <ArrowRight
-                      size={
-                        18
+                    <button
+                      onClick={() => {
+                        setSelectedRole(
+                          "creator",
+                        );
+                        setView(
+                          "signup-form",
+                        );
+                      }}
+                      className="w-full bg-slate-950/40 hover:bg-slate-800/80 border border-slate-700 text-white p-5 rounded-2xl transition-all flex items-center justify-between group"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="bg-slate-800/50 p-3 rounded-xl group-hover:text-emerald-500 group-hover:bg-emerald-500/10 transition-colors">
+                          <Star
+                            size={
+                              24
+                            }
+                          />
+                        </div>
+                        <div className="text-left">
+                          <h3 className="font-bold text-lg">
+                            Sign
+                            up
+                            as
+                            a
+                            Creator
+                          </h3>
+                          <p className="text-sm text-slate-400">
+                            Monetize
+                            instantly.
+                          </p>
+                        </div>
+                      </div>
+                      <ArrowRight
+                        size={
+                          20
+                        }
+                        className="text-slate-600 group-hover:text-emerald-500 transition-colors"
+                      />
+                    </button>
+                  </div>
+
+                  <p className="mt-6 text-center text-slate-400 text-sm">
+                    Already
+                    have
+                    an
+                    account?{" "}
+                    <button
+                      onClick={() =>
+                        setView(
+                          "login",
+                        )
                       }
-                    />
+                      className="text-emerald-500 font-bold hover:underline"
+                    >
+                      Log
+                      in
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {/* ---------------- SIGNUP: FORM VIEW ---------------- */}
+              {view ===
+                "signup-form" && (
+                <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+                  <button
+                    onClick={() => {
+                      setView(
+                        "signup-select",
+                      );
+                      resetForm();
+                    }}
+                    className="text-slate-400 hover:text-white mb-4 flex items-center gap-2 text-sm font-medium transition-colors"
+                  >
+                    <ArrowLeft
+                      size={
+                        16
+                      }
+                    />{" "}
+                    Back
+                  </button>
+
+                  <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+                    Create{" "}
+                    {selectedRole ===
+                    "creator"
+                      ? "Creator"
+                      : "Fan"}{" "}
+                    Account
+                  </h2>
+                  <p className="text-slate-400 mb-6">
+                    Enter
+                    your
+                    details
+                    to
+                    get
+                    started.
+                  </p>
+
+                  {error && (
+                    <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-3 rounded-xl mb-6 text-sm">
+                      {
+                        error
+                      }
+                    </div>
                   )}
-                </button>
-              </form>
 
-              <div className="my-6 flex items-center text-slate-600 text-xs before:flex-1 before:border-t before:border-slate-800 before:mr-3 after:flex-1 after:border-t after:border-slate-800 after:ml-3">
-                OR
-                CONNECT
-                WEB3
-                WALLET
-              </div>
+                  <form
+                    onSubmit={
+                      handleEmailSubmit
+                    }
+                    className="space-y-4"
+                  >
+                    <div className="relative">
+                      <Mail
+                        className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+                        size={
+                          18
+                        }
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email address"
+                        value={
+                          email
+                        }
+                        onChange={(
+                          e,
+                        ) =>
+                          setEmail(
+                            e
+                              .target
+                              .value,
+                          )
+                        }
+                        className="w-full bg-slate-950/50 border border-slate-700 text-white rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
+                        required
+                      />
+                    </div>
+                    <div className="relative">
+                      <Lock
+                        className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+                        size={
+                          18
+                        }
+                      />
+                      <input
+                        type="password"
+                        placeholder="Password"
+                        value={
+                          password
+                        }
+                        onChange={(
+                          e,
+                        ) =>
+                          setPassword(
+                            e
+                              .target
+                              .value,
+                          )
+                        }
+                        className="w-full bg-slate-950/50 border border-slate-700 text-white rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
+                        required
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={
+                        loading
+                      }
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                    >
+                      {loading
+                        ? "Processing..."
+                        : "Create Account"}
+                      {!loading && (
+                        <ArrowRight
+                          size={
+                            18
+                          }
+                        />
+                      )}
+                    </button>
+                  </form>
 
-              <button
-                onClick={
-                  handleWeb3Auth
-                }
-                disabled={
-                  loading
-                }
-                className="w-full bg-slate-950 hover:bg-slate-800 border border-slate-700 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-3"
-              >
-                <Wallet
-                  size={
-                    20
-                  }
-                  className="text-emerald-400"
-                />
-                Continue
-                with
-                MetaMask
-              </button>
+                  {/* Web2 Social Grouped with Email */}
+                  <div className="flex gap-3 mt-3">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        loginWithGoogle()
+                      }
+                      disabled={
+                        loading
+                      }
+                      className="w-full bg-slate-800/50 hover:bg-slate-700/80 border border-slate-700 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                          fill="#4285F4"
+                        />
+                        <path
+                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                          fill="#34A853"
+                        />
+                        <path
+                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                          fill="#FBBC05"
+                        />
+                        <path
+                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                          fill="#EA4335"
+                        />
+                      </svg>
+                      Continue
+                      with
+                      Google
+                    </button>
+                  </div>
 
-              <div className="mt-6 text-center">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setIsLogin(
-                      !isLogin,
-                    )
-                  }
-                  className="text-sm text-nippy-coral hover:underline"
-                >
-                  {isLogin
-                    ? "Need an account? Sign up"
-                    : "Already have an account? Log in"}
-                </button>
-              </div>
+                  <div className="my-6 flex items-center text-slate-500 text-xs font-bold tracking-widest before:flex-1 before:border-t before:border-slate-700 before:mr-4 after:flex-1 after:border-t after:border-slate-700 after:ml-4">
+                    OR
+                  </div>
+
+                  {/* Web3 Isolated */}
+                  <button
+                    onClick={
+                      handleWeb3Auth
+                    }
+                    disabled={
+                      loading
+                    }
+                    className="w-full bg-slate-800/50 hover:bg-slate-700/80 border border-slate-700 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-3"
+                  >
+                    <Wallet
+                      size={
+                        20
+                      }
+                      className="text-emerald-400"
+                    />
+                    Sign
+                    Up
+                    with
+                    Web3
+                  </button>
+                </div>
+              )}
             </div>
           </div>
-        )}
-
-        {/* Footer */}
-        <footer className="border-t border-gray-800 mt-auto py-12 px-10 bg-nippy-onyx">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
-            <div className="flex flex-col items-center md:items-start gap-2">
-              <span className="text-nippy-blush font-bold text-xl tracking-tight">
-                nippy
-                <span className="text-nippy-coral">
-                  .
-                </span>
-              </span>
-              <span className="text-gray-500 text-sm">
-                ©2026
-                Nippy
-              </span>
-            </div>
-            <div className="text-sm text-gray-400">
-              Secure
-              Web3
-              Creator
-              Monetization
-              Platform.
-              18
-              U.S.C.
-              §
-              2257
-              Compliant.
-            </div>
-          </div>
-        </footer>
+        </div>
       </div>
     );
   };

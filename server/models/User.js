@@ -15,12 +15,21 @@ const userSchema =
       passwordHash:
         {
           type: String,
-          // CRITICAL: Password is only required if the user doesn't have a Web3 wallet
           required:
             function () {
-              return !this
-                .walletAddress;
+              // Password is only required if they are NOT using Google or Web3
+              return (
+                !this
+                  .googleId &&
+                !this
+                  .walletAddress
+              );
             },
+        },
+      googleId:
+        {
+          type: String,
+          sparse: true,
         },
       role: {
         type: String,

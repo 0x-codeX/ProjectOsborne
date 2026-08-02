@@ -2,6 +2,7 @@
 const express = require("express");
 const router =
   express.Router();
+const jwt = require("jsonwebtoken");
 const {
   registerUser,
   loginUser,
@@ -18,6 +19,17 @@ const {
 const {
   requireAuth,
 } = require("../middleware/authMiddleware");
+const {
+  OAuth2Client,
+} = require("google-auth-library");
+const User = require("../models/User");
+
+const googleClient =
+  new OAuth2Client(
+    process
+      .env
+      .GOOGLE_CLIENT_ID,
+  );
 
 
 router.post(
@@ -46,6 +58,125 @@ router.get(
   "/me",
   requireAuth,
   getMe,
+);
+
+
+router.post(
+  "/google",
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const {
+        credential,
+        role,
+      } =
+        req.body; // 'credential' here is the access_token from React
+
+      // 1. Ask Google's UserInfo endpoint to verify the access token and return the user profile
+      const googleResponse =
+        await fetch(
+          "https://www.googleapis.com/oauth2/v3/userinfo",
+          {
+            headers:
+              {
+                Authorization: `Bearer ${credential}`,
+              },
+          },
+        );
+
+      if (
+        !googleResponse.ok
+      ) {
+        throw new Error(
+          "Failed to verify token with Google",
+        );
+      }
+
+      const payload =
+        await googleResponse.json();
+      const {
+        email,
+        sub: googleId,
+        name,
+      } = payload;
+
+      // 2. Check if the user already exists in Nippy
+      let user =
+        await User.findOne(
+          {
+            email,
+          },
+        );
+      let isNewUser = false;
+
+      if (
+        !user
+      ) {
+        // 3. Create a new user if they don't exist
+        isNewUser = true;
+
+        user =
+          new User(
+            {
+              email,
+              googleId,
+              role:
+                role ||
+                "fan",
+              isEmailVerified: true,
+              hasCompletedBioData: false,
+              isAgeVerified: false,
+            },
+          );
+        await user.save();
+      }
+
+      // 4. Generate your platform's JWT
+      const token =
+        jwt.sign(
+          {
+            id: user._id,
+            role: user.role,
+          },
+          process
+            .env
+            .JWT_SECRET,
+          {
+            expiresIn:
+              "7d",
+          },
+        );
+
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            token,
+            user,
+            isNewUser,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Google Auth Error:",
+        error,
+      );
+      res
+        .status(
+          401,
+        )
+        .json(
+          {
+            message:
+              "Google authentication failed. Invalid token.",
+          },
+        );
+    }
+  },
 );
 
 module.exports =

@@ -21,13 +21,18 @@
     "dotenv": "^17.4.2",
     "ethers": "^6.17.0",
     "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "google-auth-library": "^11.0.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.28.0",
     "mongodb": "^7.5.0",
     "mongoose": "^9.8.0",
     "multer": "^2.2.0",
-    "node-cron": "^4.6.0"
+    "node-cron": "^4.6.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "passport-twitter": "^1.0.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

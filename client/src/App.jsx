@@ -23,6 +23,7 @@ import FanSettings from "./components/FanSettings";
 import CreatorPublicProfile from "./components/CreatorPublicProfile";
 import FanInbox from "./components/FanInbox";
 import FanChatWindow from "./components/FanChatWindow";
+import { GoogleOAuthProvider } from "@react-oauth/google";
 
 
 
@@ -45,133 +46,141 @@ const Placeholder =
 
 function App() {
   return (
-    <Router>
-      <Routes>
-        {/* PUBLIC & ONBOARDING ROUTES */}
-        <Route
-          path="/"
-          element={
-            <AgeGateway />
-          }
-        />
-        <Route
-          path="/auth/login"
-          element={
-            <LandingPage />
-          }
-        />
-        <Route
-          path="/fan-setup"
-          element={
-            <FanBiodata />
-          }
-        />
+    <GoogleOAuthProvider
+      clientId={
+        import.meta
+          .env
+          .VITE_GOOGLE_CLIENT_ID
+      }
+    >
+      <Router>
+        <Routes>
+          {/* PUBLIC & ONBOARDING ROUTES */}
+          <Route
+            path="/"
+            element={
+              <AgeGateway />
+            }
+          />
+          <Route
+            path="/auth/login"
+            element={
+              <LandingPage />
+            }
+          />
+          <Route
+            path="/fan-setup"
+            element={
+              <FanBiodata />
+            }
+          />
 
-        {/* Creator Onboarding */}
-        <Route
-          path="/auth/creator/biodata"
-          element={
-            <BioDataSetup />
-          }
-        />
-        <Route
-          path="/auth/creator/kyc"
-          element={
-            <KycPage />
-          }
-        />
+          {/* Creator Onboarding */}
+          <Route
+            path="/auth/creator/biodata"
+            element={
+              <BioDataSetup />
+            }
+          />
+          <Route
+            path="/auth/creator/kyc"
+            element={
+              <KycPage />
+            }
+          />
 
-        {/* FAN ZONE */}
-        <Route
-          element={
-            <FanLayout />
-          }
-        >
+          {/* FAN ZONE */}
           <Route
-            path="/feed"
             element={
-              <FanFeed />
+              <FanLayout />
             }
-          />
-          <Route
-            path="messages"
-            element={
-              <FanInbox />
-            }
-          />
-          <Route
-            path="/notifications"
-            element={
-              <NotificationsFeed />
-            }
-          />
-          <Route
-            path="/fan/dashboard"
-            element={
-              <FanDashboard />
-            }
-          />
-          <Route
-            path="/fan/profile"
-            element={
-              <FanProfile />
-            }
-          />{" "}
-          {/* WIRED HERE */}
-          <Route
-            path="/fan/settings"
-            element={
-              <FanSettings />
-            }
-          />
-          <Route
-            path="/bookmarks"
-            element={
-              <BookmarksFeed />
-            }
-          />
-          <Route
-            path="/creator/:id"
-            element={
-              <CreatorPublicProfile />
-            }
-          />
-        </Route>
-        
-        <Route
-          path="/messages/:id"
-          element={
-            <FanChatWindow />
-          }
-        />
+          >
+            <Route
+              path="/feed"
+              element={
+                <FanFeed />
+              }
+            />
+            <Route
+              path="messages"
+              element={
+                <FanInbox />
+              }
+            />
+            <Route
+              path="/notifications"
+              element={
+                <NotificationsFeed />
+              }
+            />
+            <Route
+              path="/fan/dashboard"
+              element={
+                <FanDashboard />
+              }
+            />
+            <Route
+              path="/fan/profile"
+              element={
+                <FanProfile />
+              }
+            />{" "}
+            {/* WIRED HERE */}
+            <Route
+              path="/fan/settings"
+              element={
+                <FanSettings />
+              }
+            />
+            <Route
+              path="/bookmarks"
+              element={
+                <BookmarksFeed />
+              }
+            />
+            <Route
+              path="/creator/:id"
+              element={
+                <CreatorPublicProfile />
+              }
+            />
+          </Route>
 
-        {/* CREATOR ZONE */}
-        <Route
-          element={
-            <CreatorLayout />
-          }
-        >
           <Route
-            path="/creator/dashboard"
+            path="/messages/:id"
             element={
-              <CreatorDashboard />
+              <FanChatWindow />
             }
           />
+
+          {/* CREATOR ZONE */}
           <Route
-            path="/creator/profile"
             element={
-              <CreatorProfile />
+              <CreatorLayout />
             }
-          />
-          <Route
-            path="/creator/vault"
-            element={
-              <CreatorVault />
-            }
-          />
-        </Route>
-      </Routes>
-    </Router>
+          >
+            <Route
+              path="/creator/dashboard"
+              element={
+                <CreatorDashboard />
+              }
+            />
+            <Route
+              path="/creator/profile"
+              element={
+                <CreatorProfile />
+              }
+            />
+            <Route
+              path="/creator/vault"
+              element={
+                <CreatorVault />
+              }
+            />
+          </Route>
+        </Routes>
+      </Router>
+    </GoogleOAuthProvider>
   );
 }
 
