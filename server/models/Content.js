@@ -52,6 +52,20 @@ const contentSchema =
             "Price cannot be negative",
           ], // 0 means free/teaser
         },
+      // -- WEB3 OWNERSHIP TRACKING --
+      unlockedFor:
+        [
+          {
+            type: String,
+            lowercase: true, // Forces all wallet addresses to lowercase automatically
+          },
+        ],
+      processedTxHashes:
+        [
+          {
+            type: String,
+          },
+        ],
 
       // -- THE MEDIA VAULT --
       fileKey:

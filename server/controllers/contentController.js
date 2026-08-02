@@ -94,84 +94,225 @@ exports.createContentPost =
 // GET /api/content/feed
 exports.getFeed = async (req, res) => {
   try {
-    const viewerId = req.user._id;
+    const viewerId =
+      req
+        .user
+        ._id;
+    const viewerWallet =
+      req
+        .user
+        .walletAddress
+        ? req.user.walletAddress.toLowerCase()
+        : null;
 
     // 1. Fetch Feed (using .lean() for massive performance gains)
     // NEW: We added populate for comments.user so the frontend can display the commenter's username
-    const posts = await Content.find()
-      .populate("creator", "username monetizationSettings profileImage")
-      .populate("comments.user", "username") // <-- CRUCIAL FOR COMMENTS OVERLAY
-      .sort({ createdAt: -1 })
-      .lean();
+    const posts =
+      await Content.find()
+        .populate(
+          "creator",
+          "username monetizationSettings profileImage",
+        )
+        .populate(
+          "comments.user",
+          "username",
+        ) // <-- CRUCIAL FOR COMMENTS OVERLAY
+        .sort(
+          {
+            createdAt:
+              -1,
+          },
+        )
+        .lean();
 
     // 2. Fetch User's Valid Purchases & Bookmarks
-    const userPurchases = await Purchase.find({ user: viewerId })
-      .select("content creator purchaseType createdAt")
-      .lean();
-      
+    const userPurchases =
+      await Purchase.find(
+        {
+          user: viewerId,
+        },
+      )
+        .select(
+          "content creator purchaseType createdAt",
+        )
+        .lean();
+
     // NEW: Fetch the viewer's profile to get their bookmarks array
-    const viewer = await User.findById(viewerId).select("bookmarks").lean();
-    
+    const viewer =
+      await User.findById(
+        viewerId,
+      )
+        .select(
+          "bookmarks",
+        )
+        .lean();
+
     // 3. Map out access rights & interactions for O(1) lightning-fast lookups
-    const unlockedContentMap = new Map();
-    const subscribedCreatorMap = new Map();
+    const unlockedContentMap =
+      new Map();
+    const subscribedCreatorMap =
+      new Map();
     // NEW: Create a Set of bookmarked IDs so we don't have to run slow array searches in the loop
-    const bookmarkedSet = new Set(viewer?.bookmarks?.map(id => id.toString()) || []);
+    const bookmarkedSet =
+      new Set(
+        viewer?.bookmarks?.map(
+          (
+            id,
+          ) =>
+            id.toString(),
+        ) ||
+          [],
+      );
 
-    userPurchases.forEach((p) => {
-      if (p.purchaseType === "PPV" && p.content) {
-        unlockedContentMap.set(p.content.toString(), new Date(p.createdAt).getTime());
-      }
-      if (p.purchaseType === "SUBSCRIPTION" && p.creator) {
-        subscribedCreatorMap.set(p.creator.toString(), new Date(p.createdAt).getTime());
-      }
-    });
+    userPurchases.forEach(
+      (
+        p,
+      ) => {
+        if (
+          p.purchaseType ===
+            "PPV" &&
+          p.content
+        ) {
+          unlockedContentMap.set(
+            p.content.toString(),
+            new Date(
+              p.createdAt,
+            ).getTime(),
+          );
+        }
+        if (
+          p.purchaseType ===
+            "SUBSCRIPTION" &&
+          p.creator
+        ) {
+          subscribedCreatorMap.set(
+            p.creator.toString(),
+            new Date(
+              p.createdAt,
+            ).getTime(),
+          );
+        }
+      },
+    );
 
-    const secureFeed = [];
+    const secureFeed =
+      [];
 
     // 4. Evaluate access and interactions for every single post
     for (const post of posts) {
-      const globalPPV = post.creator?.monetizationSettings?.defaultPPVPrice || 0;
-      const actualPrice = post.priceInUSDT !== null ? post.priceInUSDT : globalPPV;
+      const globalPPV =
+        post
+          .creator
+          ?.monetizationSettings
+          ?.defaultPPVPrice ||
+        0;
+      const actualPrice =
+        post.priceInUSDT !==
+        null
+          ? post.priceInUSDT
+          : globalPPV;
 
-      const isCreator = post.creator?._id.toString() === viewerId.toString();
-      const isFree = actualPrice === 0 && post.creator?.monetizationSettings?.monthlySubscription === 0;
+      const isCreator =
+        post.creator?._id.toString() ===
+        viewerId.toString();
+      const isFree =
+        actualPrice ===
+          0 &&
+        post
+          .creator
+          ?.monetizationSettings
+          ?.monthlySubscription ===
+          0;
 
-      // Get the exact timestamps this user acquired access (if any)
-      const ppvDate = unlockedContentMap.get(post._id.toString());
-      const subDate = subscribedCreatorMap.get(post.creator?._id.toString());
+      // Web2 (Fiat) Access Check
+      const ppvDate =
+        unlockedContentMap.get(
+          post._id.toString(),
+        );
+      const subDate =
+        subscribedCreatorMap.get(
+          post.creator?._id.toString(),
+        );
+      const hasPurchasedFiatPPV =
+        !!ppvDate;
+      const hasActiveSub =
+        !!subDate;
 
-      const hasPurchasedPPV = !!ppvDate;
-      const hasActiveSub = !!subDate;
+      // Web3 (Crypto) Access Check
+      // Check if the post's unlockedFor array includes the viewer's wallet address
+      let hasPurchasedCrypto = false;
+      if (
+        viewerWallet &&
+        post.unlockedFor &&
+        post
+          .unlockedFor
+          .length >
+          0
+      ) {
+        hasPurchasedCrypto =
+          post.unlockedFor.some(
+            (
+              address,
+            ) =>
+              address.toLowerCase() ===
+              viewerWallet,
+          );
+      }
 
-      const hasAccess = isCreator || isFree || hasPurchasedPPV || hasActiveSub;
+      // Master Access Boolean
+      const hasAccess =
+        isCreator ||
+        isFree ||
+        hasPurchasedFiatPPV ||
+        hasPurchasedCrypto ||
+        hasActiveSub;
 
       // --- THE SUNSET GATEKEEPER ---
-      if (post.status === "sunset") {
-        let isGrandfathered = false;
+      // (Keep your existing sunset logic here, just add hasPurchasedCrypto to the grandfathered checks)
+      if (
+        post.status ===
+        "sunset"
+      ) {
+        let isGrandfathered =
+          isCreator;
+        const sunsetTime =
+          new Date(
+            post.sunsetAt,
+          ).getTime();
 
-        if (isCreator) {
-          isGrandfathered = true; // Creator always sees their own deleted stuff until the Reaper gets it
-        } else {
-          const sunsetTime = new Date(post.sunsetAt).getTime();
-          
-          // Did they buy PPV before the creator hit delete?
-          if (hasPurchasedPPV && ppvDate < sunsetTime) {
-            isGrandfathered = true;
-          } 
-          // Did they subscribe before the creator hit delete?
-          else if (hasActiveSub && subDate < sunsetTime) {
-            isGrandfathered = true;
-          }
-        }
+        if (
+          hasPurchasedFiatPPV &&
+          ppvDate <
+            sunsetTime
+        )
+          isGrandfathered = true;
+        if (
+          hasActiveSub &&
+          subDate <
+            sunsetTime
+        )
+          isGrandfathered = true;
+        // Assuming if they bought it via crypto, they are grandfathered in
+        if (
+          hasPurchasedCrypto
+        )
+          isGrandfathered = true;
 
-        // If it is sunset and they aren't grandfathered, skip it entirely.
-        if (!isGrandfathered) continue; 
+        if (
+          !isGrandfathered
+        )
+          continue;
       }
 
       // 5. THE BOUNCER: Enforce the Zero-Trust rule for active content
-      if (!hasAccess) {
-        delete post.fileKey; // Strip the video file URL
+      if (
+        !hasAccess
+      ) {
+        // STOP THE LEAKS: Delete EVERYTHING sensitive.
+        delete post.fileKey;
+        delete post.mediaUrl;
+        delete post.hiddenText;
+
         post.isLocked = true;
       } else {
         post.isLocked = false;
@@ -179,23 +320,49 @@ exports.getFeed = async (req, res) => {
 
       // --- NEW: SOCIAL INTERACTION INJECTION ---
       // Safely check likes array (handles older posts that might not have the array initialized)
-      const likesArray = post.likes || [];
-      const isLiked = likesArray.some(id => id.toString() === viewerId.toString());
-      const isBookmarked = bookmarkedSet.has(post._id.toString());
-      const likesCount = likesArray.length;
-      const commentsCount = post.comments ? post.comments.length : 0;
+      const likesArray =
+        post.likes ||
+        [];
+      const isLiked =
+        likesArray.some(
+          (
+            id,
+          ) =>
+            id.toString() ===
+            viewerId.toString(),
+        );
+      const isBookmarked =
+        bookmarkedSet.has(
+          post._id.toString(),
+        );
+      const likesCount =
+        likesArray.length;
+      const commentsCount =
+        post.comments
+          ? post
+              .comments
+              .length
+          : 0;
 
-      secureFeed.push({
-        ...post,
-        actualPrice,
-        isLiked,
-        isBookmarked,
-        likesCount,
-        commentsCount
-      });
+      secureFeed.push(
+        {
+          ...post,
+          actualPrice,
+          isLiked,
+          isBookmarked,
+          likesCount,
+          commentsCount,
+        },
+      );
     }
 
-    res.status(200).json(secureFeed);
+    res
+      .status(
+        200,
+      )
+      .json(
+        secureFeed,
+      );
   } catch (error) {
     console.error("Feed error:", error);
     res.status(500).json({ message: "Failed to load feed" });

@@ -184,9 +184,9 @@ exports.getSecureStreamUrl = async (req, res) => {
         viewerId.toString();
       const isFree =
         actualPrice ===
-        0; // Free posts unlock for everyone
+        0;
 
-      // Check for PPV purchase OR an active (non-expired) subscription
+      // --- WEB2 CHECK (FIAT/STRIPE) ---
       const validPurchase =
         await Purchase.findOne(
           {
@@ -208,18 +208,46 @@ exports.getSecureStreamUrl = async (req, res) => {
                 expiresAt:
                   {
                     $gt: new Date(),
-                  }, // <-- ONLY VALID IF EXPIRATION IS IN THE FUTURE
+                  },
                 status:
-                  "completed", // <-- MUST BE A VERIFIED TRANSACTION
+                  "completed",
               },
             ],
           },
         );
 
+      // --- WEB3 CHECK (CRYPTO/POLYGON) ---
+      const viewerWallet =
+        req
+          .user
+          .walletAddress
+          ? req.user.walletAddress.toLowerCase()
+          : null;
+      let hasPurchasedCrypto = false;
+      if (
+        viewerWallet &&
+        content.unlockedFor &&
+        content
+          .unlockedFor
+          .length >
+          0
+      ) {
+        hasPurchasedCrypto =
+          content.unlockedFor.some(
+            (
+              address,
+            ) =>
+              address.toLowerCase() ===
+              viewerWallet,
+          );
+      }
+
+      // --- MASTER ACCESS CHECK ---
       if (
         !isCreator &&
         !isFree &&
-        !validPurchase
+        !validPurchase &&
+        !hasPurchasedCrypto
       ) {
         return res
           .status(

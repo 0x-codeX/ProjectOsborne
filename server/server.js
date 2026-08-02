@@ -3,68 +3,40 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
+
+// Route Imports
 const withdrawalRoutes = require("./routes/withdrawalRoutes");
-const startReaper = require("./cron/reaper");
 const contentRoutes = require("./routes/contentRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
-const purchaseRoutes = require("./routes/purchaseRoutes.js");
-const messageRoutes = require("./routes/messageRoutes.js");
+const purchaseRoutes = require("./routes/purchaseRoutes");
+const messageRoutes = require("./routes/messageRoutes");
+const authRoutes = require("./routes/authRoutes");
+const mediaRoutes = require("./routes/mediaRoutes");
+const userRoutes = require("./routes/userRoutes");
+const earningsRoutes = require("./routes/earningsRoutes");
 
+// Cron Jobs
+const startReaper = require("./cron/reaper");
+
+// Initialize Web3 Listener using CommonJS
+require("./workers/web3Listener.js");
 
 const app =
   express();
 
-
 // Security & Middleware
 app.use(
   helmet(),
-); // Secures HTTP headers
+);
 app.use(
   cors({
     origin:
       "http://localhost:5173",
   }),
-); // Allow React frontend
+);
 app.use(
   express.json(),
 );
-app.use(
-  "/api/media",
-  require("./routes/mediaRoutes"),
-);
-app.use(
-  "/api/content",
-  require("./routes/contentRoutes"),
-);
-app.use(
-  "/api/users",
-  require("./routes/userRoutes"),
-);
-app.use(
-  "/api/purchases",
-  require("./routes/purchaseRoutes"),
-);
-app.use(
-  "/api/earnings",
-  require("./routes/earningsRoutes"),
-);
-app.use(
-  "/api/withdraw",
-  withdrawalRoutes,
-);
-app.use(
-  "/api/content",
-  contentRoutes,
-);
-app.use(
-  "/api/notifications",
-  notificationRoutes,
-);
-app.use(
-  "/api/messages",
-  require("./routes/messageRoutes"),
-);
-
 
 // Database Connection
 mongoose
@@ -89,7 +61,7 @@ mongoose
       ),
   );
 
-// Basic API Routes
+// Basic API Health Route
 app.get(
   "/api/health",
   (
@@ -111,38 +83,63 @@ app.get(
   },
 );
 
-// Import Routes (To be created)
-// app.use('/api/auth', require('./routes/authRoutes'));
-// app.use('/api/creators', require('./routes/creatorRoutes'));
-// app.use('/api/transactions', require('./routes/transactionRoutes'));
+// Mounted Routes
+app.use(
+  "/api/auth",
+  authRoutes,
+);
+app.use(
+  "/api/media",
+  mediaRoutes,
+);
+app.use(
+  "/api/users",
+  userRoutes,
+);
+app.use(
+  "/api/earnings",
+  earningsRoutes,
+);
+app.use(
+  "/api/content",
+  contentRoutes,
+);
+app.use(
+  "/api/purchases",
+  purchaseRoutes,
+);
+app.use(
+  "/api/withdraw",
+  withdrawalRoutes,
+);
+app.use(
+  "/api/notifications",
+  notificationRoutes,
+);
+app.use(
+  "/api/messages",
+  messageRoutes,
+);
 
+// Server Initialization
 const PORT =
   process
     .env
     .PORT ||
   5000;
-  app.use(
-    "/api/auth",
-    require("./routes/authRoutes"),
-  );
 app.listen(
   PORT,
-  () =>
-    console.log(
-      `Server running on port ${PORT}`,
-    ),
-);
-
-app.listen(
-  process
-    .env
-    .PORT,
   () => {
     console.log(
-      `Server running on port ${process.env.PORT}`,
+      `Server running on port ${PORT}`,
     );
 
     // Start the background cron jobs
-    startReaper();
+    if (
+      typeof startReaper ===
+      "function"
+    ) {
+      startReaper();
+    }
   },
 );
