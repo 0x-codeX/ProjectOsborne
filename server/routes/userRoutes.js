@@ -14,45 +14,48 @@ const {
   updateSettings,
 } = require("../controllers/userController");
 
-
-
-// Get Routs
-router.get(
-  "/settings/monetization",
-  requireAuth,
-  getMonetizationSettings,
-);
+// --- GET Routes ---
 router.get(
   "/profile",
   requireAuth,
   getProfile,
 );
-
-
-//Put Route
-router.put(
+router.get(
   "/settings/monetization",
   requireAuth,
-  updateMonetizationSettings,
+  getMonetizationSettings,
 );
+
+// --- PUT Routes ---
+// 1. Initial Fan Onboarding / Bio Data
+router.put(
+  "/biodata",
+  requireAuth,
+  submitBioData,
+);
+
+// 2. Everyday non-sensitive profile edits (username, image)
 router.put(
   "/profile",
   requireAuth,
-  submitBioData, 
+  updateProfile,
 );
+
+// 3. Sensitive security settings (password, email, wallet)
 router.put(
   "/settings",
   requireAuth,
   updateSettings,
 );
+
+// 4. Monetization tiers
 router.put(
-  "/settings",
+  "/settings/monetization",
   requireAuth,
-  updateProfile,
+  updateMonetizationSettings,
 );
 
-
-// Delete Routes
+// --- DELETE Routes ---
 router.delete(
   "/profile",
   requireAuth,

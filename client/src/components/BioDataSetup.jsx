@@ -217,6 +217,8 @@ const BioDataSetup =
               willingNsfw,
               agreedTerms,
               confirmedAge,
+              isAgeVerified:
+                confirmedAge,
               subscribeEmails,
               hasCompletedBioData: true,
               profileImage, // Save the base64 string directly

@@ -20,6 +20,7 @@ exports.submitBioData =
         willingNsfw,
         agreedTerms,
         confirmedAge,
+        isAgeVerified,
         subscribeEmails,
         hasCompletedBioData,
         profileImage,
@@ -74,18 +75,19 @@ exports.submitBioData =
         user.payoutAddress ||
         user.walletAddress ||
         "";
-      const currentEmail =
-        user.email ||
-        "";
 
+      // THE FIX: Only trigger the security lock if they ALREADY have an email in the DB
+      // and are trying to change it to a different one. First-time setup gets a free pass.
       const isPayoutChanged =
         payoutAddress &&
+        user.payoutAddress &&
         payoutAddress !==
           currentPayout;
       const isEmailChanged =
         email &&
+        user.email &&
         email !==
-          currentEmail;
+          user.email;
 
       if (
         isPayoutChanged ||
@@ -105,7 +107,7 @@ exports.submitBioData =
               .json(
                 {
                   message:
-                    "Wallet signature required to modify sensitive data.",
+                    "Wallet signature required to modify existing sensitive data.",
                 },
               );
           }
@@ -292,8 +294,9 @@ exports.submitBioData =
               willingNsfw,
               agreedTerms,
               confirmedAge,
+              isAgeVerified,
               subscribeEmails,
-              hasCompletedBioData,
+              hasCompletedBioData: true,
               profileImage,
               payoutAddress,
               // Sync username to displayName automatically so their profile looks good immediately

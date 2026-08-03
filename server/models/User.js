@@ -15,16 +15,7 @@ const userSchema =
       passwordHash:
         {
           type: String,
-          required:
-            function () {
-              // Password is only required if they are NOT using Google or Web3
-              return (
-                !this
-                  .googleId &&
-                !this
-                  .walletAddress
-              );
-            },
+          // REMOVED the buggy required function. Enforce password checks in the auth controller.
         },
       googleId:
         {
@@ -47,7 +38,7 @@ const userSchema =
         {
           type: String,
           unique: true,
-          sparse: true, // Allows null until they finish the BioData setup
+          sparse: true,
           trim: true,
         },
       phone:
@@ -84,15 +75,22 @@ const userSchema =
           type: Boolean,
           default: false,
         },
+      isAgeVerified:
+        {
+          // ADDED: Your frontend routing strictly relies on this
+          type: Boolean,
+          default: false,
+        },
+      isEmailVerified:
+        {
+          // ADDED: The Google Auth route needs this
+          type: Boolean,
+          default: false,
+        },
       subscribeEmails:
         {
           type: Boolean,
           default: false,
-        },
-      hasCompletedBioData:
-        {
-          type: Boolean,
-          default: false, // Flips to true once they submit the BioData form
         },
       payoutAddress:
         {
@@ -102,6 +100,7 @@ const userSchema =
         },
       hasCompletedBioData:
         {
+          // Cleaned up the duplicate
           type: Boolean,
           default: false,
         },
@@ -112,7 +111,7 @@ const userSchema =
           type: String,
           default:
             null,
-          sparse: true, // Prevents duplicate null wallets
+          sparse: true,
         },
       usdtBalance:
         {
@@ -150,7 +149,7 @@ const userSchema =
           providerSessionId:
             {
               type: String,
-            }, // Stores Didit's session_id
+            },
           verifiedAt:
             {
               type: Date,
