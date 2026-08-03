@@ -4,6 +4,40 @@ const Purchase = require("../models/Purchase");
 const {
   deleteFromCloudflare,
 } = require("../utils/cloudflare");
+const {
+  S3Client,
+  GetObjectCommand,
+  PutObjectCommand,
+} = require("@aws-sdk/client-s3");
+const {
+  getSignedUrl,
+} = require("@aws-sdk/s3-request-presigner");
+const fs = require("fs");
+const path = require("path");
+const ffmpeg = require("fluent-ffmpeg");
+
+
+
+// Initialize R2 Client
+const s3 =
+  new S3Client(
+    {
+      region:
+        "auto",
+      endpoint: `https://${process.env.S3_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials:
+        {
+          accessKeyId:
+            process
+              .env
+              .S3_ACCESS_KEY,
+          secretAccessKey:
+            process
+              .env
+              .S3_SECRET_KEY,
+        },
+    },
+  );
 
 // POST /api/content
 exports.createContentPost =
@@ -16,19 +50,18 @@ exports.createContentPost =
         title,
         description,
         priceInUSDT,
-        fileKey,
-        fileType,
         isNsfw,
       } =
         req.body;
+      const file =
+        req.file; // From multer middleware
 
       // 1. Validate inputs
       if (
         !title ||
         priceInUSDT ===
           undefined ||
-        !fileKey ||
-        !fileType
+        !file
       ) {
         return res
           .status(
@@ -37,29 +70,151 @@ exports.createContentPost =
           .json(
             {
               message:
-                "Missing required paywall fields.",
+                "Missing required paywall fields or video.",
             },
           );
       }
 
-      // 2. Mint the post in MongoDB attached to the logged-in creator
+      const originalPath =
+        file.path;
+      const uniqueId =
+        Date.now().toString();
+      // Clean original file name of spaces and weird characters
+      const cleanFileName =
+        file.originalname.replace(
+          /[^a-zA-Z0-9.]/g,
+          "_",
+        );
+
+      const originalFileKey = `raw_${uniqueId}_${cleanFileName}`;
+      const teaserFileKey = `teaser_${uniqueId}.mp4`;
+      const teaserPath =
+        path.join(
+          __dirname,
+          `../uploads/${teaserFileKey}`,
+        );
+
+      // 2. FFmpeg: Generate the 15-second bandwidth-friendly Teaser
+      await new Promise(
+        (
+          resolve,
+          reject,
+        ) => {
+          ffmpeg(
+            originalPath,
+          )
+            .setDuration(
+              15,
+            ) // Cut after 15 seconds
+            .noAudio() // Strip audio completely
+            .fps(
+              15,
+            ) // Drop framerate (smooth enough for blurs)
+            .size(
+              "?x240",
+            ) // Crush resolution to 240p height
+            .videoCodec(
+              "libx264",
+            )
+            .addOptions(
+              [
+                "-crf 35",
+                "-preset ultrafast",
+              ],
+            ) // Maximum compression
+            .output(
+              teaserPath,
+            )
+            .on(
+              "end",
+              resolve,
+            )
+            .on(
+              "error",
+              reject,
+            )
+            .run();
+        },
+      );
+
+      // 3. Upload original video to the PRIVATE Bucket
+      const rawFileStream =
+        fs.createReadStream(
+          originalPath,
+        );
+      await s3.send(
+        new PutObjectCommand(
+          {
+            Bucket:
+              process
+                .env
+                .S3_BUCKET_NAME,
+            Key: originalFileKey,
+            Body: rawFileStream,
+            ContentType:
+              file.mimetype,
+          },
+        ),
+      );
+
+      // 4. Upload the teaser to the PUBLIC Bucket
+      const teaserFileStream =
+        fs.createReadStream(
+          teaserPath,
+        );
+      await s3.send(
+        new PutObjectCommand(
+          {
+            Bucket:
+              process
+                .env
+                .S3_BUCKET_NAME,
+            Key: teaserFileKey,
+            Body: teaserFileStream,
+            ContentType:
+              "video/mp4",
+          },
+        ),
+      );
+
+      // 5. Mint the post in MongoDB
       const newContent =
         await Content.create(
           {
             creator:
               req
                 .user
-                ._id || req.user.id, // Comes from protect middleware
+                ._id ||
+              req
+                .user
+                .id,
             title,
             description,
-            priceInUSDT,
-            fileKey,
-            fileType,
+            priceInUSDT:
+              Number(
+                priceInUSDT,
+              ),
+            fileKey:
+              originalFileKey,
+            teaserKey:
+              teaserFileKey,
+            fileType:
+              file.mimetype,
             isNsfw:
-              isNsfw ||
-              false,
+              isNsfw ===
+                "true" ||
+              isNsfw ===
+                true,
           },
         );
+
+      // 6. Cleanup: Delete temporary files from your backend server disk
+      fs.unlinkSync(
+        originalPath,
+      );
+      fs.unlinkSync(
+        teaserPath,
+      );
 
       res
         .status(
@@ -78,6 +233,20 @@ exports.createContentPost =
         "Content Creation Error:",
         error,
       );
+      // Cleanup on failure
+      if (
+        req.file &&
+        fs.existsSync(
+          req
+            .file
+            .path,
+        )
+      )
+        fs.unlinkSync(
+          req
+            .file
+            .path,
+        );
       res
         .status(
           500,
@@ -217,11 +386,11 @@ exports.getFeed = async (req, res) => {
         viewerId.toString();
       const isFree =
         actualPrice ===
-          0 &&
-        post
-          .creator
-          ?.monetizationSettings
-          ?.monthlySubscription ===
+        //   0 &&
+        // post
+        //   .creator
+        //   ?.monetizationSettings
+        //   ?.monthlySubscription ===
           0;
 
       // Web2 (Fiat) Access Check
@@ -239,7 +408,6 @@ exports.getFeed = async (req, res) => {
         !!subDate;
 
       // Web3 (Crypto) Access Check
-      // Check if the post's unlockedFor array includes the viewer's wallet address
       let hasPurchasedCrypto = false;
       if (
         viewerWallet &&
@@ -268,7 +436,6 @@ exports.getFeed = async (req, res) => {
         hasActiveSub;
 
       // --- THE SUNSET GATEKEEPER ---
-      // (Keep your existing sunset logic here, just add hasPurchasedCrypto to the grandfathered checks)
       if (
         post.status ===
         "sunset"
@@ -292,7 +459,6 @@ exports.getFeed = async (req, res) => {
             sunsetTime
         )
           isGrandfathered = true;
-        // Assuming if they bought it via crypto, they are grandfathered in
         if (
           hasPurchasedCrypto
         )
@@ -304,22 +470,60 @@ exports.getFeed = async (req, res) => {
           continue;
       }
 
-      // 5. THE BOUNCER: Enforce the Zero-Trust rule for active content
+      // --- NEW: THE IRONCLAD BOUNCER & SIGNER ---
+
+      // Always provide a public teaser URL for the blurred background.
+      // We will build the upload logic for 'teaserKey' in the next step.
+      post.teaserUrl =
+        post.teaserKey
+          ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
+          : "https://placehold.co/600x400/111111/555555?text=Locked";
+
       if (
         !hasAccess
       ) {
-        // STOP THE LEAKS: Delete EVERYTHING sensitive.
+        // LACK OF ACCESS: Nuke the sensitive keys entirely
         delete post.fileKey;
-        delete post.mediaUrl;
+        post.mediaUrl =
+          null;
         delete post.hiddenText;
-
         post.isLocked = true;
       } else {
-        post.isLocked = false;
+        // GRANTED ACCESS: Generate a 1-hour self-destructing Private URL
+        try {
+          const command =
+            new GetObjectCommand(
+              {
+                Bucket:
+                  process
+                    .env
+                    .S3_BUCKET_NAME, // Make sure this env var exists
+                Key: post.fileKey,
+              },
+            );
+          // Signs the URL cryptographically using your backend credentials
+          post.mediaUrl =
+            await getSignedUrl(
+              s3,
+              command,
+              {
+                expiresIn: 3600,
+              },
+            );
+          post.isLocked = false;
+        } catch (err) {
+          console.error(
+            "Failed to sign URL for post:",
+            post._id,
+            err,
+          );
+          post.mediaUrl =
+            null;
+          post.isLocked = true; // Failsafe
+        }
       }
 
-      // --- NEW: SOCIAL INTERACTION INJECTION ---
-      // Safely check likes array (handles older posts that might not have the array initialized)
+      // --- SOCIAL INTERACTION INJECTION ---
       const likesArray =
         post.likes ||
         [];
@@ -916,91 +1120,273 @@ exports.addComment =
   // GET /api/content/bookmarked
 exports.getBookmarks = async (req, res) => {
   try {
-    const viewerId = req.user._id;
+    const viewerId =
+      req
+        .user
+        ._id;
 
     // 1. Fetch the user's bookmarked IDs
-    const viewer = await User.findById(viewerId).select("bookmarks").lean();
-    
-    if (!viewer || !viewer.bookmarks || viewer.bookmarks.length === 0) {
-      return res.status(200).json([]); // Return empty array if no bookmarks
+    const viewer =
+      await User.findById(
+        viewerId,
+      )
+        .select(
+          "bookmarks",
+        )
+        .lean();
+
+    if (
+      !viewer ||
+      !viewer.bookmarks ||
+      viewer
+        .bookmarks
+        .length ===
+        0
+    ) {
+      return res
+        .status(
+          200,
+        )
+        .json(
+          [],
+        ); // Return empty array if no bookmarks
     }
 
     // 2. Fetch the actual content using the $in operator
-    const bookmarkedPosts = await Content.find({ _id: { $in: viewer.bookmarks } })
-      .populate("creator", "username monetizationSettings profileImage")
-      .populate("comments.user", "username")
-      .sort({ createdAt: -1 })
-      .lean();
+    const bookmarkedPosts =
+      await Content.find(
+        {
+          _id: {
+            $in: viewer.bookmarks,
+          },
+        },
+      )
+        .populate(
+          "creator",
+          "username monetizationSettings profileImage",
+        )
+        .populate(
+          "comments.user",
+          "username",
+        )
+        .sort(
+          {
+            createdAt:
+              -1,
+          },
+        )
+        .lean();
 
     // 3. Fetch User's Valid Purchases to evaluate access
-    const userPurchases = await Purchase.find({ user: viewerId })
-      .select("content creator purchaseType createdAt")
-      .lean();
+    const userPurchases =
+      await Purchase.find(
+        {
+          user: viewerId,
+        },
+      )
+        .select(
+          "content creator purchaseType createdAt",
+        )
+        .lean();
 
-    const unlockedContentMap = new Map();
-    const subscribedCreatorMap = new Map();
+    const unlockedContentMap =
+      new Map();
+    const subscribedCreatorMap =
+      new Map();
 
-    userPurchases.forEach((p) => {
-      if (p.purchaseType === "PPV" && p.content) {
-        unlockedContentMap.set(p.content.toString(), new Date(p.createdAt).getTime());
-      }
-      if (p.purchaseType === "SUBSCRIPTION" && p.creator) {
-        subscribedCreatorMap.set(p.creator.toString(), new Date(p.createdAt).getTime());
-      }
-    });
+    userPurchases.forEach(
+      (
+        p,
+      ) => {
+        if (
+          p.purchaseType ===
+            "PPV" &&
+          p.content
+        ) {
+          unlockedContentMap.set(
+            p.content.toString(),
+            new Date(
+              p.createdAt,
+            ).getTime(),
+          );
+        }
+        if (
+          p.purchaseType ===
+            "SUBSCRIPTION" &&
+          p.creator
+        ) {
+          subscribedCreatorMap.set(
+            p.creator.toString(),
+            new Date(
+              p.createdAt,
+            ).getTime(),
+          );
+        }
+      },
+    );
 
-    const secureBookmarks = [];
+    const secureBookmarks =
+      [];
 
     // 4. THE BOUNCER: Evaluate access for the bookmarked posts
+    // 4. THE BOUNCER: Evaluate access for the bookmarked posts
     for (const post of bookmarkedPosts) {
-      const globalPPV = post.creator?.monetizationSettings?.defaultPPVPrice || 0;
-      const actualPrice = post.priceInUSDT !== null ? post.priceInUSDT : globalPPV;
+      const globalPPV =
+        post
+          .creator
+          ?.monetizationSettings
+          ?.defaultPPVPrice ||
+        0;
+      const actualPrice =
+        post.priceInUSDT !==
+        null
+          ? post.priceInUSDT
+          : globalPPV;
 
-      const isCreator = post.creator?._id.toString() === viewerId.toString();
-      const isFree = actualPrice === 0 && post.creator?.monetizationSettings?.monthlySubscription === 0;
+      const isCreator =
+        post.creator?._id.toString() ===
+        viewerId.toString();
+      const isFree =
+        actualPrice ===
+        0; // Fixed Free Logic
 
-      const ppvDate = unlockedContentMap.get(post._id.toString());
-      const subDate = subscribedCreatorMap.get(post.creator?._id.toString());
+      const ppvDate =
+        unlockedContentMap.get(
+          post._id.toString(),
+        );
+      const subDate =
+        subscribedCreatorMap.get(
+          post.creator?._id.toString(),
+        );
 
-      const hasPurchasedPPV = !!ppvDate;
-      const hasActiveSub = !!subDate;
+      const hasPurchasedPPV =
+        !!ppvDate;
+      const hasActiveSub =
+        !!subDate;
 
-      const hasAccess = isCreator || isFree || hasPurchasedPPV || hasActiveSub;
+      const hasAccess =
+        isCreator ||
+        isFree ||
+        hasPurchasedPPV ||
+        hasActiveSub;
 
       // Sunset Escrow Gatekeeper
-      if (post.status === "sunset") {
+      if (
+        post.status ===
+        "sunset"
+      ) {
         let isGrandfathered = false;
-        if (isCreator) {
+        if (
+          isCreator
+        ) {
           isGrandfathered = true;
         } else {
-          const sunsetTime = new Date(post.sunsetAt).getTime();
-          if (hasPurchasedPPV && ppvDate < sunsetTime) isGrandfathered = true;
-          else if (hasActiveSub && subDate < sunsetTime) isGrandfathered = true;
+          const sunsetTime =
+            new Date(
+              post.sunsetAt,
+            ).getTime();
+          if (
+            hasPurchasedPPV &&
+            ppvDate <
+              sunsetTime
+          )
+            isGrandfathered = true;
+          else if (
+            hasActiveSub &&
+            subDate <
+              sunsetTime
+          )
+            isGrandfathered = true;
         }
-        if (!isGrandfathered) continue; 
+        if (
+          !isGrandfathered
+        )
+          continue;
       }
 
-      // Lock it down if they don't have access
-      if (!hasAccess) {
-        delete post.fileKey; 
+      // --- NEW: THE IRONCLAD BOUNCER & SIGNER ---
+      post.teaserUrl =
+        post.teaserKey
+          ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
+          : "https://placehold.co/600x400/111111/555555?text=Locked";
+
+      if (
+        !hasAccess
+      ) {
+        // LACK OF ACCESS: Nuke the sensitive keys entirely
+        delete post.fileKey;
+        post.mediaUrl =
+          null;
         post.isLocked = true;
       } else {
-        post.isLocked = false;
+        // GRANTED ACCESS: Generate a 1-hour self-destructing Private URL
+        try {
+          const command =
+            new GetObjectCommand(
+              {
+                Bucket:
+                  process
+                    .env
+                    .S3_BUCKET_NAME,
+                Key: post.fileKey,
+              },
+            );
+          post.mediaUrl =
+            await getSignedUrl(
+              s3,
+              command,
+              {
+                expiresIn: 3600,
+              },
+            );
+          post.isLocked = false;
+        } catch (err) {
+          console.error(
+            "Failed to sign URL for bookmarked post:",
+            post._id,
+            err,
+          );
+          post.mediaUrl =
+            null;
+          post.isLocked = true;
+        }
       }
 
-      const likesArray = post.likes || [];
-      
-      secureBookmarks.push({
-        ...post,
-        actualPrice,
-        isLiked: likesArray.some(id => id.toString() === viewerId.toString()),
-        isBookmarked: true, // It is explicitly true because it's in their bookmarks
-        likesCount: likesArray.length,
-        commentsCount: post.comments ? post.comments.length : 0
-      });
-    }
+      const likesArray =
+        post.likes ||
+        [];
 
-    res.status(200).json(secureBookmarks);
+      secureBookmarks.push(
+        {
+          ...post,
+          actualPrice,
+          isLiked:
+            likesArray.some(
+              (
+                id,
+              ) =>
+                id.toString() ===
+                viewerId.toString(),
+            ),
+          isBookmarked: true,
+          likesCount:
+            likesArray.length,
+          commentsCount:
+            post.comments
+              ? post
+                  .comments
+                  .length
+              : 0,
+        },
+      );
+    }
+    res
+      .status(
+        200,
+      )
+      .json(
+        secureBookmarks,
+      );
   } catch (error) {
     console.error("Bookmarks error:", error);
     res.status(500).json({ message: "Failed to load bookmarks" });
@@ -1010,81 +1396,269 @@ exports.getBookmarks = async (req, res) => {
 // GET /api/content/creator/:id
 exports.getCreatorPublicProfile = async (req, res) => {
   try {
-    const creatorId = req.params.id;
-    const viewerId = req.user._id;
+    const creatorId =
+      req
+        .params
+        .id;
+    const viewerId =
+      req
+        .user
+        ._id;
 
     // 1. Fetch the Creator's public info
-    const creator = await User.findById(creatorId)
-      .select("username profileImage monetizationSettings")
-      .lean();
+    const creator =
+      await User.findById(
+        creatorId,
+      )
+        .select(
+          "username profileImage monetizationSettings",
+        )
+        .lean();
 
-    if (!creator) {
-      return res.status(404).json({ message: "Creator not found" });
+    if (
+      !creator
+    ) {
+      return res
+        .status(
+          404,
+        )
+        .json(
+          {
+            message:
+              "Creator not found",
+          },
+        );
     }
 
     // 2. Fetch all active/sunset content by this creator
-    const creatorContent = await Content.find({ 
-      creator: creatorId,
-      status: { $in: ["active", "sunset"] } 
-    })
-      .populate("comments.user", "username")
-      .sort({ createdAt: -1 })
-      .lean();
+    const creatorContent =
+      await Content.find(
+        {
+          creator:
+            creatorId,
+          status:
+            {
+              $in: [
+                "active",
+                "sunset",
+              ],
+            },
+        },
+      )
+        .populate(
+          "comments.user",
+          "username",
+        )
+        .sort(
+          {
+            createdAt:
+              -1,
+          },
+        )
+        .lean();
 
     // 3. Fetch Viewer's purchases related ONLY to this creator
-    const viewerPurchases = await Purchase.find({ 
-      user: viewerId,
-      creator: creatorId 
-    }).lean();
+    const viewerPurchases =
+      await Purchase.find(
+        {
+          user: viewerId,
+          creator:
+            creatorId,
+        },
+      ).lean();
 
     let hasActiveSub = false;
-    const unlockedPPV = new Set();
+    const unlockedPPV =
+      new Set();
 
-    viewerPurchases.forEach((p) => {
-      if (p.purchaseType === "SUBSCRIPTION") hasActiveSub = true;
-      if (p.purchaseType === "PPV" && p.content) unlockedPPV.add(p.content.toString());
-    });
+    viewerPurchases.forEach(
+      (
+        p,
+      ) => {
+        if (
+          p.purchaseType ===
+          "SUBSCRIPTION"
+        )
+          hasActiveSub = true;
+        if (
+          p.purchaseType ===
+            "PPV" &&
+          p.content
+        )
+          unlockedPPV.add(
+            p.content.toString(),
+          );
+      },
+    );
 
-    const secureContent = [];
+    const secureContent =
+      [];
 
-    // 4. THE BOUNCER: Evaluate access
-    for (const post of creatorContent) {
-      const globalPPV = creator.monetizationSettings?.defaultPPVPrice || 0;
-      const actualPrice = post.priceInUSDT !== null ? post.priceInUSDT : globalPPV;
+    // 4. THE BOUNCER: Evaluate access for the bookmarked posts
+    for (const post of bookmarkedPosts) {
+      const globalPPV =
+        post
+          .creator
+          ?.monetizationSettings
+          ?.defaultPPVPrice ||
+        0;
+      const actualPrice =
+        post.priceInUSDT !==
+        null
+          ? post.priceInUSDT
+          : globalPPV;
 
-      const isFree = actualPrice === 0 && creator.monetizationSettings?.monthlySubscription === 0;
-      const hasPurchasedPPV = unlockedPPV.has(post._id.toString());
+      const isCreator =
+        post.creator?._id.toString() ===
+        viewerId.toString();
+      const isFree =
+        actualPrice ===
+        0; // Fixed Free Logic
 
-      let hasAccess = isFree || hasPurchasedPPV || hasActiveSub;
+      const ppvDate =
+        unlockedContentMap.get(
+          post._id.toString(),
+        );
+      const subDate =
+        subscribedCreatorMap.get(
+          post.creator?._id.toString(),
+        );
 
-      // Sunset Escrow Gatekeeper (Fans can only view sunsetted content if they already bought it)
-      if (post.status === "sunset") {
-        if (!hasPurchasedPPV && !hasActiveSub) continue; 
+      const hasPurchasedPPV =
+        !!ppvDate;
+      const hasActiveSub =
+        !!subDate;
+
+      const hasAccess =
+        isCreator ||
+        isFree ||
+        hasPurchasedPPV ||
+        hasActiveSub;
+
+      // Sunset Escrow Gatekeeper
+      if (
+        post.status ===
+        "sunset"
+      ) {
+        let isGrandfathered = false;
+        if (
+          isCreator
+        ) {
+          isGrandfathered = true;
+        } else {
+          const sunsetTime =
+            new Date(
+              post.sunsetAt,
+            ).getTime();
+          if (
+            hasPurchasedPPV &&
+            ppvDate <
+              sunsetTime
+          )
+            isGrandfathered = true;
+          else if (
+            hasActiveSub &&
+            subDate <
+              sunsetTime
+          )
+            isGrandfathered = true;
+        }
+        if (
+          !isGrandfathered
+        )
+          continue;
       }
 
-      // Lock it down if no access
-      if (!hasAccess) {
-        delete post.fileKey; 
+      // --- NEW: THE IRONCLAD BOUNCER & SIGNER ---
+      post.teaserUrl =
+        post.teaserKey
+          ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
+          : "https://placehold.co/600x400/111111/555555?text=Locked";
+
+      if (
+        !hasAccess
+      ) {
+        // LACK OF ACCESS: Nuke the sensitive keys entirely
+        delete post.fileKey;
+        post.mediaUrl =
+          null;
         post.isLocked = true;
       } else {
-        post.isLocked = false;
+        // GRANTED ACCESS: Generate a 1-hour self-destructing Private URL
+        try {
+          const command =
+            new GetObjectCommand(
+              {
+                Bucket:
+                  process
+                    .env
+                    .S3_BUCKET_NAME,
+                Key: post.fileKey,
+              },
+            );
+          post.mediaUrl =
+            await getSignedUrl(
+              s3,
+              command,
+              {
+                expiresIn: 3600,
+              },
+            );
+          post.isLocked = false;
+        } catch (err) {
+          console.error(
+            "Failed to sign URL for bookmarked post:",
+            post._id,
+            err,
+          );
+          post.mediaUrl =
+            null;
+          post.isLocked = true;
+        }
       }
 
-      const likesArray = post.likes || [];
-      secureContent.push({
-        ...post,
-        actualPrice,
-        isLiked: likesArray.some(id => id.toString() === viewerId.toString()),
-        likesCount: likesArray.length,
-        commentsCount: post.comments ? post.comments.length : 0
-      });
+      const likesArray =
+        post.likes ||
+        [];
+
+      secureBookmarks.push(
+        {
+          ...post,
+          actualPrice,
+          isLiked:
+            likesArray.some(
+              (
+                id,
+              ) =>
+                id.toString() ===
+                viewerId.toString(),
+            ),
+          isBookmarked: true,
+          likesCount:
+            likesArray.length,
+          commentsCount:
+            post.comments
+              ? post
+                  .comments
+                  .length
+              : 0,
+        },
+      );
     }
 
-    res.status(200).json({ 
-      creator, 
-      isSubscribed: hasActiveSub,
-      content: secureContent 
-    });
+    res
+      .status(
+        200,
+      )
+      .json(
+        {
+          creator,
+          isSubscribed:
+            hasActiveSub,
+          content:
+            secureContent,
+        },
+      );
   } catch (error) {
     console.error("Public profile error:", error);
     res.status(500).json({ message: "Failed to load creator profile" });

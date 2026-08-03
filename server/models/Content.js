@@ -74,6 +74,11 @@ const contentSchema =
           required: true,
           unique: true,
         },
+      teaserKey:
+        {
+          type: String,
+          // The compressed, public 15s 240p loop
+        },
       fileType:
         {
           type: String,

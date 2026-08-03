@@ -19,6 +19,13 @@ const {
   getCreatorPublicProfile,
 } = require("../controllers/contentController");
 const Content = require("../models/Content");
+const multer = require("multer");
+
+
+
+
+// Setup Multer to save temporarily in an 'uploads' folder
+const upload = multer({ dest: "uploads/" });
 
 
 
@@ -93,6 +100,11 @@ router.get("/:id/payload", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+
+
+// The 'video' string must match the FormData field name from your frontend
+router.post("/upload", requireAuth, upload.single("video"), createContentPost);
 
 module.exports =
   router;
