@@ -280,7 +280,7 @@ exports.getFeed = async (req, res) => {
       await Content.find()
         .populate(
           "creator",
-          "username monetizationSettings profileImage",
+          "username monetizationSettings profileImage walletAddress",
         )
         .populate(
           "comments.user",
@@ -1163,7 +1163,7 @@ exports.getBookmarks = async (req, res) => {
       )
         .populate(
           "creator",
-          "username monetizationSettings profileImage",
+          "username monetizationSettings profileImage walletAddress",
         )
         .populate(
           "comments.user",
@@ -1228,7 +1228,6 @@ exports.getBookmarks = async (req, res) => {
     const secureBookmarks =
       [];
 
-    // 4. THE BOUNCER: Evaluate access for the bookmarked posts
     // 4. THE BOUNCER: Evaluate access for the bookmarked posts
     for (const post of bookmarkedPosts) {
       const globalPPV =
@@ -1396,195 +1395,73 @@ exports.getBookmarks = async (req, res) => {
 // GET /api/content/creator/:id
 exports.getCreatorPublicProfile = async (req, res) => {
   try {
-    const creatorId =
-      req
-        .params
-        .id;
-    const viewerId =
-      req
-        .user
-        ._id;
+    const creatorId = req.params.id;
+    const viewerId = req.user._id;
+    const viewerWallet = req.user.walletAddress ? req.user.walletAddress.toLowerCase() : null;
 
-    // 1. Fetch the Creator's public info
-    const creator =
-      await User.findById(
-        creatorId,
-      )
-        .select(
-          "username profileImage monetizationSettings",
-        )
-        .lean();
+    // 1. Fetch Creator WITH WALLET ADDRESS (Crucial for Web3 payments)
+    const creator = await User.findById(creatorId)
+      .select("username profileImage monetizationSettings walletAddress") 
+      .lean();
 
-    if (
-      !creator
-    ) {
-      return res
-        .status(
-          404,
-        )
-        .json(
-          {
-            message:
-              "Creator not found",
-          },
-        );
-    }
+    if (!creator) return res.status(404).json({ message: "Creator not found" });
 
-    // 2. Fetch all active/sunset content by this creator
-    const creatorContent =
-      await Content.find(
-        {
-          creator:
-            creatorId,
-          status:
-            {
-              $in: [
-                "active",
-                "sunset",
-              ],
-            },
-        },
-      )
-        .populate(
-          "comments.user",
-          "username",
-        )
-        .sort(
-          {
-            createdAt:
-              -1,
-          },
-        )
-        .lean();
+    // 2. Fetch Creator's content
+    const creatorContent = await Content.find({
+      creator: creatorId,
+      status: { $in: ["active", "sunset"] },
+    })
+      .populate("comments.user", "username")
+      .sort({ createdAt: -1 })
+      .lean();
 
-    // 3. Fetch Viewer's purchases related ONLY to this creator
-    const viewerPurchases =
-      await Purchase.find(
-        {
-          user: viewerId,
-          creator:
-            creatorId,
-        },
-      ).lean();
+    // 3. Fetch Viewer's purchases 
+    const viewerPurchases = await Purchase.find({
+      user: viewerId,
+      creator: creatorId,
+    }).lean();
 
     let hasActiveSub = false;
-    const unlockedPPV =
-      new Set();
+    const unlockedPPV = new Set();
 
-    viewerPurchases.forEach(
-      (
-        p,
-      ) => {
-        if (
-          p.purchaseType ===
-          "SUBSCRIPTION"
-        )
-          hasActiveSub = true;
-        if (
-          p.purchaseType ===
-            "PPV" &&
-          p.content
-        )
-          unlockedPPV.add(
-            p.content.toString(),
-          );
-      },
-    );
+    viewerPurchases.forEach((p) => {
+      if (p.purchaseType === "SUBSCRIPTION") hasActiveSub = true;
+      if (p.purchaseType === "PPV" && p.content) unlockedPPV.add(p.content.toString());
+    });
 
-    const secureContent =
-      [];
+    const secureContent = [];
 
-    // 4. THE BOUNCER: Evaluate access for the bookmarked posts
-    for (const post of bookmarkedPosts) {
-      const globalPPV =
-        post
-          .creator
-          ?.monetizationSettings
-          ?.defaultPPVPrice ||
-        0;
-      const actualPrice =
-        post.priceInUSDT !==
-        null
-          ? post.priceInUSDT
-          : globalPPV;
+    // 4. THE IRONCLAD BOUNCER 
+    for (const post of creatorContent) {
+      const globalPPV = creator.monetizationSettings?.defaultPPVPrice || 0;
+      const actualPrice = post.priceInUSDT !== null ? post.priceInUSDT : globalPPV;
 
-      const isCreator =
-        post.creator?._id.toString() ===
-        viewerId.toString();
-      const isFree =
-        actualPrice ===
-        0; // Fixed Free Logic
+      const isCreator = creatorId === viewerId.toString();
+      const isFree = actualPrice === 0;
 
-      const ppvDate =
-        unlockedContentMap.get(
-          post._id.toString(),
+      const hasPurchasedFiatPPV = unlockedPPV.has(post._id.toString());
+      
+      let hasPurchasedCrypto = false;
+      if (viewerWallet && post.unlockedFor && post.unlockedFor.length > 0) {
+        hasPurchasedCrypto = post.unlockedFor.some(
+          (address) => address.toLowerCase() === viewerWallet
         );
-      const subDate =
-        subscribedCreatorMap.get(
-          post.creator?._id.toString(),
-        );
-
-      const hasPurchasedPPV =
-        !!ppvDate;
-      const hasActiveSub =
-        !!subDate;
-
-      const hasAccess =
-        isCreator ||
-        isFree ||
-        hasPurchasedPPV ||
-        hasActiveSub;
-
-      // Sunset Escrow Gatekeeper
-      if (
-        post.status ===
-        "sunset"
-      ) {
-        let isGrandfathered = false;
-        if (
-          isCreator
-        ) {
-          isGrandfathered = true;
-        } else {
-          const sunsetTime =
-            new Date(
-              post.sunsetAt,
-            ).getTime();
-          if (
-            hasPurchasedPPV &&
-            ppvDate <
-              sunsetTime
-          )
-            isGrandfathered = true;
-          else if (
-            hasActiveSub &&
-            subDate <
-              sunsetTime
-          )
-            isGrandfathered = true;
-        }
-        if (
-          !isGrandfathered
-        )
-          continue;
       }
 
-      // --- NEW: THE IRONCLAD BOUNCER & SIGNER ---
-      post.teaserUrl =
-        post.teaserKey
-          ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
-          : "https://placehold.co/600x400/111111/555555?text=Locked";
+      const hasAccess = isCreator || isFree || hasPurchasedFiatPPV || hasPurchasedCrypto || hasActiveSub;
 
-      if (
-        !hasAccess
-      ) {
-        // LACK OF ACCESS: Nuke the sensitive keys entirely
+      // Setup Teaser URL
+      post.teaserUrl = post.teaserKey
+        ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
+        : "https://placehold.co/600x400/111111/555555?text=Locked";
+
+      if (!hasAccess) {
+        // LOCK IT DOWN
         delete post.fileKey;
-        post.mediaUrl =
-          null;
+        post.mediaUrl = null;
         post.isLocked = true;
       } else {
-        // GRANTED ACCESS: Generate a 1-hour self-destructing Private URL
+        // UNLOCK WITH PRIVATE URL
         try {
           const command =
             new GetObjectCommand(
@@ -1596,69 +1473,31 @@ exports.getCreatorPublicProfile = async (req, res) => {
                 Key: post.fileKey,
               },
             );
-          post.mediaUrl =
-            await getSignedUrl(
-              s3,
-              command,
-              {
-                expiresIn: 3600,
-              },
-            );
+          post.mediaUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
           post.isLocked = false;
         } catch (err) {
-          console.error(
-            "Failed to sign URL for bookmarked post:",
-            post._id,
-            err,
-          );
-          post.mediaUrl =
-            null;
+          console.error("Failed to sign URL for profile post:", post._id, err);
+          post.mediaUrl = null;
           post.isLocked = true;
         }
       }
 
-      const likesArray =
-        post.likes ||
-        [];
+      const likesArray = post.likes || [];
 
-      secureBookmarks.push(
-        {
-          ...post,
-          actualPrice,
-          isLiked:
-            likesArray.some(
-              (
-                id,
-              ) =>
-                id.toString() ===
-                viewerId.toString(),
-            ),
-          isBookmarked: true,
-          likesCount:
-            likesArray.length,
-          commentsCount:
-            post.comments
-              ? post
-                  .comments
-                  .length
-              : 0,
-        },
-      );
+      secureContent.push({
+        ...post,
+        actualPrice,
+        isLiked: likesArray.some((id) => id.toString() === viewerId.toString()),
+        likesCount: likesArray.length,
+        commentsCount: post.comments ? post.comments.length : 0,
+      });
     }
 
-    res
-      .status(
-        200,
-      )
-      .json(
-        {
-          creator,
-          isSubscribed:
-            hasActiveSub,
-          content:
-            secureContent,
-        },
-      );
+    res.status(200).json({
+      creator,
+      isSubscribed: hasActiveSub,
+      content: secureContent,
+    });
   } catch (error) {
     console.error("Public profile error:", error);
     res.status(500).json({ message: "Failed to load creator profile" });
