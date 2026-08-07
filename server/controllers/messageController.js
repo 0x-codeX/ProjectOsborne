@@ -281,25 +281,36 @@ exports.sendMessage = async (req, res) => {
       sender.role ===
       "creator"
     ) {
-      // Creators cannot send raw free images/videos (must be PPV or Voice Note)
       if (
-        fileKey &&
-        priceInUSDT ===
-          0 &&
-        !fileType?.includes(
-          "audio",
-        )
+        fileKey
       ) {
-        return res
-          .status(
-            400,
-          )
-          .json(
-            {
-              message:
-                "Raw image/video uploads are disabled. Lock media as PPV before sending.",
-            },
+        // We look for a flag from the frontend telling us this is a Vault Link
+        const isVaultLink =
+          req
+            .body
+            .isVaultLink ===
+          true;
+        const isVoiceNote =
+          fileType?.includes(
+            "audio",
           );
+
+        // RUTHLESS BLOCK: If it's not a Voice Note and not from the Vault, kill the request.
+        if (
+          !isVoiceNote &&
+          !isVaultLink
+        ) {
+          return res
+            .status(
+              403,
+            )
+            .json(
+              {
+                message:
+                  "Direct media uploads are blocked. You may only send 20-second Voice Notes or attach content already uploaded to your Vault.",
+              },
+            );
+        }
       }
     }
 

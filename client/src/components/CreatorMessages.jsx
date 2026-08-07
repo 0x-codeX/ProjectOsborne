@@ -20,10 +20,11 @@ import {
   Video,
   Image as ImageIcon,
   Loader2,
+  Square,
 } from "lucide-react";
 import { io } from "socket.io-client";
 
-// KEEPING MOCK VAULT UNTIL WE BUILD YOUR CLOUDFLARE R2 MEDIA UPLOADER
+// MOCK VAULT
 const MOCK_VAULT =
   [
     {
@@ -120,7 +121,7 @@ const CreatorMessages =
         false,
       );
 
-    // --- VAULT DRAWER STATE ---
+    // --- VAULT DRAWER & ATTACHMENT STATE ---
     const [
       showVaultDrawer,
       setShowVaultDrawer,
@@ -148,6 +149,30 @@ const CreatorMessages =
     ] =
       useState(
         null,
+      );
+
+    // --- NEW: VOICE RECORDING STATE ---
+    const [
+      isRecording,
+      setIsRecording,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      recordingTime,
+      setRecordingTime,
+    ] =
+      useState(
+        0,
+      );
+    const mediaRecorderRef =
+      useRef(
+        null,
+      );
+    const audioChunksRef =
+      useRef(
+        [],
       );
 
     // 1. Fetch Inbox on Mount
@@ -186,7 +211,7 @@ const CreatorMessages =
       fetchInbox();
     }, []);
 
-    // 2. Fetch Chat History when a conversation is selected
+    // 2. Fetch Chat History & Socket Connection
     useEffect(() => {
       if (
         !selectedChat
@@ -227,19 +252,15 @@ const CreatorMessages =
 
       fetchMessages();
 
-      // 1. Connect to socket
       const socket =
         io(
           "http://localhost:5000",
         );
-
-      // 2. Join the room
       socket.emit(
         "join_chat",
         selectedChat._id,
       );
 
-      // 3. Listen for new messages
       socket.on(
         "receive_message",
         (
@@ -291,7 +312,167 @@ const CreatorMessages =
         );
       };
 
-    // 3. Handle Sending Message
+    // --- VOICE RECORDING LOGIC ---
+    // The Ironclad 20-Second Kill Switch
+    useEffect(() => {
+      let interval;
+      if (
+        isRecording
+      ) {
+        interval =
+          setInterval(
+            () => {
+              setRecordingTime(
+                (
+                  prev,
+                ) => {
+                  if (
+                    prev >=
+                    20
+                  ) {
+                    stopRecording(); // Force stop at exactly 20 seconds
+                    return 20;
+                  }
+                  return (
+                    prev +
+                    1
+                  );
+                },
+              );
+            },
+            1000,
+          );
+      } else {
+        setRecordingTime(
+          0,
+        );
+      }
+      return () =>
+        clearInterval(
+          interval,
+        );
+    }, [
+      isRecording,
+    ]);
+
+    const startRecording =
+      async () => {
+        try {
+          const stream =
+            await navigator.mediaDevices.getUserMedia(
+              {
+                audio: true,
+              },
+            );
+          const mediaRecorder =
+            new MediaRecorder(
+              stream,
+            );
+          mediaRecorderRef.current =
+            mediaRecorder;
+          audioChunksRef.current =
+            [];
+
+          mediaRecorder.ondataavailable =
+            (
+              event,
+            ) => {
+              if (
+                event
+                  .data
+                  .size >
+                0
+              )
+                audioChunksRef.current.push(
+                  event.data,
+                );
+            };
+
+          mediaRecorder.onstop =
+            () => {
+              const audioBlob =
+                new Blob(
+                  audioChunksRef.current,
+                  {
+                    type: "audio/webm",
+                  },
+                );
+
+              // NEW: Create a local URL so the creator can listen before sending
+              const localAudioUrl =
+                URL.createObjectURL(
+                  audioBlob,
+                );
+
+              // Mocking the upload process
+              setPendingAttachment(
+                {
+                  title: `Voice Note (${recordingTime}s)`,
+                  type: "audio",
+                  fileKey: `mock-audio-${Date.now()}.webm`,
+                  localUrl:
+                    localAudioUrl, // Store the local URL
+                  isVaultLink: false,
+                },
+              );
+              setCustomPrice(
+                "0.00",
+              );
+
+              stream
+                .getTracks()
+                .forEach(
+                  (
+                    track,
+                  ) =>
+                    track.stop(),
+                );
+            };
+
+          mediaRecorder.start();
+          setIsRecording(
+            true,
+          );
+        } catch (error) {
+          console.error(
+            "Microphone access denied:",
+            error,
+          );
+          alert(
+            "You must grant microphone access to send voice notes.",
+          );
+        }
+      };
+
+    const stopRecording =
+      () => {
+        if (
+          mediaRecorderRef.current &&
+          isRecording
+        ) {
+          mediaRecorderRef.current.stop();
+          setIsRecording(
+            false,
+          );
+        }
+      };
+
+    const formatTime =
+      (
+        seconds,
+      ) => {
+        const mins =
+          Math.floor(
+            seconds /
+              60,
+          );
+        const secs =
+          seconds %
+          60;
+        return `${mins}:${secs.toString().padStart(2, "0")}`;
+      };
+
+    // --- HANDLE SENDING MESSAGE ---
     const handleSend =
       async (
         e,
@@ -334,11 +515,18 @@ const CreatorMessages =
               pendingAttachment.type ===
               "video"
                 ? "video/mp4"
-                : "image/jpeg";
+                : pendingAttachment.type ===
+                    "audio"
+                  ? "audio/webm"
+                  : "image/jpeg";
             payload.priceInUSDT =
               Number(
                 customPrice,
               );
+            // Inject the Vault flag so the backend gatekeeper lets it through
+            payload.isVaultLink =
+              pendingAttachment.isVaultLink ||
+              false;
           }
 
           const res =
@@ -383,23 +571,17 @@ const CreatorMessages =
         }
       };
 
-    // Filter Logic
     const filteredInbox =
       inbox
         .filter(
           (
             chat,
-          ) => {
-            if (
-              activeTab ===
-              "priority"
-            )
-              return (
-                chat.lifetimeValue >
+          ) =>
+            activeTab ===
+            "priority"
+              ? chat.lifetimeValue >
                 100
-              ); // Define Priority as LTV > 100
-            return true;
-          },
+              : true,
         )
         .filter(
           (
@@ -675,9 +857,27 @@ const CreatorMessages =
                         <div
                           className={`max-w-[75%] p-3 rounded-2xl text-sm ${isCreator ? "bg-[#FF5757] text-white rounded-tr-sm" : "bg-slate-800 text-slate-200 rounded-tl-sm"}`}
                         >
-                          {
+                          {msg.fileType?.includes(
+                            "audio",
+                          ) ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="font-bold italic text-[10px] uppercase opacity-80">
+                                Voice
+                                Note
+                              </span>
+                              {/* NOTE: Ensure msg.fileKey or msg.fileUrl is a valid HTTPS link to your S3/R2 bucket */}
+                              <audio
+                                src={
+                                  msg.fileUrl ||
+                                  msg.fileKey
+                                }
+                                controls
+                                className="h-10 max-w-[220px]"
+                              />
+                            </div>
+                          ) : (
                             msg.text
-                          }
+                          )}
                         </div>
                       )}
                       <span className="text-[10px] text-slate-500 mt-1 mx-1">
@@ -707,17 +907,32 @@ const CreatorMessages =
             <div className="p-4 border-t border-slate-800 bg-slate-950/50 pb-safe flex flex-col">
               {pendingAttachment && (
                 <div className="mb-3 flex items-center justify-between bg-[#FF5757]/10 border border-[#FF5757]/30 rounded-lg p-2 px-3 self-start">
-                  <div className="flex items-center gap-2 text-[#FF5757] text-sm font-bold">
-                    <Lock
-                      size={
-                        14
-                      }
-                    />
-                    <span className="truncate max-w-[200px]">
-                      {
-                        pendingAttachment.title
-                      }
-                    </span>
+                  <div className="flex items-center gap-3 text-[#FF5757] text-sm font-bold">
+                    {/* NEW: Render actual audio player if it's a voice note */}
+                    {pendingAttachment.type ===
+                    "audio" ? (
+                      <audio
+                        src={
+                          pendingAttachment.localUrl
+                        }
+                        controls
+                        className="h-8 max-w-[200px]"
+                      />
+                    ) : (
+                      <>
+                        <Lock
+                          size={
+                            14
+                          }
+                        />
+                        <span className="truncate max-w-[200px]">
+                          {
+                            pendingAttachment.title
+                          }
+                        </span>
+                      </>
+                    )}
+
                     <span className="bg-[#FF5757] text-white px-1.5 py-0.5 rounded text-[10px] font-mono ml-2">
                       $
                       {
@@ -742,7 +957,7 @@ const CreatorMessages =
                 </div>
               )}
 
-              <div className="flex items-end gap-2 bg-slate-900 border border-slate-800 p-2 rounded-2xl focus-within:border-[#FF5757] transition-colors">
+              <div className="flex items-end gap-2 bg-slate-900 border border-slate-800 p-2 rounded-2xl focus-within:border-[#FF5757] transition-colors relative">
                 <div className="flex gap-1 pb-1 pl-1">
                   <button
                     onClick={() =>
@@ -750,7 +965,10 @@ const CreatorMessages =
                         true,
                       )
                     }
-                    className="p-2 text-slate-400 hover:text-[#FF5757] transition-colors rounded-full"
+                    disabled={
+                      isRecording
+                    }
+                    className="p-2 text-slate-400 hover:text-[#FF5757] disabled:opacity-50 transition-colors rounded-full"
                   >
                     <Lock
                       size={
@@ -760,72 +978,109 @@ const CreatorMessages =
                   </button>
                 </div>
 
-                <textarea
-                  rows="1"
-                  placeholder={
-                    pendingAttachment
-                      ? "Add a description for this locked media..."
-                      : "Type a message..."
-                  }
-                  value={
-                    messageInput
-                  }
-                  onChange={(
-                    e,
-                  ) =>
-                    setMessageInput(
-                      e
-                        .target
-                        .value,
-                    )
-                  }
-                  onKeyDown={(
-                    e,
-                  ) => {
-                    if (
-                      e.key ===
-                        "Enter" &&
-                      !e.shiftKey
-                    ) {
-                      e.preventDefault();
-                      handleSend();
+                {isRecording ? (
+                  <div className="flex-1 flex items-center justify-between px-4 py-2.5 bg-rose-500/10 rounded-xl border border-rose-500/30">
+                    <div className="flex items-center gap-3 text-[#FF5757]">
+                      <div className="w-2 h-2 bg-[#FF5757] rounded-full animate-pulse"></div>
+                      <span className="font-mono text-sm font-bold tracking-wider">
+                        RECORDING{" "}
+                        {formatTime(
+                          recordingTime,
+                        )}{" "}
+                        /
+                        0:20
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <textarea
+                    rows="1"
+                    placeholder={
+                      pendingAttachment
+                        ? "Add a description..."
+                        : "Type a message..."
                     }
-                  }}
-                  className="flex-1 bg-transparent border-none outline-none text-sm text-white resize-none max-h-32 py-2.5 px-2"
-                />
+                    value={
+                      messageInput
+                    }
+                    onChange={(
+                      e,
+                    ) =>
+                      setMessageInput(
+                        e
+                          .target
+                          .value,
+                      )
+                    }
+                    onKeyDown={(
+                      e,
+                    ) => {
+                      if (
+                        e.key ===
+                          "Enter" &&
+                        !e.shiftKey
+                      ) {
+                        e.preventDefault();
+                        handleSend();
+                      }
+                    }}
+                    className="flex-1 bg-transparent border-none outline-none text-sm text-white resize-none max-h-32 py-2.5 px-2"
+                  />
+                )}
 
-                <button
-                  onClick={
-                    handleSend
-                  }
-                  disabled={
-                    (!messageInput.trim() &&
-                      !pendingAttachment) ||
-                    isSending
-                  }
-                  className={`p-2.5 rounded-xl transition-all mb-0.5 ${messageInput.trim() || pendingAttachment ? "bg-[#FF5757] text-white shadow-lg" : "bg-slate-800 text-slate-500"}`}
-                >
-                  {isSending ? (
-                    <Loader2
-                      size={
-                        18
-                      }
-                      className="animate-spin"
-                    />
-                  ) : (
-                    <Send
-                      size={
-                        18
-                      }
-                      className={
-                        messageInput.trim() ||
-                        pendingAttachment
-                          ? "ml-0.5"
-                          : ""
-                      }
-                    />
-                  )}
-                </button>
+                {/* DYNAMIC ACTION BUTTON: Shows Send if text/attachment exists, shows Mic otherwise */}
+                {messageInput.trim() ||
+                pendingAttachment ? (
+                  <button
+                    onClick={
+                      handleSend
+                    }
+                    disabled={
+                      isSending
+                    }
+                    className="p-2.5 rounded-xl transition-all mb-0.5 bg-[#FF5757] text-white shadow-lg"
+                  >
+                    {isSending ? (
+                      <Loader2
+                        size={
+                          18
+                        }
+                        className="animate-spin"
+                      />
+                    ) : (
+                      <Send
+                        size={
+                          18
+                        }
+                        className="ml-0.5"
+                      />
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onMouseDown={
+                      isRecording
+                        ? stopRecording
+                        : startRecording
+                    }
+                    className={`p-2.5 rounded-xl transition-all mb-0.5 ${isRecording ? "bg-rose-600 text-white animate-pulse" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+                  >
+                    {isRecording ? (
+                      <Square
+                        size={
+                          18
+                        }
+                        fill="currentColor"
+                      />
+                    ) : (
+                      <Mic
+                        size={
+                          18
+                        }
+                      />
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -863,10 +1118,7 @@ const CreatorMessages =
                     lock
                     behind
                     a
-                    paywall
-                    in
-                    this
-                    chat.
+                    paywall.
                   </p>
                 </div>
                 <button
@@ -989,8 +1241,12 @@ const CreatorMessages =
                     </div>
                     <button
                       onClick={() => {
+                        // CRITICAL: We tag this item with isVaultLink: true so the backend allows it
                         setPendingAttachment(
-                          selectedVaultItem,
+                          {
+                            ...selectedVaultItem,
+                            isVaultLink: true,
+                          },
                         );
                         setShowVaultDrawer(
                           false,
@@ -1015,7 +1271,6 @@ const CreatorMessages =
             </div>
           </div>
         )}
-
         <style
           dangerouslySetInnerHTML={{
             __html: `.hide-scrollbar::-webkit-scrollbar { display: none; } .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`,

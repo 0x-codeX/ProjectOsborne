@@ -504,13 +504,31 @@ const FanChatWindow =
                           : "bg-[#262626] text-slate-200 rounded-2xl rounded-tl-sm border border-gray-800"
                       }`}
                     >
-                      {msg.text && (
+                      {/* IRONCLAD MEDIA RENDERING */}
+                      {msg.fileType?.includes(
+                        "audio",
+                      ) ? (
+                        <div className="flex flex-col gap-1 mt-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">
+                            Voice
+                            Note
+                          </span>
+                          <audio
+                            src={
+                              msg.fileUrl ||
+                              msg.fileKey
+                            }
+                            controls
+                            className="h-10 w-[200px] md:w-[250px] rounded"
+                          />
+                        </div>
+                      ) : msg.text ? (
                         <p className="text-[15px] leading-relaxed break-words">
                           {
                             msg.text
                           }
                         </p>
-                      )}
+                      ) : null}
 
                       {/* Handle Locked PPV Display logic here as you originally had it... */}
                       {msg.priceInUSDT >
