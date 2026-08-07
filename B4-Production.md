@@ -10,3 +10,6 @@ Short-Term (Today): Type allow, get that pub-...r2.dev URL, and plug it into you
 Long-Term (Production): Before you launch this to actual paying users, we will come back to this exact page and click "Connect a Custom Domain" (e.g., media.yournippydomain.com). Doing that removes the rate limit and unlocks Cloudflare's massive global caching network, which is critical for serving videos fast in Nigeria without skyrocketing your server costs.
 
 Before you go to mainnet, you will want to update your GATEWAY_ABI smart contract to accept a purchaseType integer (e.g., 0 = PPV, 1 = Sub, 2 = Chat). When the contract emits that integer in its event, your Web3 listener will know exactly what the user bought without having to guess based on missing contentIds.
+
+For CloudFlare CORS Policy
+(Note: Using * is fine for development. When you launch the actual business, we will lock AllowedOrigins down to your official production domain name).

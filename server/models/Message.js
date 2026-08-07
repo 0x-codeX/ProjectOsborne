@@ -50,6 +50,10 @@ const messageSchema =
           default:
             null,
         }, // 'image/png', 'video/mp4', etc.
+      fileUrl:
+        {
+          type: String,
+        },
 
       // Monetization Engine
       priceInUSDT:

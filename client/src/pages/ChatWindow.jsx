@@ -224,7 +224,125 @@ const ChatWindow =
 
     return (
       <div className="max-w-3xl mx-auto h-[calc(100vh-100px)] flex flex-col mt-4 bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
-        {/* HEADER & MESSAGES MAP STAY EXACTLY THE SAME */}
+        {/* MESSAGES */}
+        <div className="flex-grow overflow-y-auto p-4 space-y-6">
+          {messages.map(
+            (
+              msg,
+            ) => {
+              const myId =
+                currentUser._id ||
+                currentUser.id;
+              const isMe =
+                msg.sender ===
+                myId;
+
+              // Bulletproof check
+              const isVoiceNote =
+                msg.fileType?.includes(
+                  "audio",
+                ) ||
+                (msg.fileKey &&
+                  msg.fileKey.includes(
+                    "voice-notes",
+                  ));
+              const isLockedPPV =
+                msg.priceInUSDT >
+                  0 &&
+                !isMe &&
+                !isVoiceNote;
+
+              return (
+                <div
+                  key={
+                    msg._id
+                  }
+                  className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
+                >
+                  <div
+                    className={`max-w-[85%] md:max-w-[70%] px-4 py-2.5 relative ${
+                      isMe
+                        ? "bg-[#FF5757] text-white rounded-2xl rounded-tr-sm shadow-md shadow-[#FF5757]/20"
+                        : "bg-slate-900 text-slate-200 rounded-2xl rounded-tl-sm border border-slate-700"
+                    }`}
+                  >
+                    {/* --- VOICE NOTE RENDERING --- */}
+                    {isVoiceNote && (
+                      <div className="flex flex-col gap-1 mt-1 mb-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">
+                          {isMe
+                            ? "Your Voice Note"
+                            : "Voice Note"}
+                        </span>
+                        <audio
+                          src={
+                            msg.fileUrl ||
+                            ""
+                          }
+                          controls
+                          className="h-10 w-[200px] md:w-[250px] rounded bg-transparent"
+                        />
+                      </div>
+                    )}
+
+                    {/* --- LOCKED PPV RENDERING --- */}
+                    {isLockedPPV ? (
+                      <div className="mt-2 w-64 p-4 bg-black rounded-xl border border-yellow-500/30 flex flex-col items-center">
+                        <Lock
+                          size={
+                            24
+                          }
+                          className="text-yellow-500 mb-2"
+                        />
+                        <span className="text-xs font-bold text-yellow-500 mb-2">
+                          PPV
+                          Content
+                        </span>
+                        <button className="bg-yellow-500 text-black text-xs font-bold py-2 px-4 rounded-full">
+                          Unlock
+                          for{" "}
+                          {
+                            msg.priceInUSDT
+                          }{" "}
+                          USDT
+                        </button>
+                      </div>
+                    ) : (
+                      msg.text && (
+                        <p className="text-[15px] leading-relaxed break-words">
+                          {
+                            msg.text
+                          }
+                        </p>
+                      )
+                    )}
+
+                    {/* TIMESTAMPS */}
+                    <div
+                      className={`text-[10px] mt-1.5 flex items-center gap-1 ${isMe ? "text-white/70 justify-end" : "text-slate-500"}`}
+                    >
+                      {new Date(
+                        msg.createdAt,
+                      ).toLocaleTimeString(
+                        [],
+                        {
+                          hour: "2-digit",
+                          minute:
+                            "2-digit",
+                        },
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            },
+          )}
+          <div
+            ref={
+              messagesEndRef
+            }
+          />
+        </div>
 
         {/* ❌ DELETE THE 24-HOUR RULE BLOCKER UI YOU HAD HERE ❌ */}
 

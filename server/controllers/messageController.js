@@ -9,11 +9,12 @@ const Wallet = require("../models/Wallet");
 const {
   S3Client,
   GetObjectCommand,
+  PutObjectCommand,
 } = require("@aws-sdk/client-s3");
 const {
   getSignedUrl,
 } = require("@aws-sdk/s3-request-presigner");
-
+const crypto = require("crypto");
 
 
 const s3Client =
@@ -28,6 +29,7 @@ const s3Client =
         process
           .env
           .S3_ENDPOINT,
+      forcePathStyle: true,
       credentials:
         {
           accessKeyId:
@@ -42,263 +44,111 @@ const s3Client =
     },
   );
 
-// @desc    Send a message (Enforces Bundles, 24-hr PPV rule & Subscriptions)
+// @desc    Send a message (Enforces Bundles, 24-hr PPV rule, Subscriptions, & Audio Uploads)
 // @route   POST /api/messages/send
 exports.sendMessage = async (req, res) => {
   try {
-    const senderId =
-      req
-        .user
-        ._id ||
-      req
-        .user
-        .id;
-    const {
-      receiverId,
-      text,
-      fileKey,
-      fileType,
-      priceInUSDT,
-    } =
-      req.body;
+    const senderId = req.user._id || req.user.id;
+    
+    // NOTE: Because of FormData, boolean/numbers may arrive as strings.
+    let { receiverId, text, isVaultLink } = req.body;
+    let fileKey = req.body.fileKey;
+    let fileType = req.body.fileType;
+    let priceInUSDT = Number(req.body.priceInUSDT) || 0;
+    
+    let fileUrl = null; // Will hold the R2 public URL if an audio file is uploaded
 
-    if (
-      !receiverId
-    ) {
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Receiver ID is required.",
-          },
-        );
+    if (!receiverId) {
+      return res.status(400).json({ message: "Receiver ID is required." });
     }
 
-    if (
-      !text &&
-      !fileKey
-    ) {
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Message cannot be empty.",
-          },
-        );
+    // Must have text, a vault fileKey, OR an incoming audio file
+    if (!text && !fileKey && !req.file) {
+      return res.status(400).json({ message: "Message cannot be empty." });
     }
 
-    const sender =
-      await User.findById(
-        senderId,
-      );
-    const receiver =
-      await User.findById(
-        receiverId,
-      );
+    const sender = await User.findById(senderId);
+    const receiver = await User.findById(receiverId);
 
-    if (
-      !sender ||
-      !receiver
-    ) {
-      return res
-        .status(
-          404,
-        )
-        .json(
-          {
-            message:
-              "User not found.",
-          },
-        );
+    if (!sender || !receiver) {
+      return res.status(404).json({ message: "User not found." });
     }
 
-    let creatorId,
-      fanId;
+    let creatorId, fanId;
 
     // Determine Roles
-    if (
-      sender.role ===
-      "fan"
-    ) {
-      creatorId =
-        receiverId;
-      fanId =
-        senderId;
+    if (sender.role === "fan") {
+      creatorId = receiverId;
+      fanId = senderId;
     } else {
-      creatorId =
-        senderId;
-      fanId =
-        receiverId;
+      creatorId = senderId;
+      fanId = receiverId;
     }
 
     // 1. Find the Conversation First (Needed to check bubbles)
-    let conversation =
-      await Conversation.findOne(
-        {
-          participants:
-            {
-              $all: [
-                senderId,
-                receiverId,
-              ],
-            },
-        },
-      );
+    let conversation = await Conversation.findOne({
+      participants: { $all: [senderId, receiverId] },
+    });
 
-    // --- THE GATEKEEPER (FAN BUSINESS RULES) ---
-    if (
-      sender.role ===
-      "fan"
-    ) {
+    // ==========================================
+    // --- THE GATEKEEPER: FAN BUSINESS RULES ---
+    // ==========================================
+    if (sender.role === "fan") {
       // Rule A: 200 Character Limit
-      if (
-        text &&
-        text.length >
-          200
-      ) {
-        return res
-          .status(
-            400,
-          )
-          .json(
-            {
-              message:
-                "Fan messages are limited to 200 characters to prevent spam.",
-            },
-          );
+      if (text && text.length > 200) {
+        return res.status(400).json({ message: "Fan messages are limited to 200 characters to prevent spam." });
       }
 
-      // Rule B: Fans CANNOT send attachments or media files
-      if (
-        fileKey ||
-        fileType
-      ) {
-        return res
-          .status(
-            400,
-          )
-          .json(
-            {
-              message:
-                "Fans are restricted to text-only messages.",
-            },
-          );
+      // Rule B: Fans CANNOT send attachments, media files, or file uploads
+      if (req.file || fileKey || fileType) {
+        return res.status(400).json({ message: "Fans are restricted to text-only messages." });
       }
 
       // Rule C: Check Bubble Balance
-      if (
-        !conversation ||
-        conversation.bubblesLeft <=
-          0
-      ) {
-        return res
-          .status(
-            402,
-          )
-          .json(
-            {
-              message:
-                "Message bundle exhausted. Purchase a new bundle to keep chatting.",
-              requiresBundle: true,
-            },
-          );
+      if (!conversation || conversation.bubblesLeft <= 0) {
+        return res.status(402).json({
+          message: "Message bundle exhausted. Purchase a new bundle to keep chatting.",
+          requiresBundle: true,
+        });
       }
 
-      // Rule D: Maintain existing 24-hr PPV / Sub check, but ADD 'MESSAGE_BUNDLE' as valid access
-      const now =
-        new Date();
-      const twentyFourHoursAgo =
-        new Date(
-          now.getTime() -
-            24 *
-              60 *
-              60 *
-              1000,
-        );
+      // Rule D: 24-hr PPV / Sub / Chat Bundle check
+      const now = new Date();
+      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-      const validAccess =
-        await Purchase.findOne(
-          {
-            user: fanId,
-            creator:
-              creatorId,
-            status:
-              "completed",
-            $or: [
-              {
-                purchaseType:
-                  "SUBSCRIPTION",
-                expiresAt:
-                  {
-                    $gt: now,
-                  },
-              },
-              {
-                purchaseType:
-                  "PPV",
-                createdAt:
-                  {
-                    $gt: twentyFourHoursAgo,
-                  },
-              },
-              {
-                purchaseType:
-                  {
-                    $in: [
-                      "CHAT_BUNDLE",
-                      "MESSAGE_BUNDLE",
-                    ],
-                  },
-              }, // If they bought a bundle, they are authorized!
-            ],
-          },
-        );
+      const validAccess = await Purchase.findOne({
+        user: fanId,
+        creator: creatorId,
+        status: "completed",
+        $or: [
+          { purchaseType: "SUBSCRIPTION", expiresAt: { $gt: now } },
+          { purchaseType: "PPV", createdAt: { $gt: twentyFourHoursAgo } },
+          { purchaseType: { $in: ["CHAT_BUNDLE", "MESSAGE_BUNDLE"] } },
+        ],
+      });
 
-      if (
-        !validAccess
-      ) {
-        return res
-          .status(
-            403,
-          )
-          .json(
-            {
-              message:
-                "Access Denied. You must have an active subscription, purchased a PPV in the last 24 hours, or a Chat Bundle.",
-              requiresPurchase: true,
-            },
-          );
+      if (!validAccess) {
+        return res.status(403).json({
+          message: "Access Denied. You must have an active subscription, purchased a PPV in the last 24 hours, or a Chat Bundle.",
+          requiresPurchase: true,
+        });
       }
-    }
-    // --- CREATOR BUSINESS RULES ---
-    else if (
-      sender.role ===
-      "creator"
-    ) {
-      if (
-        fileKey
-      ) {
-        // We look for a flag from the frontend telling us this is a Vault Link
-        const isVaultLink =
-          req
-            .body
-            .isVaultLink ===
-          true;
-        const isVoiceNote =
-          fileType?.includes(
-            "audio",
-          );
+    } 
 
-        // RUTHLESS BLOCK: If it's not a Voice Note and not from the Vault, kill the request.
+    // ==============================================
+    // --- THE GATEKEEPER: CREATOR BUSINESS RULES ---
+    // ==============================================
+    else if (sender.role === "creator") {
+      
+      // 1. Process Live Voice Note Upload (if exists)
+      if (
+        req.file
+      ) {
+        // Enforce audio only for direct uploads
         if (
-          !isVoiceNote &&
-          !isVaultLink
+          !req.file.mimetype.includes(
+            "audio",
+          )
         ) {
           return res
             .status(
@@ -307,129 +157,155 @@ exports.sendMessage = async (req, res) => {
             .json(
               {
                 message:
-                  "Direct media uploads are blocked. You may only send 20-second Voice Notes or attach content already uploaded to your Vault.",
+                  "Only voice notes can be uploaded directly.",
               },
             );
+        }
+
+        // Upload to Cloudflare R2
+        const randomName =
+          crypto
+            .randomBytes(
+              16,
+            )
+            .toString(
+              "hex",
+            );
+        fileKey = `voice-notes/${randomName}.webm`;
+        fileType =
+          req
+            .file
+            .mimetype;
+
+        const uploadParams =
+          {
+            Bucket:
+              process
+                .env
+                .S3_BUCKET_NAME,
+            Key: fileKey,
+            Body: req
+              .file
+              .buffer,
+            ContentType:
+              fileType,
+          };
+
+        await s3Client.send(
+          new PutObjectCommand(
+            uploadParams,
+          ),
+        );
+
+        // // Generate the public playback URL
+        // fileUrl = `${process.env.R2_PUBLIC_DOMAIN}/${fileKey}`;
+
+        // IRONCLAD URL GENERATION: Ensure https:// is always present
+        let domain =
+          process
+            .env
+            .R2_PUBLIC_DOMAIN;
+        if (
+          !domain.startsWith(
+            "http",
+          )
+        ) {
+          domain = `https://${domain}`;
+        }
+
+        // Remove trailing slashes if they accidentally put one in the .env
+        if (
+          domain.endsWith(
+            "/",
+          )
+        ) {
+          domain =
+            domain.slice(
+              0,
+              -1,
+            );
+        }
+
+        // Generate the public playback URL
+        fileUrl = `${domain}/${fileKey}`;
+      }
+
+      // 2. Validate Vault Media & Attachment Restrictions
+      if (fileKey) {
+        const vaultLink = isVaultLink === "true" || isVaultLink === true;
+        const isVoiceNote = fileType?.includes("audio");
+
+        // RUTHLESS BLOCK: If it's not a Voice Note and not from the Vault, kill it.
+        if (!isVoiceNote && !vaultLink) {
+          return res.status(403).json({
+            message: "Direct media uploads are blocked. You may only send 20-second Voice Notes or attach content already uploaded to your Vault.",
+          });
         }
       }
     }
 
-    // 2. Create the Conversation if it doesn't exist (e.g. Creator initiates)
-    if (
-      !conversation
-    ) {
-      conversation =
-        await Conversation.create(
-          {
-            participants:
-              [
-                senderId,
-                receiverId,
-              ],
-            creator:
-              creatorId,
-            fan: fanId,
-            bubblesLeft: 0,
-          },
-        );
+    // ==============================
+    // --- DATABASE OPERATIONS ---
+    // ==============================
+
+    // 2. Create the Conversation if it doesn't exist
+    if (!conversation) {
+      conversation = await Conversation.create({
+        participants: [senderId, receiverId],
+        creator: creatorId,
+        fan: fanId,
+        bubblesLeft: 0,
+      });
     }
 
     // 3. Create the Message
-    const isLockedPPV =
-      sender.role ===
-        "creator" &&
-      priceInUSDT >
-        0;
+    const isLockedPPV = sender.role === "creator" && priceInUSDT > 0;
 
-    const message =
-      await Message.create(
-        {
-          conversationId:
-            conversation._id,
-          sender:
-            senderId,
-          receiver:
-            receiverId,
-          text:
-            text ||
-            "",
-          fileKey:
-            fileKey ||
-            null,
-          fileType:
-            fileType ||
-            null,
-          priceInUSDT:
-            isLockedPPV
-              ? priceInUSDT
-              : 0,
-        },
-      );
+    const message = await Message.create({
+      conversationId: conversation._id,
+      sender: senderId,
+      receiver: receiverId,
+      text: text || "",
+      fileKey: fileKey || null,
+      fileUrl: fileUrl || null, // Save the playable Cloudflare R2 URL here!
+      fileType: fileType || null,
+      priceInUSDT: isLockedPPV ? priceInUSDT : 0,
+    });
 
     // 4. Atomically Update Conversation Last Message & Deduct Bubble
-    const updatePayload =
-      {
-        $set: {
-          lastMessage:
-            {
-              text: isLockedPPV
-                ? "🔒 Locked Message"
-                : text ||
-                  "📸 Media attachment",
-              sender:
-                senderId,
-              createdAt:
-                message.createdAt,
-              isLockedPPV:
-                isLockedPPV,
-            },
+    const updatePayload = {
+      $set: {
+        lastMessage: {
+          text: isLockedPPV ? "🔒 Locked Message" : (text || "📸 Media attachment"),
+          sender: senderId,
+          createdAt: message.createdAt,
+          isLockedPPV: isLockedPPV,
         },
-      };
+      },
+    };
 
     // If a fan sends a message, deduct 1 bubble atomically
-    if (
-      sender.role ===
-      "fan"
-    ) {
-      updatePayload.$inc =
-        {
-          bubblesLeft:
-            -1,
-        };
+    if (sender.role === "fan") {
+      updatePayload.$inc = { bubblesLeft: -1 };
     }
 
-    const updatedConversation =
-      await Conversation.findByIdAndUpdate(
-        conversation._id,
-        updatePayload,
-        {
-          new: true,
-        },
-      );
+    const updatedConversation = await Conversation.findByIdAndUpdate(
+      conversation._id,
+      updatePayload,
+      { new: true }
+    );
 
-    // BLAST MESSAGE TO THE SOCKET ROOM ---
-    req.io
-      .to(
-        conversation._id.toString(),
-      )
-      .emit(
-        "receive_message",
-        message,
-      );
+    // ==============================
+    // --- SOCKET BROADCAST ---
+    // ==============================
+    req.io.to(conversation._id.toString()).emit("receive_message", message);
 
-    res
-      .status(
-        201,
-      )
-      .json(
-        {
-          message:
-            "Message sent successfully",
-          data: message,
-          bubblesLeft:
-            updatedConversation.bubblesLeft,
-        },
-      );
+    res.status(201).json({
+      message: "Message sent successfully",
+      data: message,
+      bubblesLeft: updatedConversation.bubblesLeft,
+    });
+
   } catch (error) {
     console.error("SendMessage Error:", error);
     res.status(500).json({ message: "Server error sending message." });

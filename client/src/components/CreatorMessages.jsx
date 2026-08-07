@@ -409,7 +409,7 @@ const CreatorMessages =
                 {
                   title: `Voice Note (${recordingTime}s)`,
                   type: "audio",
-                  fileKey: `mock-audio-${Date.now()}.webm`,
+                  blob: audioBlob,
                   localUrl:
                     localAudioUrl, // Store the local URL
                   isVaultLink: false,
@@ -495,44 +495,67 @@ const CreatorMessages =
             localStorage.getItem(
               "nippy_token",
             );
-          const payload =
-            {
-              receiverId:
-                selectedChat
-                  .otherUser
-                  ._id,
-              conversationId:
-                selectedChat._id,
-              text: messageInput.trim(),
-            };
+          // We must use FormData to send actual files
+          const formData =
+            new FormData();
+          formData.append(
+            "receiverId",
+            selectedChat
+              .otherUser
+              ._id,
+          );
+          formData.append(
+            "conversationId",
+            selectedChat._id,
+          );
+          formData.append(
+            "text",
+            messageInput.trim(),
+          );
 
           if (
             pendingAttachment
           ) {
-            payload.fileKey =
-              pendingAttachment.fileKey;
-            payload.fileType =
-              pendingAttachment.type ===
-              "video"
-                ? "video/mp4"
-                : pendingAttachment.type ===
-                    "audio"
-                  ? "audio/webm"
-                  : "image/jpeg";
-            payload.priceInUSDT =
-              Number(
+            // If it is a freshly recorded voice note, append the Blob
+            if (
+              pendingAttachment.blob
+            ) {
+              formData.append(
+                "media",
+                pendingAttachment.blob,
+                "voice-note.webm",
+              );
+            }
+            // If it is an item from the Vault, just send the strings
+            else if (
+              pendingAttachment.isVaultLink
+            ) {
+              formData.append(
+                "fileKey",
+                pendingAttachment.fileKey,
+              );
+              formData.append(
+                "fileType",
+                pendingAttachment.type ===
+                  "video"
+                  ? "video/mp4"
+                  : "image/jpeg",
+              );
+              formData.append(
+                "isVaultLink",
+                "true",
+              );
+              formData.append(
+                "priceInUSDT",
                 customPrice,
               );
-            // Inject the Vault flag so the backend gatekeeper lets it through
-            payload.isVaultLink =
-              pendingAttachment.isVaultLink ||
-              false;
+            }
           }
 
           const res =
             await axios.post(
               "/api/messages/send",
-              payload,
+              formData,
               {
                 headers:
                   {

@@ -486,10 +486,30 @@ const FanChatWindow =
               (
                 msg,
               ) => {
+                const myId =
+                  currentUser._id ||
+                  currentUser.id;
                 const isMe =
                   msg.sender ===
-                  (currentUser._id ||
-                    currentUser.id);
+                  myId;
+
+                // Bulletproof check: Look at fileType, OR if the fileKey contains our voice-note path
+                const isVoiceNote =
+                  msg.fileType?.includes(
+                    "audio",
+                  ) ||
+                  (msg.fileKey &&
+                    msg.fileKey.includes(
+                      "voice-notes",
+                    ));
+
+                // 2. Ironclad Rule: Voice notes are ALWAYS free. Only lock non-audio content.
+                const isLockedPPV =
+                  msg.priceInUSDT >
+                    0 &&
+                  !isMe &&
+                  !isVoiceNote;
+
                 return (
                   <div
                     key={
@@ -504,61 +524,83 @@ const FanChatWindow =
                           : "bg-[#262626] text-slate-200 rounded-2xl rounded-tl-sm border border-gray-800"
                       }`}
                     >
-                      {/* IRONCLAD MEDIA RENDERING */}
-                      {msg.fileType?.includes(
-                        "audio",
-                      ) ? (
-                        <div className="flex flex-col gap-1 mt-1">
-                          <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">
-                            Voice
-                            Note
-                          </span>
-                          <audio
-                            src={
-                              msg.fileUrl ||
-                              msg.fileKey
-                            }
-                            controls
-                            className="h-10 w-[200px] md:w-[250px] rounded"
-                          />
-                        </div>
-                      ) : msg.text ? (
-                        <p className="text-[15px] leading-relaxed break-words">
-                          {
-                            msg.text
-                          }
-                        </p>
-                      ) : null}
-
-                      {/* Handle Locked PPV Display logic here as you originally had it... */}
-                      {msg.priceInUSDT >
-                        0 &&
-                        msg.sender !==
-                          currentUser._id && (
-                          <div className="mt-2 w-64 p-4 bg-black rounded-xl border border-yellow-500/30 flex flex-col items-center">
-                            <Lock
+                      {/* --- FREE VOICE NOTE RENDERING --- */}
+                      {/* --- FREE VOICE NOTE RENDERING --- */}
+                      {isVoiceNote && (
+                        <div className="flex flex-col gap-1 mt-1 mb-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider opacity-70 flex items-center gap-1">
+                            <CheckCircle2
                               size={
-                                24
+                                12
                               }
-                              className="text-yellow-500 mb-2"
+                              className={
+                                isMe
+                                  ? "text-white"
+                                  : "text-emerald-400"
+                              }
                             />
-                            <span className="text-xs font-bold text-yellow-500 mb-2">
-                              PPV
-                              Content
-                            </span>
-                            <button className="bg-yellow-500 text-black text-xs font-bold py-2 px-4 rounded-full">
-                              Unlock
-                              for{" "}
-                              {
-                                msg.priceInUSDT
-                              }{" "}
-                              USDT
-                            </button>
-                          </div>
-                        )}
+                            {isMe
+                              ? "Your Voice Note"
+                              : "Creator Voice Note"}
+                          </span>
 
+                          {/* IRONCLAD CHECK: Only render audio if URL actually exists */}
+                          {msg.fileUrl ? (
+                            <audio
+                              src={
+                                msg.fileUrl
+                              }
+                              controls
+                              className="h-10 w-[200px] md:w-[250px] rounded bg-transparent"
+                            />
+                          ) : (
+                            <div className="text-[10px] text-red-300 italic p-2 bg-black/20 rounded border border-red-500/30">
+                              Audio
+                              link
+                              missing
+                              from
+                              database.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* --- LOCKED PPV OR TEXT RENDERING --- */}
+                      {isLockedPPV ? (
+                        <div className="mt-2 w-64 p-4 bg-black rounded-xl border border-yellow-500/30 flex flex-col items-center">
+                          <Lock
+                            size={
+                              24
+                            }
+                            className="text-yellow-500 mb-2"
+                          />
+                          <span className="text-xs font-bold text-yellow-500 mb-2">
+                            PPV
+                            Content
+                          </span>
+                          <button className="bg-yellow-500 text-black text-xs font-bold py-2 px-4 rounded-full transition-transform hover:scale-105 hover:bg-yellow-400">
+                            Unlock
+                            for{" "}
+                            {
+                              msg.priceInUSDT
+                            }{" "}
+                            USDT
+                          </button>
+                        </div>
+                      ) : (
+                        // Only render text if the message actually has text (Creators might send audio without text)
+                        msg.text && (
+                          <p className="text-[15px] leading-relaxed break-words">
+                            {
+                              msg.text
+                            }
+                          </p>
+                        )
+                      )}
+
+                      {/* TIMESTAMPS */}
                       <div
-                        className={`text-[10px] mt-1 flex items-center gap-1 ${isMe ? "text-white/70 justify-end" : "text-gray-500"}`}
+                        className={`text-[10px] mt-1.5 flex items-center gap-1 ${isMe ? "text-white/70 justify-end" : "text-gray-500"}`}
                       >
                         {new Date(
                           msg.createdAt,
