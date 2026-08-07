@@ -7,16 +7,23 @@ const {
   getMessages,
   verifyMessagePayment,
   getSecureMessageMedia,
+  buyMessageBundle, // <-- ADDED THIS NEW CONTROLLER
 } = require("../controllers/messageController");
 const {
   requireAuth,
-} = require("../middleware/authMiddleware"); // Or whatever your auth middleware is named
+} = require("../middleware/authMiddleware");
 
+// --- MESSAGE ROUTES ---
 router.post(
   "/send",
   requireAuth,
   sendMessage,
 );
+router.post(
+  "/buy-bundle",
+  requireAuth,
+  buyMessageBundle,
+); // <-- ADDED THIS ROUTE
 router.get(
   "/inbox",
   requireAuth,

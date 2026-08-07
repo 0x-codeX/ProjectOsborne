@@ -83,5 +83,3 @@ module.exports =
     "Message",
     messageSchema,
   );
-
-  

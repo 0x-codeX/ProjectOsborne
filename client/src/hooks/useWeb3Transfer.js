@@ -1,16 +1,27 @@
 import { useState } from "react";
 import { ethers } from "ethers";
 
-// Polygon Mainnet Configurations
+// Polygon Amoy Testnet Configurations
 const POLYGON_CHAIN_ID =
-  "0x89"; // 137 in hex
-const USDT_CONTRACT_ADDRESS =
-  "0xc2132D05D31c914a87C6611C10748AEb04B58e8F";
+  "0x13882"; // 80002 in hex
 
-// We only need the transfer function for this specific hook
+// IMPORTANT: Replace this with the Fake USDT address you deployed on Amoy!
+const USDT_CONTRACT_ADDRESS =
+  "0x3A08E5dC512f099648e491bA38D0c7E2efFbb7DB";
+const GATEWAY_ADDRESS =
+  "0x8ad6CB0559e5FEa826b8A359D27C7730Ba488779";
+
+// Minimal Fan-Facing ABIs
 const USDT_ABI =
   [
-    "function transfer(address to, uint256 value) public returns (bool)",
+    "function approve(address spender, uint256 amount) public returns (bool)",
+    "function balanceOf(address account) view returns (uint256)",
+  ];
+
+const GATEWAY_ABI =
+  [
+    "function purchaseWithERC20(address token, address creator, bytes32 contentId, uint256 price) external",
+    "function purchaseWithNative(address payable creator, bytes32 contentId) external payable",
   ];
 
 export const useWeb3Transfer =
@@ -30,10 +41,12 @@ export const useWeb3Transfer =
         null,
       );
 
-    // Helper to force network switch
     const ensurePolygonNetwork =
       async () => {
         try {
+          console.log(
+            "About to switch network...",
+          );
           await window.ethereum.request(
             {
               method:
@@ -47,8 +60,10 @@ export const useWeb3Transfer =
                 ],
             },
           );
+          console.log(
+            "Network switched successfully.",
+          );
         } catch (switchError) {
-          // This error code means the chain has not been added to MetaMask.
           if (
             switchError.code ===
             4902
@@ -64,21 +79,21 @@ export const useWeb3Transfer =
                         chainId:
                           POLYGON_CHAIN_ID,
                         chainName:
-                          "Polygon Mainnet",
+                          "Polygon Amoy Testnet",
                         rpcUrls:
                           [
-                            "https://polygon-rpc.com/",
+                            "https://rpc-amoy.polygon.technology/",
                           ],
                         nativeCurrency:
                           {
-                            name: "MATIC",
+                            name: "POL",
                             symbol:
-                              "MATIC",
+                              "POL",
                             decimals: 18,
                           },
                         blockExplorerUrls:
                           [
-                            "https://polygonscan.com/",
+                            "https://amoy.polygonscan.com/",
                           ],
                       },
                     ],
@@ -86,21 +101,23 @@ export const useWeb3Transfer =
               );
             } catch (addError) {
               throw new Error(
-                "Failed to add Polygon network to wallet.",
+                "Failed to add Amoy network to wallet.",
               );
             }
           } else {
             throw new Error(
-              "Please switch to the Polygon network in your wallet.",
+              "Please switch to the Amoy Testnet in your wallet.",
             );
           }
         }
       };
 
+    // Notice the addition of contentId
     const transferUSDT =
       async (
-        receiverAddress,
+        creatorAddress,
         priceAmount,
+        contentId = null,
       ) => {
         setIsProcessingTx(
           true,
@@ -110,19 +127,16 @@ export const useWeb3Transfer =
         );
 
         try {
-          // 1. Check if wallet is installed
           if (
             !window.ethereum
           ) {
             throw new Error(
-              "No Web3 wallet detected. Please install MetaMask or use a dApp browser.",
+              "No Web3 wallet detected. Please install MetaMask.",
             );
           }
 
-          // 2. Ensure Polygon Network
           await ensurePolygonNetwork();
 
-          // 3. Initialize Ethers v6 Provider and Signer
           const provider =
             new ethers.BrowserProvider(
               window.ethereum,
@@ -130,45 +144,86 @@ export const useWeb3Transfer =
           const signer =
             await provider.getSigner();
 
-          // 4. Initialize Contract
           const usdtContract =
             new ethers.Contract(
               USDT_CONTRACT_ADDRESS,
               USDT_ABI,
               signer,
             );
+          const gatewayContract =
+            new ethers.Contract(
+              GATEWAY_ADDRESS,
+              GATEWAY_ABI,
+              signer,
+            );
 
-          // 5. Format Amount (USDT on Polygon has 6 decimals, NEVER use parseEther here)
           const amountParsed =
             ethers.parseUnits(
               priceAmount.toString(),
               6,
             );
 
-          // 6. Execute Transaction
-          const tx =
-            await usdtContract.transfer(
-              receiverAddress,
+          // Convert MongoDB ObjectId string to bytes32 for the smart contract
+          let bytes32ContentId;
+          if (
+            contentId
+          ) {
+            // Ensure it has the 0x prefix for ethers.js padding
+            const hexId =
+              contentId.startsWith(
+                "0x",
+              )
+                ? contentId
+                : "0x" +
+                  contentId;
+            bytes32ContentId =
+              ethers.zeroPadValue(
+                hexId,
+                32,
+              );
+          } else {
+            bytes32ContentId =
+              ethers.ZeroHash; // Fallback for subscriptions without a specific post
+          }
+
+          console.log(
+            "1. Requesting USDT Approval...",
+          );
+          const approveTx =
+            await usdtContract.approve(
+              GATEWAY_ADDRESS,
+              amountParsed,
+            );
+          await approveTx.wait(
+            1,
+          );
+
+          console.log(
+            "2. Approval confirmed. Executing Gateway Purchase...",
+          );
+          const purchaseTx =
+            await gatewayContract.purchaseWithERC20(
+              USDT_CONTRACT_ADDRESS,
+              creatorAddress,
+              bytes32ContentId,
               amountParsed,
             );
 
-          // 7. Wait for Receipt (1 block confirmation)
           const receipt =
-            await tx.wait(
+            await purchaseTx.wait(
               1,
             );
 
           setIsProcessingTx(
             false,
           );
-          return receipt.hash; // Return the hash so the backend can verify it
+          return receipt.hash;
         } catch (error) {
           console.error(
             "Web3 Transfer Error:",
             error,
           );
 
-          // Parse common Web3 errors for better UI feedback
           let errorMessage =
             "Transaction failed.";
           if (
@@ -183,6 +238,9 @@ export const useWeb3Transfer =
           } else if (
             error.message.includes(
               "insufficient funds",
+            ) ||
+            error.message.includes(
+              "exceeds balance",
             )
           ) {
             errorMessage =
@@ -201,7 +259,7 @@ export const useWeb3Transfer =
           );
           throw new Error(
             errorMessage,
-          ); // Throw so the component can catch it
+          );
         }
       };
 

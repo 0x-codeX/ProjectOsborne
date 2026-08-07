@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import { ethers } from "ethers";
 import { useGoogleLogin } from "@react-oauth/google";
-import landingBackground from "../assets/background7.jpg"; // Ensure this path is correct
+import landingBackground from "../assets/background7.jpg";
+import nippyLogo from "../assets/NippyLogo.png";
 
 const LandingPage =
   () => {
@@ -522,9 +523,20 @@ const LandingPage =
         <div className="relative z-10 w-full h-full flex items-center justify-center lg:justify-between lg:pl-16 lg:pr-6">
           {/* Left Side - Hero Text (Hidden on small screens) */}
           <div className="hidden lg:block w-1/2">
-            <span className="text-4xl font-black tracking-tighter text-emerald-500 block mb-6">
-              NIPPY.
-            </span>
+            {/* UPDATED: Oversized Logo Drop-Cap (Roughly 2x text height) */}
+            <div className="flex items-center mb-6">
+              <img
+                src={
+                  nippyLogo
+                }
+                alt="Nippy Logo"
+                className="w-20 h-20 object-contain drop-shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+              />
+              <span className="text-4xl font-black tracking-tighter text-emerald-500 -ml-4 -mb-4">
+                IPPY.
+              </span>
+            </div>
+
             <h1 className="text-6xl font-black text-white mb-4 tracking-tight drop-shadow-2xl leading-tight">
               Own
               your
@@ -554,10 +566,17 @@ const LandingPage =
 
           {/* Right Side - Auth Panel */}
           <div className="w-[92%] sm:w-[450px] h-auto max-h-[90vh] bg-slate-900/80 backdrop-blur-2xl border border-slate-700/50 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col justify-center px-6 sm:px-12 py-8 lg:translate-x-4 overflow-y-auto">
-            {/* Mobile Logo */}
-            <div className="lg:hidden mb-6 text-center">
-              <span className="text-3xl font-black tracking-tighter text-emerald-500">
-                NIPPY.
+            {/* UPDATED: Mobile Logo (Centered, perfectly scaled) */}
+            <div className="lg:hidden mb-6 flex items-center justify-center">
+              <img
+                src={
+                  nippyLogo
+                }
+                alt="Nippy Logo"
+                className="w-14 h-14 object-contain drop-shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+              />
+              <span className="text-3xl font-black tracking-tighter text-emerald-500 -ml-3 -mb-2">
+                IPPY.
               </span>
             </div>
 

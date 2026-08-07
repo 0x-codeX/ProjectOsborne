@@ -15,6 +15,8 @@ import {
   Settings,
   LogOut,
 } from "lucide-react";
+import landingBackground from "../assets/background7.jpg";
+import nippyLogo from "../assets/NippyLogo.png";
 
 const FanLayout =
   () => {
@@ -23,7 +25,6 @@ const FanLayout =
     const navigate =
       useNavigate();
 
-    // 1. UPDATED NAV ARRAY: Added Messages, Removed Settings
     const navItems =
       [
         {
@@ -45,7 +46,7 @@ const FanLayout =
           icon: Bell,
         },
         {
-          path: "/messages", // Added Messages exactly where you wanted it
+          path: "/messages",
           label:
             "Messages",
           icon: MessageCircle,
@@ -78,26 +79,41 @@ const FanLayout =
       };
 
     return (
-      <div className="min-h-screen bg-nippy-onyx text-slate-200 flex flex-col font-sans">
+      <div className="relative min-h-screen text-slate-200 flex flex-col font-sans">
+        {/* BACKGROUND INJECTION - IRONCLAD UI */}
+        <div className="fixed inset-0 z-[-1] pointer-events-none overflow-hidden">
+          <img
+            src={
+              landingBackground
+            }
+            alt="Creator Background"
+            className="w-full h-full object-cover grayscale-[50%] blur-2xl scale-125 opacity-40"
+          />
+          <div className="absolute inset-0 bg-nippy-onyx/95"></div>
+        </div>
+
         {/* DESKTOP TOP NAV (Hidden on Mobile) */}
         <header className="hidden md:flex justify-between items-center py-4 px-10 border-b border-gray-800 bg-nippy-obsidian/90 backdrop-blur-md sticky top-0 z-50">
           {/* Logo */}
           <div
-            className="flex items-center gap-2 cursor-pointer"
+            className="flex items-center cursor-pointer group"
             onClick={() =>
               navigate(
                 "/feed",
               )
             }
           >
-            <div className="w-8 h-8 bg-gradient-to-tr from-nippy-coral to-nippy-coralHover rounded-lg flex items-center justify-center shadow-lg shadow-nippy-coral/20">
-              <span className="text-white font-bold text-xl italic tracking-tighter">
-                n
-              </span>
-            </div>
-            <span className="text-nippy-blush font-bold text-xl tracking-tight">
-              nippy
-              <span className="text-nippy-coral">
+            <img
+              src={
+                nippyLogo
+              }
+              alt="Nippy Logo"
+              className="w-8 h-8 object-contain group-hover:scale-105 transition-transform"
+            />
+            {/* Cleaned up conflicting text colors - streamlined to White + Emerald */}
+            <span className="text-emerald-500 font-bold text-2xl tracking-tight -ml-1 transition-colors">
+              ippy
+              <span className="text-emerald-500">
                 .
               </span>
             </span>
@@ -109,7 +125,6 @@ const FanLayout =
               (
                 item,
               ) => {
-                // Keep Profile highlighted if they are inside Settings
                 const isActive =
                   location.pathname ===
                     item.path ||
@@ -120,7 +135,6 @@ const FanLayout =
                 const Icon =
                   item.icon;
 
-                // 2. THE DROPDOWN INJECTION FOR PROFILE
                 if (
                   item.label ===
                   "Profile"
@@ -138,7 +152,7 @@ const FanLayout =
                         }
                         className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
                           isActive
-                            ? "bg-gray-800 text-nippy-coral font-semibold"
+                            ? "bg-gray-800 text-emerald-500 font-semibold"
                             : "text-gray-400 hover:text-white hover:bg-gray-800/50"
                         }`}
                       >
@@ -154,7 +168,6 @@ const FanLayout =
                         </span>
                       </Link>
 
-                      {/* Hover Dropdown for Settings (Desktop Only) */}
                       <div className="absolute top-full right-0 mt-2 w-40 bg-nippy-obsidian border border-gray-800 rounded-xl shadow-xl opacity-0 group-hover:opacity-100 transition-opacity invisible group-hover:visible z-50 overflow-hidden">
                         <Link
                           to="/fan/settings"
@@ -173,7 +186,6 @@ const FanLayout =
                   );
                 }
 
-                // Standard render for everything else
                 return (
                   <Link
                     key={
@@ -184,7 +196,7 @@ const FanLayout =
                     }
                     className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
                       isActive
-                        ? "bg-gray-800 text-nippy-coral font-semibold"
+                        ? "bg-gray-800 text-emerald-500 font-semibold"
                         : "text-gray-400 hover:text-white hover:bg-gray-800/50"
                     }`}
                   >
@@ -257,7 +269,7 @@ const FanLayout =
                     }
                     className={`flex flex-col items-center p-2 rounded-xl transition-all ${
                       isActive
-                        ? "text-nippy-coral"
+                        ? "text-emerald-500"
                         : "text-gray-500 hover:text-gray-300"
                     }`}
                   >
@@ -267,7 +279,7 @@ const FanLayout =
                       }
                       className={
                         isActive
-                          ? "fill-nippy-coral/20"
+                          ? "fill-emerald-500/20"
                           : ""
                       }
                     />

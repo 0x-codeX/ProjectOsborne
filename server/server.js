@@ -3,6 +3,10 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
+const http = require("http");
+const {
+  Server,
+} = require("socket.io");
 
 // Route Imports
 const withdrawalRoutes = require("./routes/withdrawalRoutes");
@@ -18,11 +22,34 @@ const earningsRoutes = require("./routes/earningsRoutes");
 // Cron Jobs
 const startReaper = require("./cron/reaper");
 
-// Initialize Web3 Listener using CommonJS
+// Initialize Web3 Listener
 require("./workers/web3Listener.js");
 
 const app =
   express();
+
+// 1. Wrap Express inside the core HTTP server
+const server =
+  http.createServer(
+    app,
+  );
+
+// 2. Initialize Socket.io with CORS allowing your React frontend
+const io =
+  new Server(
+    server,
+    {
+      cors: {
+        origin:
+          "http://localhost:5173", // Change this if your React port is different
+        methods:
+          [
+            "GET",
+            "POST",
+          ],
+      },
+    },
+  );
 
 // Security & Middleware
 app.use(
@@ -36,6 +63,56 @@ app.use(
 );
 app.use(
   express.json(),
+);
+
+// 3. Make 'io' available inside all your controllers via 'req'
+app.use(
+  (
+    req,
+    res,
+    next,
+  ) => {
+    req.io =
+      io;
+    next();
+  },
+);
+
+// 4. Listen for live connections
+io.on(
+  "connection",
+  (
+    socket,
+  ) => {
+    console.log(
+      "🟢 User connected to WebSockets:",
+      socket.id,
+    );
+
+    // When a user opens a chat window, put them in a private "room" for that conversation
+    socket.on(
+      "join_chat",
+      (
+        conversationId,
+      ) => {
+        socket.join(
+          conversationId,
+        );
+        console.log(
+          `User joined conversation room: ${conversationId}`,
+        );
+      },
+    );
+
+    socket.on(
+      "disconnect",
+      () => {
+        console.log(
+          "🔴 User disconnected",
+        );
+      },
+    );
+  },
 );
 
 // Database Connection
@@ -127,7 +204,9 @@ const PORT =
     .env
     .PORT ||
   5000;
-app.listen(
+
+// THE FIX: Cleanly wrapping the listen callback to include the cron jobs
+server.listen(
   PORT,
   () => {
     console.log(

@@ -15,6 +15,7 @@ const {
 const fs = require("fs");
 const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
+const Conversation = require("../models/Conversation");
 
 
 
@@ -1392,20 +1393,21 @@ exports.getBookmarks = async (req, res) => {
   }
 };
 
-// GET /api/content/creator/:id
+ // GET /api/content/creator/:id
 exports.getCreatorPublicProfile = async (req, res) => {
   try {
     const creatorId = req.params.id;
     const viewerId = req.user._id;
     const viewerWallet = req.user.walletAddress ? req.user.walletAddress.toLowerCase() : null;
 
-    // 1. Fetch Creator WITH WALLET ADDRESS (Crucial for Web3 payments)
+    // 1. Fetch Creator
     const creator = await User.findById(creatorId)
       .select("username profileImage monetizationSettings walletAddress") 
       .lean();
 
     if (!creator) return res.status(404).json({ message: "Creator not found" });
 
+    // ⚠️ MENTOR NOTE: You MUST add pagination here eventually (.limit(20).skip(...))
     // 2. Fetch Creator's content
     const creatorContent = await Content.find({
       creator: creatorId,
@@ -1429,10 +1431,40 @@ exports.getCreatorPublicProfile = async (req, res) => {
       if (p.purchaseType === "PPV" && p.content) unlockedPPV.add(p.content.toString());
     });
 
-    const secureContent = [];
+    // ==========================================
+    // 3.5. NEW: FETCH CHAT BUBBLES
+    // ==========================================
+    // Note: Adapt this query based on where you actually store chat balances in your DB!
+    // If it's on the User model, query the User. If it's a separate model, query that.
+    const chatRecord =
+      await Conversation.findOne(
+        {
+          fan: viewerId,
+          creator:
+            creatorId,
+        },
+      )
+        .select(
+          "bubblesLeft",
+        )
+        .lean();
 
-    // 4. THE IRONCLAD BOUNCER 
-    for (const post of creatorContent) {
+    const chatBubblesLeft =
+      chatRecord
+        ? chatRecord.bubblesLeft
+        : 0;
+    const hasActiveChat =
+      chatBubblesLeft >
+      0;
+    // ==========================================
+
+
+    // 4. THE IRONCLAD BOUNCER (Optimized)
+    // ⚠️ MENTOR FIX: We use `Promise.all` with `.map` here. 
+    // Doing `await getSignedUrl` sequentially inside a `for...of` loop creates an "N+1" problem.
+    // If they have 50 posts, you were forcing the server to wait for S3 50 times in a row. 
+    // Promise.all processes them concurrently.
+    const secureContent = await Promise.all(creatorContent.map(async (post) => {
       const globalPPV = creator.monetizationSettings?.defaultPPVPrice || 0;
       const actualPrice = post.priceInUSDT !== null ? post.priceInUSDT : globalPPV;
 
@@ -1463,16 +1495,10 @@ exports.getCreatorPublicProfile = async (req, res) => {
       } else {
         // UNLOCK WITH PRIVATE URL
         try {
-          const command =
-            new GetObjectCommand(
-              {
-                Bucket:
-                  process
-                    .env
-                    .S3_BUCKET_NAME,
-                Key: post.fileKey,
-              },
-            );
+          const command = new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: post.fileKey,
+          });
           post.mediaUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
           post.isLocked = false;
         } catch (err) {
@@ -1484,18 +1510,21 @@ exports.getCreatorPublicProfile = async (req, res) => {
 
       const likesArray = post.likes || [];
 
-      secureContent.push({
+      return {
         ...post,
         actualPrice,
         isLiked: likesArray.some((id) => id.toString() === viewerId.toString()),
         likesCount: likesArray.length,
         commentsCount: post.comments ? post.comments.length : 0,
-      });
-    }
+      };
+    }));
 
+    // 5. RETURN NEW CHAT FIELDS TO FRONTEND
     res.status(200).json({
       creator,
       isSubscribed: hasActiveSub,
+      chatBubblesLeft, // <-- Added this
+      hasActiveChat,   // <-- Added this
       content: secureContent,
     });
   } catch (error) {

@@ -21,26 +21,26 @@ import FanDashboard from "./components/FanDashboard";
 import FanProfile from "./components/FanProfile";
 import FanSettings from "./components/FanSettings";
 import CreatorPublicProfile from "./components/CreatorPublicProfile";
+import CreatorFeed from "./components/CreatorFeed";
+import CreatorMessages from "./components/CreatorMessages";
 import FanInbox from "./components/FanInbox";
 import FanChatWindow from "./components/FanChatWindow";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 
-
-
-
-
-
-// Dummy components to prevent white-screen crashes on new fan routes
+// Dummy components to prevent white-screen crashes on new routes
 const Placeholder =
   ({
     title,
   }) => (
-    <div className="p-10 text-center text-gray-400 text-xl">
+    <div className="p-10 text-center text-gray-400 text-xl font-bold flex items-center justify-center h-full">
       {
         title
       }{" "}
-      coming
-      soon...
+      module
+      is
+      currently
+      under
+      construction.
     </div>
   );
 
@@ -55,7 +55,9 @@ function App() {
     >
       <Router>
         <Routes>
-          {/* PUBLIC & ONBOARDING ROUTES */}
+          {/* =========================================
+              PUBLIC & ONBOARDING ROUTES
+          ========================================= */}
           <Route
             path="/"
             element={
@@ -89,7 +91,9 @@ function App() {
             }
           />
 
-          {/* FAN ZONE */}
+          {/* =========================================
+              FAN ZONE (Rendered inside FanLayout)
+          ========================================= */}
           <Route
             element={
               <FanLayout />
@@ -102,7 +106,7 @@ function App() {
               }
             />
             <Route
-              path="messages"
+              path="/messages"
               element={
                 <FanInbox />
               }
@@ -124,8 +128,7 @@ function App() {
               element={
                 <FanProfile />
               }
-            />{" "}
-            {/* WIRED HERE */}
+            />
             <Route
               path="/fan/settings"
               element={
@@ -138,6 +141,8 @@ function App() {
                 <BookmarksFeed />
               }
             />
+
+            {/* The Black Hole: This must stay at the bottom of FanLayout routes */}
             <Route
               path="/creator/:id"
               element={
@@ -153,7 +158,9 @@ function App() {
             }
           />
 
-          {/* CREATOR ZONE */}
+          {/* =========================================
+              CREATOR ZONE (Rendered inside CreatorLayout)
+          ========================================= */}
           <Route
             element={
               <CreatorLayout />
@@ -166,15 +173,43 @@ function App() {
               }
             />
             <Route
+              path="/creator/vault"
+              element={
+                <CreatorVault />
+              }
+            />
+            <Route
               path="/creator/profile"
               element={
                 <CreatorProfile />
               }
             />
+
+            {/* NEW: Explicit routes to intercept the layout links and stop the crash */}
             <Route
-              path="/creator/vault"
+              path="/creator/feed"
               element={
-                <CreatorVault />
+                <CreatorFeed />
+              }
+            />
+            <Route
+              path="/creator/messages"
+              element={
+                <CreatorMessages />
+              }
+            />
+            <Route
+              path="/creator/notifications"
+              element={
+                <Placeholder title="Creator Alerts" />
+              }
+            />
+
+            {/* FUTURE: If you add settings, intercept it here too */}
+            <Route
+              path="/creator/settings"
+              element={
+                <Placeholder title="Creator Settings" />
               }
             />
           </Route>

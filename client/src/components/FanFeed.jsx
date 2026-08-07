@@ -2,7 +2,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import { ethers } from "ethers";
+import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import {
   Heart,
   MessageCircle,
@@ -11,15 +11,11 @@ import {
   Send,
   Lock,
   BadgeDollarSign,
+  Wallet,
+  CreditCard,
+  X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-
-const USDT_ABI =
-  [
-    "function transfer(address to, uint256 amount) returns (bool)",
-  ];
-const USDT_ADDRESS =
-  "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"; // Polygon Mainnet USDT
 
 const FanFeed =
   () => {
@@ -44,6 +40,10 @@ const FanFeed =
       useState(
         null,
       );
+    const {
+      transferUSDT,
+    } =
+      useWeb3Transfer();
 
     // Interaction States
     const [
@@ -67,6 +67,22 @@ const FanFeed =
       useState(
         false,
       );
+
+    // PAYMENT MODAL STATES
+    const [
+      paymentModalPost,
+      setPaymentModalPost,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      paymentMethod,
+      setPaymentMethod,
+    ] =
+      useState(
+        null,
+      ); // 'CRYPTO' | 'CARD'
 
     useEffect(() => {
       fetchFeed();
@@ -100,7 +116,6 @@ const FanFeed =
             throw new Error(
               "Failed to load feed from server",
             );
-
           const data =
             await response.json();
           setFeed(
@@ -118,13 +133,10 @@ const FanFeed =
         }
       };
 
-    // --- INTERACTION HANDLERS ---
-
     const handleLike =
       async (
         postId,
       ) => {
-        // 1. Optimistic UI Update (Instant visual feedback)
         setFeed(
           (
             prevFeed,
@@ -160,7 +172,6 @@ const FanFeed =
             ),
         );
 
-        // 2. Background Backend Request
         try {
           const token =
             localStorage.getItem(
@@ -181,7 +192,6 @@ const FanFeed =
           console.error(
             "Failed to sync like with server",
           );
-          // If you were being ruthless, you'd revert the UI state here if the fetch failed.
         }
       };
 
@@ -277,7 +287,6 @@ const FanFeed =
           const data =
             await response.json();
 
-          // Replace the optimistic comment with the real one from the server (which includes the DB _id and username)
           setFeed(
             (
               prevFeed,
@@ -308,10 +317,9 @@ const FanFeed =
                 },
               ),
           );
-
           setCommentText(
             "",
-          ); // Clear the input field
+          );
         } catch (error) {
           console.error(
             "Failed to post comment",
@@ -326,100 +334,69 @@ const FanFeed =
         }
       };
 
-    // --- PAYMENT HANDLER ---
-    const handleUnlock =
-      async (
-        post,
-      ) => {
+    // --- FINAL EXECUTION HANDLER ---
+    const executePayment =
+      async () => {
+        if (
+          !paymentModalPost ||
+          !paymentMethod
+        )
+          return;
+
+        if (
+          paymentMethod ===
+          "CARD"
+        ) {
+          alert(
+            "Paystack integration pending. Please use Web3 Crypto for now.",
+          );
+          return;
+        }
+
         try {
           setProcessingId(
-            post._id,
+            paymentModalPost._id,
           );
-
           if (
-            !window.ethereum
+            !paymentModalPost
+              .creator
+              ?.walletAddress
           ) {
-            alert(
-              "Please install MetaMask or another Web3 wallet.",
+            throw new Error(
+              "This creator has not set up their Web3 wallet address yet!",
             );
-            return;
           }
 
-          const provider =
-            new ethers.BrowserProvider(
-              window.ethereum,
-            );
-          const signer =
-            await provider.getSigner();
-          const usdtContract =
-            new ethers.Contract(
-              USDT_ADDRESS,
-              USDT_ABI,
-              signer,
-            );
-          const amountToPay =
-            ethers.parseUnits(
-              post.actualPrice.toString(),
-              6,
-            );
-
-          const tx =
-            await usdtContract.transfer(
-              post
+          const txHash =
+            await transferUSDT(
+              paymentModalPost
                 .creator
                 .walletAddress,
-              amountToPay,
-            );
-          await tx.wait();
-
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          const verifyResponse =
-            await fetch(
-              "http://localhost:5000/api/purchases/verify",
-              {
-                method:
-                  "POST",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    contentId:
-                      post._id,
-                    creatorId:
-                      post
-                        .creator
-                        ._id,
-                    txHash:
-                      tx.hash,
-                    purchaseType:
-                      "PPV",
-                  },
-                ),
-              },
+              paymentModalPost.actualPrice,
+              paymentModalPost._id,
             );
 
-          if (
-            !verifyResponse.ok
-          )
-            throw new Error(
-              "Backend verification failed.",
-            );
-
+          await new Promise(
+            (
+              resolve,
+            ) =>
+              setTimeout(
+                resolve,
+                3000,
+              ),
+          );
           await fetchFeed();
+          setPaymentModalPost(
+            null,
+          ); // Close modal on success
         } catch (error) {
           console.error(
-            "Purchase failed:",
+            "Unlock Error Trace:",
             error,
           );
           alert(
-            "Transaction failed or was rejected.",
+            error.message ||
+              "Transaction failed. Check browser console for details.",
           );
         } finally {
           setProcessingId(
@@ -432,7 +409,7 @@ const FanFeed =
       loading
     ) {
       return (
-        <div className="flex justify-center items-center h-64 text-nippy-coral animate-pulse">
+        <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse">
           Loading
           feed...
         </div>
@@ -440,7 +417,7 @@ const FanFeed =
     }
 
     return (
-      <div className="max-w-2xl mx-auto py-8 px-4">
+      <div className="max-w-2xl mx-auto py-8 px-4 relative">
         {feed.length ===
         0 ? (
           <p className="text-center text-gray-500 mt-10">
@@ -457,16 +434,14 @@ const FanFeed =
                 key={
                   post._id
                 }
-                className="mb-10 bg-nippy-obsidian border border-gray-800 rounded-2xl overflow-hidden shadow-xl"
+                className="mb-10 bg-nippy-obsidian/80 backdrop-blur-md border border-gray-800/60 rounded-2xl overflow-hidden shadow-xl"
               >
-                {/* UPDATED: Clickable Creator Header */}
                 <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
-                  {/* WRAPPED IN A LINK WITH HOVER EFFECTS */}
                   <Link
                     to={`/creator/${post.creator?._id}`}
                     className="flex items-center gap-3 group cursor-pointer"
                   >
-                    <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center overflow-hidden border border-gray-600 group-hover:border-nippy-coral transition-colors">
+                    <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center overflow-hidden border border-gray-600 group-hover:border-emerald-500 transition-colors">
                       <span className="font-bold text-gray-300 group-hover:text-white">
                         {post.creator?.username
                           ?.charAt(
@@ -477,7 +452,7 @@ const FanFeed =
                       </span>
                     </div>
                     <div>
-                      <div className="font-bold text-slate-200 group-hover:text-nippy-coral transition-colors">
+                      <div className="font-bold text-slate-200 group-hover:text-emerald-500 transition-colors">
                         {post
                           .creator
                           ?.username ||
@@ -491,9 +466,10 @@ const FanFeed =
                     </div>
                   </Link>
 
+                  {/* IRONCLAD UPDATE: Money tag is now Emerald */}
                   {post.actualPrice >
                     0 && (
-                    <div className="flex items-center gap-1 bg-nippy-coral/10 text-nippy-coral px-3 py-1 rounded-full border border-nippy-coral/20 text-xs font-bold">
+                    <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
                       <BadgeDollarSign
                         size={
                           14
@@ -504,84 +480,87 @@ const FanFeed =
                   )}
                 </div>
 
-                {/* Media Area */}
-                <div className="relative bg-black w-full min-h-[300px] flex items-center justify-center">
+                <div className="relative bg-black w-full min-h-[300px] max-h-[600px] flex items-center justify-center overflow-hidden">
                   {post.isLocked ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md p-6 text-center">
-                      <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mb-4 shadow-lg">
-                        <Lock
-                          size={
-                            28
-                          }
-                          className="text-nippy-coral"
-                        />
-                      </div>
-                      <h3 className="text-xl font-bold text-white mb-2">
-                        Exclusive
-                        Content
-                        Locked
-                      </h3>
-                      <p className="text-sm text-gray-400 mb-6 max-w-sm">
-                        {
-                          post.title
-                        }{" "}
-                        —
-                        Unlock
-                        to
-                        view
-                        this
-                        content
-                        and
-                        support
-                        the
-                        creator
-                        directly.
-                      </p>
-
-                      <button
-                        onClick={() =>
-                          handleUnlock(
-                            post,
-                          )
-                        }
-                        disabled={
-                          processingId ===
-                          post._id
-                        }
-                        className="bg-nippy-coral text-white px-8 py-3 rounded-full font-bold hover:bg-nippy-coralHover disabled:opacity-50 transition-all shadow-lg shadow-nippy-coral/20"
-                      >
-                        {processingId ===
-                        post._id
-                          ? "Confirming in Web3..."
-                          : `Unlock for $${post.actualPrice} USDT`}
-                      </button>
-                      <p className="text-xs text-gray-500 mt-4">
-                        Protected
-                        by
-                        30-Day
-                        Sunset
-                        Escrow
-                      </p>
-                    </div>
+                    <video
+                      src={
+                        post.teaserUrl
+                      }
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className="w-full h-auto max-h-[600px] object-cover blur-3xl scale-[1.2] opacity-70 pointer-events-none select-none"
+                    />
                   ) : (
                     <video
                       controls
                       className="w-full h-auto max-h-[600px] object-contain"
-                      src={`https://pub-${import.meta.env.VITE_CLOUDFLARE_R2_DEV_DOMAIN}.r2.dev/${post.fileKey}`}
-                    >
-                      Your
-                      browser
-                      does
-                      not
-                      support
-                      the
-                      video
-                      tag.
-                    </video>
+                      src={
+                        post.mediaUrl
+                      }
+                    />
+                  )}
+
+                  {post.isLocked && (
+                    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center z-10 p-6">
+                      <Lock className="w-12 h-12 text-white/70 mb-3" />
+                      <h3 className="text-2xl font-extrabold text-white mb-1 shadow-black drop-shadow-md">
+                        Content
+                        Locked
+                      </h3>
+                      <p className="text-gray-200 text-sm mb-6 font-medium drop-shadow-md text-center max-w-xs">
+                        Unlock
+                        this
+                        content
+                        to
+                        view
+                        the
+                        full
+                        resolution
+                        video.
+                      </p>
+
+                      <div className="flex flex-col gap-3 w-full max-w-xs">
+                        {/* IRONCLAD UPDATE: Neutral action button that opens checkout */}
+                        <button
+                          onClick={() => {
+                            setPaymentModalPost(
+                              post,
+                            );
+                            setPaymentMethod(
+                              null,
+                            );
+                          }}
+                          className="bg-white hover:bg-gray-200 text-black font-bold py-3 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg"
+                        >
+                          <BadgeDollarSign
+                            size={
+                              20
+                            }
+                          />
+                          Unlock
+                          for{" "}
+                          {
+                            post.actualPrice
+                          }{" "}
+                          USDT
+                        </button>
+
+                        {/* IRONCLAD UPDATE: Neutral Navigation button */}
+                        <Link
+                          to={`/creator/${post.creator?._id}`}
+                          className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-gray-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
+                        >
+                          Subscribe
+                          to
+                          Creator
+                        </Link>
+                      </div>
+                    </div>
                   )}
                 </div>
 
-                {/* Post Details & Action Bar */}
                 <div className="p-4">
                   <h2 className="text-lg font-bold text-slate-200 mb-1">
                     {
@@ -594,10 +573,9 @@ const FanFeed =
                     }
                   </p>
 
-                  {/* Action Bar */}
                   <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
                     <div className="flex items-center gap-6">
-                      {/* Like Button */}
+                      {/* Keep Heart Red - That is universally understood for 'Likes' */}
                       <button
                         onClick={() =>
                           handleLike(
@@ -610,7 +588,11 @@ const FanFeed =
                           size={
                             22
                           }
-                          className={`transition-all duration-200 ${post.isLiked ? "text-nippy-coral fill-current scale-110" : "text-gray-400 group-hover:text-nippy-coral"}`}
+                          className={`transition-all duration-200 ${
+                            post.isLiked
+                              ? "text-rose-500 fill-current scale-110"
+                              : "text-gray-400 group-hover:text-rose-500"
+                          }`}
                         />
                         <span className="text-sm text-gray-400 font-medium">
                           {post.likesCount ||
@@ -618,7 +600,6 @@ const FanFeed =
                         </span>
                       </button>
 
-                      {/* Comment Toggle Button */}
                       <button
                         onClick={() =>
                           setActiveCommentPostId(
@@ -642,7 +623,6 @@ const FanFeed =
                         </span>
                       </button>
 
-                      {/* Views Count (Read Only) */}
                       <div className="flex items-center gap-2 text-gray-500">
                         <Eye
                           size={
@@ -656,7 +636,6 @@ const FanFeed =
                       </div>
                     </div>
 
-                    {/* Bookmark Button */}
                     <button
                       onClick={() =>
                         handleBookmark(
@@ -679,11 +658,9 @@ const FanFeed =
                   </div>
                 </div>
 
-                {/* Inline Comment Box Dropdown */}
                 {activeCommentPostId ===
                   post._id && (
-                  <div className="bg-slate-900 border-t border-gray-800 p-4 animate-in slide-in-from-top-2">
-                    {/* Existing Comments List */}
+                  <div className="bg-slate-900/80 backdrop-blur-md border-t border-gray-800/60 p-4 animate-in slide-in-from-top-2">
                     <div className="max-h-48 overflow-y-auto mb-4 space-y-3 pr-2 scrollbar-thin scrollbar-thumb-gray-700">
                       {post.comments &&
                       post
@@ -727,7 +704,6 @@ const FanFeed =
                       )}
                     </div>
 
-                    {/* Comment Input Field */}
                     <div className="flex items-center gap-2 relative">
                       <input
                         type="text"
@@ -753,7 +729,7 @@ const FanFeed =
                             post._id,
                           )
                         }
-                        className="w-full bg-black border border-gray-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:outline-none focus:border-nippy-coral"
+                        className="w-full bg-black border border-gray-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:outline-none focus:border-emerald-500"
                       />
                       <button
                         onClick={() =>
@@ -765,7 +741,7 @@ const FanFeed =
                           submittingComment ||
                           !commentText.trim()
                         }
-                        className="absolute right-2 text-nippy-coral hover:text-white disabled:opacity-50 transition-colors p-1"
+                        className="absolute right-2 text-emerald-500 hover:text-emerald-400 disabled:opacity-50 transition-colors p-1"
                       >
                         <Send
                           size={
@@ -779,6 +755,153 @@ const FanFeed =
               </div>
             ),
           )
+        )}
+
+        {/* IRONCLAD UPDATE: The Checkout Modal */}
+        {paymentModalPost && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+              <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                <h3 className="text-lg font-bold text-white">
+                  Select
+                  Payment
+                  Method
+                </h3>
+                <button
+                  onClick={() =>
+                    setPaymentModalPost(
+                      null,
+                    )
+                  }
+                  className="text-gray-400 hover:text-white transition-colors"
+                  disabled={
+                    processingId ===
+                    paymentModalPost._id
+                  }
+                >
+                  <X
+                    size={
+                      24
+                    }
+                  />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-gray-400 text-center">
+                  You
+                  are
+                  unlocking
+                  content
+                  from{" "}
+                  <span className="text-white font-bold">
+                    {
+                      paymentModalPost
+                        .creator
+                        ?.username
+                    }
+                  </span>{" "}
+                  for{" "}
+                  <span className="text-emerald-500 font-bold">
+                    {
+                      paymentModalPost.actualPrice
+                    }{" "}
+                    USDT
+                  </span>
+                </p>
+
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <button
+                    onClick={() =>
+                      setPaymentMethod(
+                        "CRYPTO",
+                      )
+                    }
+                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
+                      paymentMethod ===
+                      "CRYPTO"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
+                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                    }`}
+                  >
+                    <Wallet
+                      size={
+                        28
+                      }
+                      className="mb-2"
+                    />
+                    <span className="font-bold text-sm">
+                      Crypto
+                    </span>
+                    <span className="text-[10px] opacity-70">
+                      MetaMask
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      setPaymentMethod(
+                        "CARD",
+                      )
+                    }
+                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
+                      paymentMethod ===
+                      "CARD"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
+                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                    }`}
+                  >
+                    <CreditCard
+                      size={
+                        28
+                      }
+                      className="mb-2"
+                    />
+                    <span className="font-bold text-sm">
+                      Card
+                    </span>
+                    <span className="text-[10px] opacity-70">
+                      Paystack
+                      /
+                      Fiat
+                    </span>
+                  </button>
+                </div>
+
+                {/* THE FINAL EXECUTION BUTTON - EMERALD GREEN */}
+                <button
+                  onClick={
+                    executePayment
+                  }
+                  disabled={
+                    !paymentMethod ||
+                    processingId ===
+                      paymentModalPost._id
+                  }
+                  className="w-full mt-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:hover:bg-emerald-500 shadow-lg shadow-emerald-500/20"
+                >
+                  {processingId ===
+                  paymentModalPost._id ? (
+                    <span className="animate-pulse">
+                      Processing...
+                    </span>
+                  ) : (
+                    <>
+                      <Lock
+                        size={
+                          18
+                        }
+                        className="opacity-70"
+                      />{" "}
+                      Confirm
+                      &
+                      Pay
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     );

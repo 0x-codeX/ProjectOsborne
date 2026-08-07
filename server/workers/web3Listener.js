@@ -35,11 +35,23 @@ async function processPurchaseEvent(
   txHash,
 ) {
   try {
-    // Decode the bytes32 back to the 24-character MongoDB ObjectId
+    // 1. Guard against Subscriptions
+    // If the ID is completely empty, it means this was a channel subscription, not a PPV.
+    if (
+      contentIdBytes32 ===
+      ethers.ZeroHash
+    ) {
+      console.log(
+        `[!] Subscription detected from ${buyer} | Tx: ${txHash}. Skipping PPV unlock.`,
+      );
+      // TODO: Route to your subscription unlocking logic here.
+      return;
+    }
+
+    // 2. Extract the actual Mongo ID from the RIGHT side of the padded string
     const extractedMongoId =
       contentIdBytes32.slice(
-        2,
-        26,
+        -24,
       );
 
     const filter =
@@ -79,6 +91,10 @@ async function processPurchaseEvent(
     ) {
       console.log(
         `[+] SUCCESS: Unlocked content ${extractedMongoId} for ${buyer} | Tx: ${txHash}`,
+      );
+    } else {
+      console.log(
+        `[!] WARNING: Valid transaction, but content ${extractedMongoId} not found or already unlocked.`,
       );
     }
   } catch (error) {

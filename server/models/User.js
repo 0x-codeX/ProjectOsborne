@@ -183,7 +183,7 @@ const userSchema =
           defaultPPVPrice:
             {
               type: Number,
-              default: 3.0,
+              default: 1.0,
               min: [
                 0,
                 "Price cannot be negative",
@@ -207,7 +207,34 @@ const userSchema =
                 "Price cannot be negative",
               ],
             },
-          threeMonthBundle:
+          // Dynamic Multi-Month Tier
+          multiMonthDuration:
+            {
+              type: Number,
+              enum: [
+                2,
+                3,
+              ],
+              default: 2,
+            },
+          multiMonthPrice:
+            {
+              type: Number,
+              default: 0,
+              min: [
+                0,
+                "Price cannot be negative",
+              ],
+            },
+
+          // Message Bundle Settings
+          messageBundleSize:
+            {
+              type: Number,
+              default: 5,
+              min: 5,
+            },
+          messageBundlePrice:
             {
               type: Number,
               default: 0,

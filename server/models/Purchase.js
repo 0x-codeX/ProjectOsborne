@@ -66,15 +66,15 @@ const purchaseSchema =
           type: Number,
           required: true,
         },
-      purchaseType:
-        {
-          type: String,
-          enum: [
-            "PPV",
-            "SUBSCRIPTION",
-          ],
-          required: true,
-        },
+      // purchaseType:
+      //   {
+      //     type: String,
+      //     enum: [
+      //       "PPV",
+      //       "SUBSCRIPTION",
+      //     ],
+      //     required: true,
+      //   },
       message:
         {
           type: mongoose
@@ -92,6 +92,7 @@ const purchaseSchema =
             "SUBSCRIPTION",
             "PPV",
             "DM_UNLOCK",
+            "CHAT_BUNDLE",
           ],
           required: true,
         },

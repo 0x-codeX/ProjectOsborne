@@ -436,8 +436,12 @@ exports.updateMonetizationSettings = async (req, res) => {
       defaultPPVPrice,
       weeklySubscription,
       monthlySubscription,
-      threeMonthBundle,
-    } = req.body;
+      multiMonthDuration,
+      multiMonthPrice,
+      messageBundleSize,
+      messageBundlePrice,
+    } =
+      req.body;
 
     // THE FIX: Safely extract ID
     const userId = req.user._id || req.user.id;
@@ -446,25 +450,61 @@ exports.updateMonetizationSettings = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized: No user ID in token." });
     }
 
-    const user = await User.findByIdAndUpdate(
-      userId,
-      {
-        $set: {
-          monetizationSettings: {
-            defaultPPVPrice: Number(defaultPPVPrice) || 0,
-            weeklySubscription: Number(weeklySubscription) || 0,
-            monthlySubscription: Number(monthlySubscription) || 0,
-            threeMonthBundle: Number(threeMonthBundle) || 0,
+    const user =
+      await User.findByIdAndUpdate(
+        userId,
+        {
+          $set: {
+            monetizationSettings:
+              {
+                defaultPPVPrice:
+                  Number(
+                    defaultPPVPrice,
+                  ) ||
+                  0,
+                weeklySubscription:
+                  Number(
+                    weeklySubscription,
+                  ) ||
+                  0,
+                monthlySubscription:
+                  Number(
+                    monthlySubscription,
+                  ) ||
+                  0,
+                multiMonthDuration:
+                  Number(
+                    multiMonthDuration,
+                  ) ||
+                  3,
+                multiMonthPrice:
+                  Number(
+                    multiMonthPrice,
+                  ) ||
+                  0,
+                messageBundleSize:
+                  Number(
+                    messageBundleSize,
+                  ) ||
+                  5,
+                messageBundlePrice:
+                  Number(
+                    messageBundlePrice,
+                  ) ||
+                  0,
+              },
           },
         },
-      },
-      {
-        returnDocument: 'after', // THE FIX: Silences Mongoose deprecation warnings
-        runValidators: true,
-        // Removed upsert: true because $set on an existing user document works perfectly without it, 
-        // and upserting a completely missing user document based just on an ID is dangerous here.
-      }
-    ).select("monetizationSettings");
+        {
+          returnDocument:
+            "after", // THE FIX: Silences Mongoose deprecation warnings
+          runValidators: true,
+          // Removed upsert: true because $set on an existing user document works perfectly without it,
+          // and upserting a completely missing user document based just on an ID is dangerous here.
+        },
+      ).select(
+        "monetizationSettings",
+      );
 
     if (!user) {
       return res.status(404).json({ message: "User not found." });

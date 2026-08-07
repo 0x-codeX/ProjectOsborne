@@ -42,274 +42,451 @@ const s3Client =
     },
   );
 
-// @desc    Send a message (Enforces 24-hr PPV rule & Subscriptions)
+// @desc    Send a message (Enforces Bundles, 24-hr PPV rule & Subscriptions)
 // @route   POST /api/messages/send
-exports.sendMessage =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const senderId =
-        req
-          .user
-          ._id ||
-        req
-          .user
-          .id;
-      const {
-        receiverId,
-        text,
-        fileKey,
-        fileType,
-        priceInUSDT,
-      } =
-        req.body;
+exports.sendMessage = async (req, res) => {
+  try {
+    const senderId =
+      req
+        .user
+        ._id ||
+      req
+        .user
+        .id;
+    const {
+      receiverId,
+      text,
+      fileKey,
+      fileType,
+      priceInUSDT,
+    } =
+      req.body;
 
-      if (
-        !receiverId
-      ) {
-        return res
-          .status(
-            400,
-          )
-          .json(
-            {
-              message:
-                "Receiver ID is required.",
-            },
-          );
-      }
-
-      if (
-        !text &&
-        !fileKey
-      ) {
-        return res
-          .status(
-            400,
-          )
-          .json(
-            {
-              message:
-                "Message cannot be empty.",
-            },
-          );
-      }
-
-      const sender =
-        await User.findById(
-          senderId,
-        );
-      const receiver =
-        await User.findById(
-          receiverId,
-        );
-
-      if (
-        !sender ||
-        !receiver
-      ) {
-        return res
-          .status(
-            404,
-          )
-          .json(
-            {
-              message:
-                "User not found.",
-            },
-          );
-      }
-
-      let creatorId,
-        fanId;
-
-      // --- THE GATEKEEPER ---
-      // If the sender is a fan, they must pass the authorization check.
-      if (
-        sender.role ===
-        "fan"
-      ) {
-        creatorId =
-          receiverId;
-        fanId =
-          senderId;
-
-        const now =
-          new Date();
-        const twentyFourHoursAgo =
-          new Date(
-            now.getTime() -
-              24 *
-                60 *
-                60 *
-                1000,
-          );
-
-        // We run ONE highly optimized query to check both conditions simultaneously
-        const validAccess =
-          await Purchase.findOne(
-            {
-              user: fanId,
-              creator:
-                creatorId,
-              status:
-                "completed",
-              $or: [
-                // Condition 1: Active Subscription (Expires in the future)
-                {
-                  purchaseType:
-                    "SUBSCRIPTION",
-                  expiresAt:
-                    {
-                      $gt: now,
-                    },
-                },
-                // Condition 2: PPV bought within the last 24 hours
-                {
-                  purchaseType:
-                    "PPV",
-                  createdAt:
-                    {
-                      $gt: twentyFourHoursAgo,
-                    },
-                },
-              ],
-            },
-          );
-
-        if (
-          !validAccess
-        ) {
-          return res
-            .status(
-              403,
-            )
-            .json(
-              {
-                message:
-                  "Access Denied. You must have an active subscription or have purchased a PPV in the last 24 hours to message this creator.",
-                requiresPurchase: true,
-              },
-            );
-        }
-      } else {
-        // If the sender is the creator, they can always message their fans
-        creatorId =
-          senderId;
-        fanId =
-          receiverId;
-      }
-
-      // 1. Find or Create the Conversation
-      let conversation =
-        await Conversation.findOne(
-          {
-            participants:
-              {
-                $all: [
-                  senderId,
-                  receiverId,
-                ],
-              },
-          },
-        );
-
-      if (
-        !conversation
-      ) {
-        conversation =
-          await Conversation.create(
-            {
-              participants:
-                [
-                  senderId,
-                  receiverId,
-                ],
-              creator:
-                creatorId,
-              fan: fanId,
-            },
-          );
-      }
-
-      // 2. Create the Message
-      const isLockedPPV =
-        sender.role ===
-          "creator" &&
-        priceInUSDT >
-          0;
-
-      const message =
-        await Message.create(
-          {
-            conversationId:
-              conversation._id,
-            sender:
-              senderId,
-            receiver:
-              receiverId,
-            text:
-              text ||
-              "",
-            fileKey:
-              fileKey ||
-              null,
-            fileType:
-              fileType ||
-              null,
-            priceInUSDT:
-              isLockedPPV
-                ? priceInUSDT
-                : 0,
-          },
-        );
-
-      // 3. Update Conversation's Last Message for the Inbox view
-      conversation.lastMessage =
-        {
-          text: isLockedPPV
-            ? "🔒 Locked Message"
-            : text ||
-              "📸 Media attachment",
-          sender:
-            senderId,
-          createdAt:
-            message.createdAt,
-          isLockedPPV:
-            isLockedPPV,
-        };
-      await conversation.save();
-
-      res
+    if (
+      !receiverId
+    ) {
+      return res
         .status(
-          201,
+          400,
         )
         .json(
           {
             message:
-              "Message sent successfully",
-            data: message,
-          },
-        );
-    } catch (error) {
-      console.error(
-        "SendMessage Error:",
-        error,
-      );
-      res
-        .status(
-          500,
-        )
-        .json(
-          {
-            message:
-              "Server error sending message.",
+              "Receiver ID is required.",
           },
         );
     }
-  };
+
+    if (
+      !text &&
+      !fileKey
+    ) {
+      return res
+        .status(
+          400,
+        )
+        .json(
+          {
+            message:
+              "Message cannot be empty.",
+          },
+        );
+    }
+
+    const sender =
+      await User.findById(
+        senderId,
+      );
+    const receiver =
+      await User.findById(
+        receiverId,
+      );
+
+    if (
+      !sender ||
+      !receiver
+    ) {
+      return res
+        .status(
+          404,
+        )
+        .json(
+          {
+            message:
+              "User not found.",
+          },
+        );
+    }
+
+    let creatorId,
+      fanId;
+
+    // Determine Roles
+    if (
+      sender.role ===
+      "fan"
+    ) {
+      creatorId =
+        receiverId;
+      fanId =
+        senderId;
+    } else {
+      creatorId =
+        senderId;
+      fanId =
+        receiverId;
+    }
+
+    // 1. Find the Conversation First (Needed to check bubbles)
+    let conversation =
+      await Conversation.findOne(
+        {
+          participants:
+            {
+              $all: [
+                senderId,
+                receiverId,
+              ],
+            },
+        },
+      );
+
+    // --- THE GATEKEEPER (FAN BUSINESS RULES) ---
+    if (
+      sender.role ===
+      "fan"
+    ) {
+      // Rule A: 200 Character Limit
+      if (
+        text &&
+        text.length >
+          200
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Fan messages are limited to 200 characters to prevent spam.",
+            },
+          );
+      }
+
+      // Rule B: Fans CANNOT send attachments or media files
+      if (
+        fileKey ||
+        fileType
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Fans are restricted to text-only messages.",
+            },
+          );
+      }
+
+      // Rule C: Check Bubble Balance
+      if (
+        !conversation ||
+        conversation.bubblesLeft <=
+          0
+      ) {
+        return res
+          .status(
+            402,
+          )
+          .json(
+            {
+              message:
+                "Message bundle exhausted. Purchase a new bundle to keep chatting.",
+              requiresBundle: true,
+            },
+          );
+      }
+
+      // Rule D: Maintain existing 24-hr PPV / Sub check, but ADD 'MESSAGE_BUNDLE' as valid access
+      const now =
+        new Date();
+      const twentyFourHoursAgo =
+        new Date(
+          now.getTime() -
+            24 *
+              60 *
+              60 *
+              1000,
+        );
+
+      const validAccess =
+        await Purchase.findOne(
+          {
+            user: fanId,
+            creator:
+              creatorId,
+            status:
+              "completed",
+            $or: [
+              {
+                purchaseType:
+                  "SUBSCRIPTION",
+                expiresAt:
+                  {
+                    $gt: now,
+                  },
+              },
+              {
+                purchaseType:
+                  "PPV",
+                createdAt:
+                  {
+                    $gt: twentyFourHoursAgo,
+                  },
+              },
+              {
+                purchaseType:
+                  {
+                    $in: [
+                      "CHAT_BUNDLE",
+                      "MESSAGE_BUNDLE",
+                    ],
+                  },
+              }, // If they bought a bundle, they are authorized!
+            ],
+          },
+        );
+
+      if (
+        !validAccess
+      ) {
+        return res
+          .status(
+            403,
+          )
+          .json(
+            {
+              message:
+                "Access Denied. You must have an active subscription, purchased a PPV in the last 24 hours, or a Chat Bundle.",
+              requiresPurchase: true,
+            },
+          );
+      }
+    }
+    // --- CREATOR BUSINESS RULES ---
+    else if (
+      sender.role ===
+      "creator"
+    ) {
+      // Creators cannot send raw free images/videos (must be PPV or Voice Note)
+      if (
+        fileKey &&
+        priceInUSDT ===
+          0 &&
+        !fileType?.includes(
+          "audio",
+        )
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Raw image/video uploads are disabled. Lock media as PPV before sending.",
+            },
+          );
+      }
+    }
+
+    // 2. Create the Conversation if it doesn't exist (e.g. Creator initiates)
+    if (
+      !conversation
+    ) {
+      conversation =
+        await Conversation.create(
+          {
+            participants:
+              [
+                senderId,
+                receiverId,
+              ],
+            creator:
+              creatorId,
+            fan: fanId,
+            bubblesLeft: 0,
+          },
+        );
+    }
+
+    // 3. Create the Message
+    const isLockedPPV =
+      sender.role ===
+        "creator" &&
+      priceInUSDT >
+        0;
+
+    const message =
+      await Message.create(
+        {
+          conversationId:
+            conversation._id,
+          sender:
+            senderId,
+          receiver:
+            receiverId,
+          text:
+            text ||
+            "",
+          fileKey:
+            fileKey ||
+            null,
+          fileType:
+            fileType ||
+            null,
+          priceInUSDT:
+            isLockedPPV
+              ? priceInUSDT
+              : 0,
+        },
+      );
+
+    // 4. Atomically Update Conversation Last Message & Deduct Bubble
+    const updatePayload =
+      {
+        $set: {
+          lastMessage:
+            {
+              text: isLockedPPV
+                ? "🔒 Locked Message"
+                : text ||
+                  "📸 Media attachment",
+              sender:
+                senderId,
+              createdAt:
+                message.createdAt,
+              isLockedPPV:
+                isLockedPPV,
+            },
+        },
+      };
+
+    // If a fan sends a message, deduct 1 bubble atomically
+    if (
+      sender.role ===
+      "fan"
+    ) {
+      updatePayload.$inc =
+        {
+          bubblesLeft:
+            -1,
+        };
+    }
+
+    const updatedConversation =
+      await Conversation.findByIdAndUpdate(
+        conversation._id,
+        updatePayload,
+        {
+          new: true,
+        },
+      );
+
+    // BLAST MESSAGE TO THE SOCKET ROOM ---
+    req.io
+      .to(
+        conversation._id.toString(),
+      )
+      .emit(
+        "receive_message",
+        message,
+      );
+
+    res
+      .status(
+        201,
+      )
+      .json(
+        {
+          message:
+            "Message sent successfully",
+          data: message,
+          bubblesLeft:
+            updatedConversation.bubblesLeft,
+        },
+      );
+  } catch (error) {
+    console.error("SendMessage Error:", error);
+    res.status(500).json({ message: "Server error sending message." });
+  }
+};
+
+
+// @desc    Verify crypto payment and credit message bubbles
+// @route   POST /api/messages/buy-bundle
+// @access  Private (Fan)
+exports.buyMessageBundle = async (req, res) => {
+  try {
+    const { creatorId, txHash, amountPaid } = req.body;
+    const fanId = req.user._id || req.user.id;
+
+    // 1. Fetch Creator's monetization settings to know bundle size
+    const creator = await User.findById(creatorId);
+    if (!creator || creator.role !== "creator") {
+      return res.status(404).json({ message: "Creator not found" });
+    }
+
+    // Get the bundle size from settings, default to 5 if not set
+    const bundleSize = creator.monetizationSettings?.messageBundleSize || 5;
+
+    // 2. Record Purchase (Prevent Replay Attacks via unique txHash)
+    const purchase = new Purchase({
+      user: fanId,
+      creator: creatorId,
+      txHash,
+      amountPaid,
+      purchaseType: "MESSAGE_BUNDLE",
+      status: "completed",
+    });
+
+    await purchase.save();
+
+    // 3. Find or Create Conversation & Credit Bubbles
+    let conversation = await Conversation.findOne({ creator: creatorId, fan: fanId });
+
+    if (!conversation) {
+      conversation = new Conversation({
+        participants: [creatorId, fanId],
+        creator: creatorId,
+        fan: fanId,
+        bubblesLeft: bundleSize,
+        lifetimeValue: amountPaid,
+      });
+    } else {
+      conversation.bubblesLeft += bundleSize;
+      conversation.lifetimeValue += amountPaid;
+    }
+
+    await conversation.save();
+
+    return res.status(200).json({
+      success: true,
+      bubblesLeft: conversation.bubblesLeft,
+      conversationId: conversation._id,
+    });
+  } catch (error) {
+    // 11000 is the MongoDB duplicate key error (meaning txHash was already used)
+    if (error.code === 11000) {
+      return res.status(400).json({ message: "Transaction hash already processed." });
+    }
+    console.error("Bundle Purchase Error:", error);
+    return res.status(500).json({ message: "Failed to process message bundle purchase." });
+  }
+};
 
 // @desc    Get User's Inbox (List of Conversations)
 // @route   GET /api/messages/inbox
@@ -366,12 +543,8 @@ exports.getInbox =
                 : conv.creator;
 
             return {
-              _id: conv._id,
+              ...conv, // THE FIX: This preserves conv.creator and conv.fan for the frontend!
               otherUser,
-              lastMessage:
-                conv.lastMessage,
-              updatedAt:
-                conv.updatedAt,
             };
           },
         );
@@ -403,103 +576,46 @@ exports.getInbox =
 
 // @desc    Get Messages for a specific Conversation
 // @route   GET /api/messages/:conversationId
-exports.getMessages =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const userId =
-        req
-          .user
-          ._id ||
-        req
-          .user
-          .id;
-      const {
-        conversationId,
-      } =
-        req.params;
+exports.getMessages = async (req, res) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const { conversationId } = req.params;
 
-      // 1. Verify the user is actually part of this conversation (Security)
-      const conversation =
-        await Conversation.findById(
-          conversationId,
-        );
-      if (
-        !conversation
-      ) {
-        return res
-          .status(
-            404,
-          )
-          .json(
-            {
-              message:
-                "Conversation not found.",
-            },
-          );
-      }
+    // 1. Fetch conversation AND populate the creator's details for the UI
+    const conversation = await Conversation.findById(conversationId)
+      .populate("creator", "username profileImage walletAddress monetizationSettings")
+      .lean();
 
-      if (
-        !conversation.participants.includes(
-          userId,
-        )
-      ) {
-        return res
-          .status(
-            403,
-          )
-          .json(
-            {
-              message:
-                "Unauthorized to view these messages.",
-            },
-          );
-      }
-
-      // 2. Fetch the messages in chronological order
-      const messages =
-        await Message.find(
-          {
-            conversationId,
-          },
-        )
-          .sort(
-            {
-              createdAt: 1,
-            },
-          )
-          .lean();
-
-      // NOTE: If a message is a PPV message, your frontend will need to verify
-      // if the user has purchased it before showing the clear Cloudflare URL.
-      // We will build that unlock route next.
-
-      res
-        .status(
-          200,
-        )
-        .json(
-          messages,
-        );
-    } catch (error) {
-      console.error(
-        "GetMessages Error:",
-        error,
-      );
-      res
-        .status(
-          500,
-        )
-        .json(
-          {
-            message:
-              "Server error fetching messages.",
-          },
-        );
+    if (!conversation) {
+      return res.status(404).json({ message: "Conversation not found." });
     }
-  };
+
+    // Security: Check if user is in the participants array. 
+    // We use .some() and .toString() because MongoDB ObjectIds can fail standard array .includes() checks.
+    const isParticipant = conversation.participants.some(
+      (participant) => participant.toString() === userId.toString()
+    );
+
+    if (!isParticipant) {
+      return res.status(403).json({ message: "Unauthorized to view these messages." });
+    }
+
+    // 2. Fetch the messages in chronological order
+    const messages = await Message.find({ conversationId })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    // 3. Return BOTH the populated conversation AND the messages
+    res.status(200).json({
+      conversation,
+      messages
+    });
+    
+  } catch (error) {
+    console.error("GetMessages Error:", error);
+    res.status(500).json({ message: "Server error fetching messages." });
+  }
+};
 
 // @desc    Verify USDT payment for a locked DM and grant access
 // @route   POST /api/messages/unlock

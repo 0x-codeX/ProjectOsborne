@@ -180,7 +180,7 @@ const FanProfile =
       loading
     ) {
       return (
-        <div className="flex justify-center items-center h-64 text-nippy-coral animate-pulse">
+        <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse">
           Loading
           profile...
         </div>
@@ -189,7 +189,6 @@ const FanProfile =
 
     return (
       <div className="w-full max-w-2xl mx-auto pb-20 md:pb-0">
-        {/* 1. MOBILE-ONLY HEADER (Sticky) */}
         <div className="md:hidden flex justify-between items-center p-4 bg-nippy-obsidian/90 backdrop-blur-md sticky top-0 z-40 border-b border-gray-800">
           <Link
             to="/fan/dashboard"
@@ -216,7 +215,6 @@ const FanProfile =
           </Link>
         </div>
 
-        {/* 2. DESKTOP-ONLY SETTINGS GEAR (Fallback) */}
         <div className="hidden md:flex justify-end pt-6 px-4">
           <Link
             to="/fan/settings"
@@ -226,19 +224,18 @@ const FanProfile =
               size={
                 16
               }
-            />
+            />{" "}
             Settings
           </Link>
         </div>
 
         <div className="px-4 py-4 md:py-2">
-          {/* 3. DESKTOP-ONLY LARGE HEADER (Hidden on mobile so it doesn't double up with the sticky header) */}
           <div className="hidden md:flex items-center gap-3 mb-8 border-b border-gray-800 pb-4">
             <User
               size={
                 28
               }
-              className="text-nippy-coral"
+              className="text-emerald-500"
             />
             <h1 className="text-2xl font-bold text-slate-200">
               Your
@@ -247,7 +244,6 @@ const FanProfile =
           </div>
 
           <div className="bg-nippy-obsidian border border-gray-800 rounded-2xl p-6 shadow-xl">
-            {/* Avatar Section */}
             <div className="flex flex-col items-center mb-8">
               <div className="relative group cursor-pointer">
                 <div className="w-24 h-24 bg-gray-800 rounded-full flex items-center justify-center border-2 border-gray-700 overflow-hidden shadow-lg">
@@ -293,7 +289,6 @@ const FanProfile =
               }
               className="space-y-6"
             >
-              {/* Username */}
               <div>
                 <label className="block text-sm font-bold text-gray-400 mb-2">
                   Username
@@ -317,13 +312,12 @@ const FanProfile =
                       },
                     )
                   }
-                  className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
+                  className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 transition-colors"
                   placeholder="e.g., Web3Whale"
                   required
                 />
               </div>
 
-              {/* Read-Only Web3 Wallet Section */}
               <div className="bg-black/50 border border-gray-800 rounded-xl p-4 flex items-center justify-between">
                 <div>
                   <label className="block text-sm font-bold text-gray-400 mb-1 flex items-center gap-2">
@@ -354,7 +348,6 @@ const FanProfile =
                 )}
               </div>
 
-              {/* Read-Only Email Warning */}
               <p className="text-xs text-gray-500 flex items-center gap-2 bg-gray-900/50 p-3 rounded-lg">
                 <ShieldCheck
                   size={
@@ -382,7 +375,7 @@ const FanProfile =
                 disabled={
                   saving
                 }
-                className="w-full bg-nippy-coral text-white font-bold py-3 rounded-xl hover:bg-nippy-coralHover transition-all flex justify-center items-center gap-2 disabled:opacity-50"
+                className="w-full bg-emerald-500 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 transition-all flex justify-center items-center gap-2 disabled:opacity-50"
               >
                 {saving ? (
                   <Loader2
@@ -404,7 +397,7 @@ const FanProfile =
               </button>
 
               {successMessage && (
-                <p className="text-green-400 text-center text-sm font-bold mt-2 animate-in fade-in">
+                <p className="text-emerald-400 text-center text-sm font-bold mt-2 animate-in fade-in">
                   {
                     successMessage
                   }

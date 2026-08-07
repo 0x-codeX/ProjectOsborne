@@ -36,7 +36,7 @@ const FanDashboard =
     ] =
       useState(
         "SUBSCRIPTIONS",
-      ); // or "PPV"
+      );
 
     useEffect(() => {
       fetchDashboardData();
@@ -85,7 +85,7 @@ const FanDashboard =
       loading
     ) {
       return (
-        <div className="flex justify-center items-center h-64 text-nippy-coral animate-pulse">
+        <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse">
           Loading
           dashboard...
         </div>
@@ -100,7 +100,7 @@ const FanDashboard =
             size={
               28
             }
-            className="text-nippy-coral"
+            className="text-emerald-500"
           />
           <h1 className="text-2xl font-bold text-slate-200">
             Your
@@ -119,7 +119,7 @@ const FanDashboard =
             className={`flex-1 py-3 font-bold rounded-xl flex items-center justify-center gap-2 transition-all ${
               activeTab ===
               "SUBSCRIPTIONS"
-                ? "bg-gray-800 text-nippy-coral shadow-lg border border-gray-700"
+                ? "bg-gray-800 text-emerald-500 shadow-lg border border-gray-700"
                 : "bg-nippy-obsidian text-gray-500 hover:bg-gray-900 border border-transparent"
             }`}
           >
@@ -140,7 +140,7 @@ const FanDashboard =
             className={`flex-1 py-3 font-bold rounded-xl flex items-center justify-center gap-2 transition-all ${
               activeTab ===
               "PPV"
-                ? "bg-gray-800 text-nippy-coral shadow-lg border border-gray-700"
+                ? "bg-gray-800 text-emerald-500 shadow-lg border border-gray-700"
                 : "bg-nippy-obsidian text-gray-500 hover:bg-gray-900 border border-transparent"
             }`}
           >
@@ -204,10 +204,6 @@ const FanDashboard =
                         </p>
                       </div>
                     </div>
-                    {/* 
-                  NOTE: When you build the Creator Profile view for fans, 
-                  you will change this Link to point to `/creator/${sub.creator._id}` 
-                */}
                     <Link
                       to={`/creator/${sub.creator._id}`}
                       className="flex items-center gap-1 text-sm font-medium text-gray-400 hover:text-white transition-colors"
@@ -254,7 +250,6 @@ const FanDashboard =
                     className="bg-nippy-obsidian border border-gray-800 rounded-xl overflow-hidden shadow-md flex flex-col"
                   >
                     <div className="bg-black aspect-video flex items-center justify-center">
-                      {/* Render the unlocked video */}
                       <video
                         controls
                         className="w-full h-full object-contain"
@@ -281,7 +276,7 @@ const FanDashboard =
                           }
                         </p>
                       </div>
-                      <div className="text-xs font-medium bg-nippy-coral/10 text-nippy-coral inline-block px-3 py-1 rounded-full self-start">
+                      <div className="text-xs font-medium bg-emerald-500/10 text-emerald-500 inline-block px-3 py-1 rounded-full self-start border border-emerald-500/20">
                         Purchased
                         on{" "}
                         {new Date(

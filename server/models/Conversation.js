@@ -31,6 +31,16 @@ const conversationSchema =
         ref: "User",
         required: true,
       },
+      bubblesLeft:
+        {
+          type: Number,
+          default: 0,
+        },
+      lifetimeValue:
+        {
+          type: Number,
+          default: 0,
+        }, // This feeds the "LTV: $450" metric we built in the UI!
 
       // We cache the last message here so the Inbox UI loads blazingly fast
       lastMessage:
@@ -86,5 +96,3 @@ module.exports =
     "Conversation",
     conversationSchema,
   );
-
-  

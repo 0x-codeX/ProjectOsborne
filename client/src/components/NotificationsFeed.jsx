@@ -58,7 +58,6 @@ const NotificationsFeed =
               data,
             );
 
-            // If there are unread notifications, mark them as read in the background
             if (
               data.some(
                 (
@@ -123,7 +122,7 @@ const NotificationsFeed =
                 size={
                   20
                 }
-                className="text-nippy-coral"
+                className="text-red-500"
               />
             );
           case "SUBSCRIPTION_RENEWAL":
@@ -132,7 +131,7 @@ const NotificationsFeed =
                 size={
                   20
                 }
-                className="text-green-400"
+                className="text-emerald-400"
               />
             );
           case "RECOMMENDATION":
@@ -160,7 +159,7 @@ const NotificationsFeed =
       loading
     ) {
       return (
-        <div className="flex justify-center items-center h-64 text-nippy-coral animate-pulse">
+        <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse">
           Loading
           alerts...
         </div>
@@ -207,14 +206,12 @@ const NotificationsFeed =
                       : "bg-gray-800/50 border-gray-700 shadow-lg shadow-black/20"
                   }`}
                 >
-                  {/* Icon Container */}
                   <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center shrink-0 border border-gray-800">
                     {getIconForType(
                       notif.type,
                     )}
                   </div>
 
-                  {/* Content */}
                   <div className="flex-1">
                     <h3
                       className={`text-sm font-bold ${notif.isRead ? "text-gray-300" : "text-white"}`}
@@ -246,9 +243,8 @@ const NotificationsFeed =
                     </span>
                   </div>
 
-                  {/* Unread dot */}
                   {!notif.isRead && (
-                    <div className="w-2 h-2 rounded-full bg-nippy-coral shrink-0 mt-2" />
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 mt-2" />
                   )}
                 </div>
               ),

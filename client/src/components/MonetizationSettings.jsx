@@ -7,9 +7,9 @@ import {
   Settings,
   Loader2,
   Save,
-  CheckCircle,
   AlertCircle,
   Edit3,
+  MessageSquare,
 } from "lucide-react";
 
 const MonetizationSettings =
@@ -23,7 +23,10 @@ const MonetizationSettings =
           defaultPPVPrice: 0,
           weeklySubscription: 0,
           monthlySubscription: 0,
-          threeMonthBundle: 0,
+          multiMonthDuration: 3,
+          multiMonthPrice: 0,
+          messageBundleSize: 5,
+          messageBundlePrice: 0,
         },
       );
 
@@ -33,7 +36,7 @@ const MonetizationSettings =
     ] =
       useState(
         "loading",
-      ); // loading, idle, saving, error
+      );
     const [
       message,
       setMessage,
@@ -47,13 +50,12 @@ const MonetizationSettings =
     ] =
       useState(
         false,
-      ); // Controls View vs Edit mode
+      );
 
     useEffect(() => {
       const fetchSettings =
         async () => {
           try {
-            // 1. Grab the isolated token directly
             const token =
               localStorage.getItem(
                 "nippy_token",
@@ -61,7 +63,6 @@ const MonetizationSettings =
               localStorage.getItem(
                 "token",
               );
-
             if (
               !token
             ) {
@@ -80,7 +81,7 @@ const MonetizationSettings =
                 {
                   headers:
                     {
-                      Authorization: `Bearer ${token}`, // 2. Use isolated token
+                      Authorization: `Bearer ${token}`,
                     },
                 },
               );
@@ -105,10 +106,28 @@ const MonetizationSettings =
                       .data
                       .monthlySubscription ||
                     0,
-                  threeMonthBundle:
+                  multiMonthDuration:
+                    res
+                      .data
+                      .multiMonthDuration ||
+                    3,
+                  multiMonthPrice:
+                    res
+                      .data
+                      .multiMonthPrice ||
                     res
                       .data
                       .threeMonthBundle ||
+                    0,
+                  messageBundleSize:
+                    res
+                      .data
+                      .messageBundleSize ||
+                    5,
+                  messageBundlePrice:
+                    res
+                      .data
+                      .messageBundlePrice ||
                     0,
                 },
               );
@@ -184,8 +203,24 @@ const MonetizationSettings =
           "",
         );
 
+        // NEW VALIDATION: Must be 5 or higher, and perfectly divisible by 5
+        if (
+          settings.messageBundleSize <
+            5 ||
+          settings.messageBundleSize %
+            5 !==
+            0
+        ) {
+          setStatus(
+            "error",
+          );
+          setMessage(
+            "Message bundles must be in multiples of 5 (5, 10, 15, 20...).",
+          );
+          return;
+        }
+
         try {
-          // 1. Grab the isolated token
           const token =
             localStorage.getItem(
               "nippy_token",
@@ -193,22 +228,13 @@ const MonetizationSettings =
             localStorage.getItem(
               "token",
             );
-
-          if (
-            !token
-          ) {
-            throw new Error(
-              "Authentication missing. Please log in again.",
-            );
-          }
-
           await axios.put(
             "/api/users/settings/monetization",
             settings,
             {
               headers:
                 {
-                  Authorization: `Bearer ${token}`, // 2. Use isolated token
+                  Authorization: `Bearer ${token}`,
                 },
             },
           );
@@ -220,10 +246,6 @@ const MonetizationSettings =
             false,
           );
         } catch (error) {
-          console.error(
-            "Save failed:",
-            error,
-          );
           setStatus(
             "error",
           );
@@ -263,15 +285,15 @@ const MonetizationSettings =
               </h2>
               <p className="text-sm text-slate-400">
                 Account-level
-                subscription
+                subscription,
+                PPV,
                 and
-                PPV
+                Chat
                 defaults.
               </p>
             </div>
           </div>
 
-          {/* Edit Button - Only shows when NOT editing */}
           {!isEditing && (
             <button
               onClick={() =>
@@ -291,7 +313,7 @@ const MonetizationSettings =
         {status ===
           "error" && (
           <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center text-red-400">
-            <AlertCircle className="w-5 h-5 mr-2" />
+            <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0" />
             {
               message
             }
@@ -300,7 +322,7 @@ const MonetizationSettings =
 
         {/* READ-ONLY SUMMARY VIEW */}
         {!isEditing ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
               <p className="text-sm text-slate-400 mb-1">
                 Default
@@ -316,6 +338,7 @@ const MonetizationSettings =
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
               <p className="text-sm text-slate-400 mb-1">
                 Weekly
+                Sub
               </p>
               <p className="text-xl font-bold text-white">
                 {settings.weeklySubscription >
@@ -327,6 +350,7 @@ const MonetizationSettings =
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
               <p className="text-sm text-slate-400 mb-1">
                 Monthly
+                Sub
               </p>
               <p className="text-xl font-bold text-white">
                 {settings.monthlySubscription >
@@ -337,14 +361,43 @@ const MonetizationSettings =
             </div>
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
               <p className="text-sm text-slate-400 mb-1">
-                3-Month
+                {
+                  settings.multiMonthDuration
+                }
+                -Month
+                Sub
+              </p>
+              <p className="text-xl font-bold text-white">
+                {settings.multiMonthPrice >
+                0
+                  ? `${settings.multiMonthPrice} USDT`
+                  : "Disabled"}
+              </p>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 text-center relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/10 rounded-bl-full blur-xl pointer-events-none"></div>
+              <p className="text-sm text-emerald-400 mb-1 flex items-center justify-center gap-1">
+                <MessageSquare
+                  size={
+                    14
+                  }
+                />{" "}
+                Chat
                 Bundle
               </p>
               <p className="text-xl font-bold text-white">
-                {settings.threeMonthBundle >
+                {settings.messageBundlePrice >
                 0
-                  ? `${settings.threeMonthBundle} USDT`
+                  ? `${settings.messageBundlePrice} USDT`
                   : "Disabled"}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider font-bold">
+                Per{" "}
+                {
+                  settings.messageBundleSize
+                }{" "}
+                Messages
               </p>
             </div>
           </div>
@@ -354,96 +407,201 @@ const MonetizationSettings =
             onSubmit={
               handleSave
             }
-            className="space-y-6"
+            className="space-y-8"
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Default
-                  PPV
-                  Unlock
-                  (USDT)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  name="defaultPPVPrice"
-                  value={
-                    settings.defaultPPVPrice
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
-                />
-              </div>
-
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Weekly
-                  Subscription
-                  (USDT)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  name="weeklySubscription"
-                  value={
-                    settings.weeklySubscription
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
-                />
-              </div>
-
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Monthly
-                  Subscription
-                  (USDT)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  name="monthlySubscription"
-                  value={
-                    settings.monthlySubscription
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
-                />
-              </div>
-
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  3-Month
-                  Bundle
-                  (USDT)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  name="threeMonthBundle"
-                  value={
-                    settings.threeMonthBundle
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
-                />
+            <div>
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-800 pb-2">
+                Content
+                Access
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Default
+                    PPV
+                    (USDT)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="defaultPPVPrice"
+                    value={
+                      settings.defaultPPVPrice
+                    }
+                    onChange={
+                      handleChange
+                    }
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                  />
+                </div>
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Weekly
+                    Sub
+                    (USDT)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="weeklySubscription"
+                    value={
+                      settings.weeklySubscription
+                    }
+                    onChange={
+                      handleChange
+                    }
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                  />
+                </div>
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Monthly
+                    Sub
+                    (USDT)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="monthlySubscription"
+                    value={
+                      settings.monthlySubscription
+                    }
+                    onChange={
+                      handleChange
+                    }
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                  />
+                </div>
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative">
+                  <select
+                    name="multiMonthDuration"
+                    value={
+                      settings.multiMonthDuration
+                    }
+                    onChange={
+                      handleChange
+                    }
+                    className="block w-full bg-transparent text-sm font-medium text-slate-300 mb-2 focus:outline-none cursor-pointer border-b border-dashed border-slate-700 pb-1"
+                  >
+                    <option
+                      value={
+                        2
+                      }
+                      className="bg-slate-900"
+                    >
+                      2-Month
+                      Sub
+                      (USDT)
+                    </option>
+                    <option
+                      value={
+                        3
+                      }
+                      className="bg-slate-900"
+                    >
+                      3-Month
+                      Sub
+                      (USDT)
+                    </option>
+                  </select>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="multiMonthPrice"
+                    value={
+                      settings.multiMonthPrice
+                    }
+                    onChange={
+                      handleChange
+                    }
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="flex gap-4">
+            {/* Direct Messaging Tiers */}
+            <div>
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-800 pb-2">
+                Direct
+                Messaging
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30">
+                  <label className="block text-sm font-medium text-emerald-400 mb-2">
+                    Bundle
+                    Size
+                    (Multiples
+                    of
+                    5)
+                  </label>
+                  {/* Notice the step="5" below! */}
+                  <input
+                    type="number"
+                    step="5"
+                    min="5"
+                    name="messageBundleSize"
+                    value={
+                      settings.messageBundleSize
+                    }
+                    onChange={
+                      handleChange
+                    }
+                    className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-lg"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-2">
+                    Base
+                    number
+                    of
+                    messages
+                    the
+                    fan
+                    buys
+                    at
+                    once
+                    (5,
+                    10,
+                    15...).
+                  </p>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30">
+                  <label className="block text-sm font-medium text-emerald-400 mb-2">
+                    Price
+                    Per
+                    Bundle
+                    (USDT)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="messageBundlePrice"
+                    value={
+                      settings.messageBundlePrice
+                    }
+                    onChange={
+                      handleChange
+                    }
+                    className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-lg"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-2">
+                    Cost
+                    to
+                    unlock{" "}
+                    {settings.messageBundleSize ||
+                      5}{" "}
+                    messages.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-4 pt-4">
               <button
                 type="submit"
                 disabled={
@@ -467,8 +625,6 @@ const MonetizationSettings =
                   </>
                 )}
               </button>
-
-              {/* Cancel Button */}
               <button
                 type="button"
                 onClick={() =>
