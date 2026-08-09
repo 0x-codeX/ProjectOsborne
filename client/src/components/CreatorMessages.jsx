@@ -21,33 +21,9 @@ import {
   Image as ImageIcon,
   Loader2,
   Square,
+  Film,
 } from "lucide-react";
 import { io } from "socket.io-client";
-
-// MOCK VAULT
-const MOCK_VAULT =
-  [
-    {
-      id: "v1",
-      title:
-        "Smart Contract Audit Walkthrough",
-      type: "video",
-      thumbnail:
-        "https://images.unsplash.com/photo-1639762681485-074b7f4facce?w=150&q=80",
-      fileKey:
-        "mock-video-123.mp4",
-    },
-    {
-      id: "v2",
-      title:
-        "Logistics Vendor List 2026",
-      type: "image",
-      thumbnail:
-        "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=150&q=80",
-      fileKey:
-        "mock-image-456.jpg",
-    },
-  ];
 
 const CreatorMessages =
   () => {
@@ -120,11 +96,39 @@ const CreatorMessages =
       useState(
         false,
       );
+    const [
+      vaultSearchQuery,
+      setVaultSearchQuery,
+    ] =
+      useState(
+        "",
+      );
+    const [
+      vaultSortOrder,
+      setVaultSortOrder,
+    ] =
+      useState(
+        "newest",
+      ); // "newest" or "oldest"
 
     // --- VAULT DRAWER & ATTACHMENT STATE ---
     const [
       showVaultDrawer,
       setShowVaultDrawer,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      vaultItems,
+      setVaultItems,
+    ] =
+      useState(
+        [],
+      );
+    const [
+      isLoadingVault,
+      setIsLoadingVault,
     ] =
       useState(
         false,
@@ -313,7 +317,6 @@ const CreatorMessages =
       };
 
     // --- VOICE RECORDING LOGIC ---
-    // The Ironclad 20-Second Kill Switch
     useEffect(() => {
       let interval;
       if (
@@ -397,21 +400,18 @@ const CreatorMessages =
                     type: "audio/webm",
                   },
                 );
-
-              // NEW: Create a local URL so the creator can listen before sending
               const localAudioUrl =
                 URL.createObjectURL(
                   audioBlob,
                 );
 
-              // Mocking the upload process
               setPendingAttachment(
                 {
                   title: `Voice Note (${recordingTime}s)`,
                   type: "audio",
                   blob: audioBlob,
                   localUrl:
-                    localAudioUrl, // Store the local URL
+                    localAudioUrl,
                   isVaultLink: false,
                 },
               );
@@ -472,7 +472,105 @@ const CreatorMessages =
         return `${mins}:${secs.toString().padStart(2, "0")}`;
       };
 
+    // --- FILTER & SORT VAULT ITEMS ---
+    const filteredVaultItems =
+      vaultItems
+        .filter(
+          (
+            item,
+          ) => {
+            const searchStr =
+              (
+                item.title ||
+                item.description ||
+                ""
+              ).toLowerCase();
+            return searchStr.includes(
+              vaultSearchQuery.toLowerCase(),
+            );
+          },
+        )
+        .sort(
+          (
+            a,
+            b,
+          ) => {
+            const dateA =
+              new Date(
+                a.createdAt,
+              );
+            const dateB =
+              new Date(
+                b.createdAt,
+              );
+            return vaultSortOrder ===
+              "newest"
+              ? dateB -
+                  dateA
+              : dateA -
+                  dateB;
+          },
+        );
+
     // --- HANDLE SENDING MESSAGE ---
+    const handleOpenVault =
+      async () => {
+        setShowVaultDrawer(
+          true,
+        );
+        setIsLoadingVault(
+          true,
+        );
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          const res =
+            await axios.get(
+              "/api/content/vault",
+              {
+                headers:
+                  {
+                    Authorization: `Bearer ${token}`,
+                  },
+              },
+            );
+
+          const items =
+            res
+              .data
+              .contents ||
+            res.data ||
+            [];
+          const sortedItems =
+            items.sort(
+              (
+                a,
+                b,
+              ) =>
+                new Date(
+                  b.createdAt,
+                ) -
+                new Date(
+                  a.createdAt,
+                ),
+            );
+          setVaultItems(
+            sortedItems,
+          );
+        } catch (err) {
+          console.error(
+            "Failed to load vault items:",
+            err,
+          );
+        } finally {
+          setIsLoadingVault(
+            false,
+          );
+        }
+      };
+
     const handleSend =
       async (
         e,
@@ -495,7 +593,6 @@ const CreatorMessages =
             localStorage.getItem(
               "nippy_token",
             );
-          // We must use FormData to send actual files
           const formData =
             new FormData();
           formData.append(
@@ -516,7 +613,6 @@ const CreatorMessages =
           if (
             pendingAttachment
           ) {
-            // If it is a freshly recorded voice note, append the Blob
             if (
               pendingAttachment.blob
             ) {
@@ -525,9 +621,7 @@ const CreatorMessages =
                 pendingAttachment.blob,
                 "voice-note.webm",
               );
-            }
-            // If it is an item from the Vault, just send the strings
-            else if (
+            } else if (
               pendingAttachment.isVaultLink
             ) {
               formData.append(
@@ -621,7 +715,11 @@ const CreatorMessages =
       <div className="h-[calc(100vh-80px)] md:h-[calc(100vh-73px)] flex bg-transparent text-slate-200 relative">
         {/* ================= LEFT PANEL ================= */}
         <div
-          className={`w-full md:w-[350px] lg:w-[400px] flex flex-col border-r border-slate-800 bg-slate-950/80 backdrop-blur-md ${selectedChat ? "hidden md:flex" : "flex"}`}
+          className={`w-full md:w-[350px] lg:w-[400px] flex flex-col border-r border-slate-800 bg-slate-950/80 backdrop-blur-md ${
+            selectedChat
+              ? "hidden md:flex"
+              : "flex"
+          }`}
         >
           <div className="p-4 border-b border-slate-800">
             <h1 className="text-2xl font-bold text-white mb-4">
@@ -660,7 +758,12 @@ const CreatorMessages =
                     "all",
                   )
                 }
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "all" ? "bg-slate-800 text-white" : "text-slate-500 hover:bg-slate-900"}`}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeTab ===
+                  "all"
+                    ? "bg-slate-800 text-white"
+                    : "text-slate-500 hover:bg-slate-900"
+                }`}
               >
                 All
               </button>
@@ -670,7 +773,12 @@ const CreatorMessages =
                     "priority",
                   )
                 }
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${activeTab === "priority" ? "bg-[#FF5757]/10 text-[#FF5757] border border-[#FF5757]/20" : "text-slate-500 hover:bg-slate-900"}`}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+                  activeTab ===
+                  "priority"
+                    ? "bg-[#FF5757]/10 text-[#FF5757] border border-[#FF5757]/20"
+                    : "text-slate-500 hover:bg-slate-900"
+                }`}
               >
                 <Star
                   size={
@@ -701,7 +809,12 @@ const CreatorMessages =
                         chat,
                       )
                     }
-                    className={`p-4 border-b border-slate-800/50 cursor-pointer flex items-center gap-3 ${selectedChat?._id === chat._id ? "bg-slate-800/50" : "hover:bg-slate-900/50"}`}
+                    className={`p-4 border-b border-slate-800/50 cursor-pointer flex items-center gap-3 ${
+                      selectedChat?._id ===
+                      chat._id
+                        ? "bg-slate-800/50"
+                        : "hover:bg-slate-900/50"
+                    }`}
                   >
                     <div className="relative">
                       <img
@@ -756,7 +869,12 @@ const CreatorMessages =
                             "Started a conversation"}
                         </p>
                         <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${chat.bubblesLeft > 0 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"}`}
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                            chat.bubblesLeft >
+                            0
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : "bg-red-500/10 text-red-400 border border-red-500/20"
+                          }`}
                         >
                           {chat.bubblesLeft ||
                             0}{" "}
@@ -774,7 +892,11 @@ const CreatorMessages =
         {/* ================= RIGHT PANEL (CHAT) ================= */}
         {selectedChat ? (
           <div
-            className={`flex-1 flex flex-col bg-slate-900/90 backdrop-blur-md ${!selectedChat ? "hidden md:flex" : "flex"}`}
+            className={`flex-1 flex flex-col bg-slate-900/90 backdrop-blur-md ${
+              !selectedChat
+                ? "hidden md:flex"
+                : "flex"
+            }`}
           >
             <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
               <div className="flex items-center gap-3">
@@ -878,7 +1000,11 @@ const CreatorMessages =
                         </div>
                       ) : (
                         <div
-                          className={`max-w-[75%] p-3 rounded-2xl text-sm ${isCreator ? "bg-[#FF5757] text-white rounded-tr-sm" : "bg-slate-800 text-slate-200 rounded-tl-sm"}`}
+                          className={`max-w-[75%] p-3 rounded-2xl text-sm ${
+                            isCreator
+                              ? "bg-[#FF5757] text-white rounded-tr-sm"
+                              : "bg-slate-800 text-slate-200 rounded-tl-sm"
+                          }`}
                         >
                           {msg.fileType?.includes(
                             "audio",
@@ -888,7 +1014,6 @@ const CreatorMessages =
                                 Voice
                                 Note
                               </span>
-                              {/* NOTE: Ensure msg.fileKey or msg.fileUrl is a valid HTTPS link to your S3/R2 bucket */}
                               <audio
                                 src={
                                   msg.fileUrl ||
@@ -899,7 +1024,80 @@ const CreatorMessages =
                               />
                             </div>
                           ) : (
-                            msg.text
+                            <div className="flex flex-col gap-2">
+                              {/* --- ATTACHMENT RENDERING --- */}
+                              {msg.fileKey && (
+                                <>
+                                  {/* 1. Explicit Video Check */}
+                                  {(msg.fileType?.includes(
+                                    "video",
+                                  ) ||
+                                    msg.fileKey
+                                      .toLowerCase()
+                                      .match(
+                                        /\.(mp4|webm|ogg)$/,
+                                      )) && (
+                                    <video
+                                      src={`https://${import.meta.env.VITE_R2_PUBLIC_DOMAIN}/${msg.fileKey}`}
+                                      controls
+                                      className="w-full md:w-[250px] rounded-lg bg-black"
+                                    />
+                                  )}
+
+                                  {/* 2. Explicit Image Check */}
+                                  {(msg.fileType?.includes(
+                                    "image",
+                                  ) ||
+                                    msg.fileKey
+                                      .toLowerCase()
+                                      .match(
+                                        /\.(jpg|jpeg|png|gif|webp)$/,
+                                      )) && (
+                                    <img
+                                      src={`https://${import.meta.env.VITE_R2_PUBLIC_DOMAIN}/${msg.fileKey}`}
+                                      alt="Media upload"
+                                      className="w-full md:w-[250px] rounded-lg"
+                                    />
+                                  )}
+
+                                  {/* 3. Fallback for PDFs, ZIPs, Docs, etc. */}
+                                  {!msg.fileType?.includes(
+                                    "video",
+                                  ) &&
+                                    !msg.fileType?.includes(
+                                      "image",
+                                    ) &&
+                                    !msg.fileKey
+                                      .toLowerCase()
+                                      .match(
+                                        /\.(mp4|webm|ogg|jpg|jpeg|png|gif|webp)$/,
+                                      ) && (
+                                      <a
+                                        href={`https://${import.meta.env.VITE_R2_PUBLIC_DOMAIN}/${msg.fileKey}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-white underline text-sm break-all font-bold flex items-center gap-1 bg-black/20 p-2 rounded-lg"
+                                      >
+                                        📎
+                                        View
+                                        Attachment
+                                      </a>
+                                    )}
+                                </>
+                              )}
+
+                              {/* --- IRONCLAD TEXT RENDERING --- */}
+                              {msg.text &&
+                                msg.text.trim()
+                                  .length >
+                                  0 && (
+                                  <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">
+                                    {
+                                      msg.text
+                                    }
+                                  </p>
+                                )}
+                            </div>
                           )}
                         </div>
                       )}
@@ -931,7 +1129,6 @@ const CreatorMessages =
               {pendingAttachment && (
                 <div className="mb-3 flex items-center justify-between bg-[#FF5757]/10 border border-[#FF5757]/30 rounded-lg p-2 px-3 self-start">
                   <div className="flex items-center gap-3 text-[#FF5757] text-sm font-bold">
-                    {/* NEW: Render actual audio player if it's a voice note */}
                     {pendingAttachment.type ===
                     "audio" ? (
                       <audio
@@ -955,7 +1152,6 @@ const CreatorMessages =
                         </span>
                       </>
                     )}
-
                     <span className="bg-[#FF5757] text-white px-1.5 py-0.5 rounded text-[10px] font-mono ml-2">
                       $
                       {
@@ -983,10 +1179,8 @@ const CreatorMessages =
               <div className="flex items-end gap-2 bg-slate-900 border border-slate-800 p-2 rounded-2xl focus-within:border-[#FF5757] transition-colors relative">
                 <div className="flex gap-1 pb-1 pl-1">
                   <button
-                    onClick={() =>
-                      setShowVaultDrawer(
-                        true,
-                      )
+                    onClick={
+                      handleOpenVault
                     }
                     disabled={
                       isRecording
@@ -1051,7 +1245,6 @@ const CreatorMessages =
                   />
                 )}
 
-                {/* DYNAMIC ACTION BUTTON: Shows Send if text/attachment exists, shows Mic otherwise */}
                 {messageInput.trim() ||
                 pendingAttachment ? (
                   <button
@@ -1086,7 +1279,11 @@ const CreatorMessages =
                         ? stopRecording
                         : startRecording
                     }
-                    className={`p-2.5 rounded-xl transition-all mb-0.5 ${isRecording ? "bg-rose-600 text-white animate-pulse" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+                    className={`p-2.5 rounded-xl transition-all mb-0.5 ${
+                      isRecording
+                        ? "bg-rose-600 text-white animate-pulse"
+                        : "bg-slate-800 text-slate-400 hover:text-white"
+                    }`}
                   >
                     {isRecording ? (
                       <Square
@@ -1121,6 +1318,7 @@ const CreatorMessages =
         {showVaultDrawer && (
           <div className="absolute inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center bg-black/80 backdrop-blur-sm">
             <div className="bg-slate-950 w-full md:w-[500px] md:rounded-3xl border-t md:border border-slate-800 shadow-2xl flex flex-col max-h-[85vh]">
+              {/* HEADER */}
               <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 md:rounded-t-3xl">
                 <div>
                   <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -1160,77 +1358,196 @@ const CreatorMessages =
                 </button>
               </div>
 
+              {/* SEARCH & SORT BAR */}
+              <div className="px-4 pb-4 pt-3 border-b border-slate-800 bg-slate-900/50 flex gap-2">
+                <div className="relative flex-1">
+                  <Search
+                    className="absolute left-3 top-2.5 text-slate-500"
+                    size={
+                      16
+                    }
+                  />
+                  <input
+                    type="text"
+                    placeholder="Search by title or description..."
+                    value={
+                      vaultSearchQuery
+                    }
+                    onChange={(
+                      e,
+                    ) =>
+                      setVaultSearchQuery(
+                        e
+                          .target
+                          .value,
+                      )
+                    }
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg py-2 pl-9 pr-3 text-sm focus:outline-none focus:border-[#FF5757]"
+                  />
+                </div>
+                <button
+                  onClick={() =>
+                    setVaultSortOrder(
+                      (
+                        prev,
+                      ) =>
+                        prev ===
+                        "newest"
+                          ? "oldest"
+                          : "newest",
+                    )
+                  }
+                  className="bg-slate-800 text-slate-300 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-700 transition-colors"
+                >
+                  <Filter
+                    size={
+                      16
+                    }
+                  />
+                  {vaultSortOrder ===
+                  "newest"
+                    ? "Newest"
+                    : "Oldest"}
+                </button>
+              </div>
+
+              {/* GRID AREA */}
               <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-3">
-                {MOCK_VAULT.map(
-                  (
-                    item,
-                  ) => {
-                    const isSelected =
-                      selectedVaultItem?.id ===
-                      item.id;
-                    return (
-                      <div
-                        key={
-                          item.id
-                        }
-                        onClick={() =>
-                          setSelectedVaultItem(
-                            item,
-                          )
-                        }
-                        className={`relative cursor-pointer rounded-xl overflow-hidden border-2 transition-all ${isSelected ? "border-[#FF5757]" : "border-slate-800 hover:border-slate-600"}`}
-                      >
-                        <div className="aspect-square bg-slate-900 relative">
-                          <img
-                            src={
-                              item.thumbnail
-                            }
-                            alt={
-                              item.title
-                            }
-                            className="w-full h-full object-cover opacity-70"
-                          />
-                          <div className="absolute top-2 left-2 bg-slate-900/80 p-1.5 rounded-md text-white backdrop-blur-md">
-                            {item.type ===
-                            "video" ? (
-                              <Video
-                                size={
-                                  14
+                {isLoadingVault ? (
+                  <div className="col-span-2 flex justify-center py-10">
+                    <Loader2 className="animate-spin text-[#FF5757]" />
+                  </div>
+                ) : filteredVaultItems.length ===
+                  0 ? (
+                  <div className="col-span-2 text-center text-slate-500 py-10">
+                    {vaultItems.length ===
+                    0
+                      ? "Your vault is empty. Upload content first."
+                      : "No content matches your search."}
+                  </div>
+                ) : (
+                  filteredVaultItems.map(
+                    (
+                      item,
+                    ) => {
+                      const itemId =
+                        item._id ||
+                        item.id;
+                      const isSelected =
+                        selectedVaultItem?._id ===
+                        itemId;
+                      const isVideo =
+                        item.fileType?.includes(
+                          "video",
+                        );
+
+                      return (
+                        <div
+                          key={
+                            itemId
+                          }
+                          onClick={() => {
+                            setSelectedVaultItem(
+                              item,
+                            );
+                            setCustomPrice(
+                              item.priceInUSDT ||
+                                0,
+                            );
+                          }}
+                          className={`relative cursor-pointer rounded-xl overflow-hidden border-2 transition-all flex flex-col ${
+                            isSelected
+                              ? "border-[#FF5757]"
+                              : "border-slate-800 hover:border-slate-600"
+                          }`}
+                        >
+                          {/* MEDIA THUMBNAIL (MIRRORING CREATOR VAULT) */}
+                          <div className="relative aspect-video bg-slate-950 flex items-center justify-center border-b border-slate-800 overflow-hidden group">
+                            {item.previewKey ? (
+                              <img
+                                src={`https://pub-cloudflare.com/${item.previewKey}`}
+                                alt={
+                                  item.title
                                 }
+                                className="w-full h-full object-cover opacity-80"
                               />
                             ) : (
-                              <ImageIcon
-                                size={
-                                  14
-                                }
-                              />
+                              <div className="flex flex-col items-center justify-center text-slate-600">
+                                {isVideo ? (
+                                  <Film
+                                    size={
+                                      24
+                                    }
+                                    className="mb-1"
+                                  />
+                                ) : (
+                                  <ImageIcon
+                                    size={
+                                      24
+                                    }
+                                    className="mb-1"
+                                  />
+                                )}
+                                <span className="text-[9px] font-mono uppercase tracking-wider text-slate-500">
+                                  {item.fileType ||
+                                    "Media"}
+                                </span>
+                              </div>
                             )}
-                          </div>
-                          {isSelected && (
-                            <div className="absolute inset-0 bg-[#FF5757]/20 flex items-center justify-center">
-                              <div className="bg-[#FF5757] text-white p-2 rounded-full shadow-lg">
-                                <Check
+
+                            {/* Top Left Icon Badge */}
+                            <div className="absolute top-1.5 left-1.5 bg-slate-900/80 p-1 rounded-md text-white backdrop-blur-md">
+                              {isVideo ? (
+                                <Film
                                   size={
-                                    20
+                                    12
                                   }
                                 />
-                              </div>
+                              ) : (
+                                <ImageIcon
+                                  size={
+                                    12
+                                  }
+                                />
+                              )}
                             </div>
-                          )}
+
+                            {/* Selection Checkmark Overlay */}
+                            {isSelected && (
+                              <div className="absolute inset-0 bg-[#FF5757]/20 flex items-center justify-center backdrop-blur-[1px]">
+                                <div className="bg-[#FF5757] text-white p-2 rounded-full shadow-lg">
+                                  <Check
+                                    size={
+                                      20
+                                    }
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* CARD DETAILS */}
+                          <div className="p-3 bg-slate-900 flex-1 flex flex-col justify-between">
+                            <p className="text-xs font-bold text-slate-200 truncate">
+                              {item.title ||
+                                "Untitled Content"}
+                            </p>
+                            <span className="text-[10px] text-emerald-400 font-mono mt-2 block font-bold">
+                              Vault
+                              Price:
+                              $
+                              {item.priceInUSDT ||
+                                0}
+                            </span>
+                          </div>
                         </div>
-                        <div className="p-2 bg-slate-900">
-                          <p className="text-xs font-bold text-slate-200 truncate">
-                            {
-                              item.title
-                            }
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  },
+                      );
+                    },
+                  )
                 )}
               </div>
 
+              {/* ATTACHMENT PRICING & BUTTON (Only shows if an item is selected) */}
               {selectedVaultItem && (
                 <div className="p-4 border-t border-slate-800 bg-slate-900 md:rounded-b-3xl">
                   <div className="flex items-center justify-between gap-4">
@@ -1264,10 +1581,16 @@ const CreatorMessages =
                     </div>
                     <button
                       onClick={() => {
-                        // CRITICAL: We tag this item with isVaultLink: true so the backend allows it
                         setPendingAttachment(
                           {
                             ...selectedVaultItem,
+                            title:
+                              selectedVaultItem.title ||
+                              selectedVaultItem.description?.substring(
+                                0,
+                                20,
+                              ) ||
+                              "Vault Content",
                             isVaultLink: true,
                           },
                         );
@@ -1294,6 +1617,7 @@ const CreatorMessages =
             </div>
           </div>
         )}
+
         <style
           dangerouslySetInnerHTML={{
             __html: `.hide-scrollbar::-webkit-scrollbar { display: none; } .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`,

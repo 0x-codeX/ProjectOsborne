@@ -1436,26 +1436,13 @@ exports.getCreatorPublicProfile = async (req, res) => {
     // ==========================================
     // Note: Adapt this query based on where you actually store chat balances in your DB!
     // If it's on the User model, query the User. If it's a separate model, query that.
-    const chatRecord =
-      await Conversation.findOne(
-        {
-          fan: viewerId,
-          creator:
-            creatorId,
-        },
-      )
-        .select(
-          "bubblesLeft",
-        )
-        .lean();
+    const chatRecord = await Conversation.findOne({
+      fan: viewerId,
+      creator: creatorId
+    }).select("bubblesLeft").lean();
 
-    const chatBubblesLeft =
-      chatRecord
-        ? chatRecord.bubblesLeft
-        : 0;
-    const hasActiveChat =
-      chatBubblesLeft >
-      0;
+    const chatBubblesLeft = chatRecord ? chatRecord.bubblesLeft : 0;
+    const hasActiveChat = chatBubblesLeft > 0;
     // ==========================================
 
 

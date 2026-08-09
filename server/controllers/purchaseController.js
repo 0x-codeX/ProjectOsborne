@@ -2,11 +2,11 @@ const {
   ethers,
 } = require("ethers");
 const Purchase = require("../models/Purchase");
-const Content = require("../models/Content");
 const User = require("../models/User");
-const Wallet = require("../models/Wallet");
-// ⚠️ MENTOR NOTE: Don't forget to import your chat balance model!
+const Content = require("../models/Content");
+const Message = require("../models/Message");
 const Conversation = require("../models/Conversation");
+const Wallet = require("../models/Wallet");
 
 // POST /api/purchases/verify
 exports.verifyPayment =
@@ -20,6 +20,7 @@ exports.verifyPayment =
         creatorId,
         txHash,
         purchaseType,
+        messageId,
       } =
         req.body;
       const buyerId =
@@ -69,7 +70,7 @@ exports.verifyPayment =
             .json(
               {
                 message:
-                  "creatorId is required for subscriptions.",
+                  "creatorId is required.",
               },
             );
         creator =
@@ -94,9 +95,7 @@ exports.verifyPayment =
             .monetizationSettings
             ?.monthlySubscription ||
           0;
-      }
-      // ⚠️ MENTOR NOTE: Added the CHAT_BUNDLE branch here
-      else if (
+      } else if (
         purchaseType ===
         "CHAT_BUNDLE"
       ) {
@@ -110,7 +109,7 @@ exports.verifyPayment =
             .json(
               {
                 message:
-                  "creatorId is required for chat bundles.",
+                  "creatorId is required.",
               },
             );
         creator =
@@ -130,8 +129,6 @@ exports.verifyPayment =
                   "Creator not found.",
               },
             );
-
-        // Expected price is the cost of at least ONE bundle
         expectedPrice =
           creator
             .monetizationSettings
@@ -151,8 +148,10 @@ exports.verifyPayment =
                   "Creator has not enabled chat bundles.",
               },
             );
-      } else {
-        // PPV Purchase
+      } else if (
+        purchaseType ===
+        "PPV"
+      ) {
         if (
           !contentId
         )
@@ -163,7 +162,7 @@ exports.verifyPayment =
             .json(
               {
                 message:
-                  "contentId is required for PPV purchases.",
+                  "contentId is required for PPV.",
               },
             );
         content =
@@ -195,6 +194,47 @@ exports.verifyPayment =
                 .monetizationSettings
                 ?.defaultPPVPrice ||
               0;
+      } else if (
+        purchaseType ===
+        "DM_UNLOCK"
+      ) {
+        if (
+          !messageId
+        )
+          return res
+            .status(
+              400,
+            )
+            .json(
+              {
+                message:
+                  "messageId is required for DM unlocks.",
+              },
+            );
+        content =
+          await Message.findById(
+            messageId,
+          ).populate(
+            "sender",
+          );
+        if (
+          !content
+        )
+          return res
+            .status(
+              404,
+            )
+            .json(
+              {
+                message:
+                  "Message not found.",
+              },
+            );
+        creator =
+          content.sender;
+        expectedPrice =
+          content.priceInUSDT ||
+          0;
       }
 
       if (
@@ -216,23 +256,17 @@ exports.verifyPayment =
         creator.walletAddress.toLowerCase();
 
       // 3. Connect to Polygon RPC
-      // const provider =
-      //   new ethers.JsonRpcProvider(
-      //     "https://rpc-amoy.polygon.technology/",
-      //   );
       const rpcUrl =
         process
           .env
-          .POLYGON_RPC_URL; // Make sure this matches the variable name in your .env file
-
+          .POLYGON_RPC_URL;
       if (
         !rpcUrl
       ) {
         throw new Error(
-          "Missing ALCHEMY_AMOY_URL in .env file",
+          "Missing POLYGON_RPC_URL in .env file",
         );
       }
-
       const provider =
         new ethers.JsonRpcProvider(
           rpcUrl,
@@ -276,13 +310,12 @@ exports.verifyPayment =
             },
           );
 
-      // 5. Verify Contract (Must be the Nippy Gateway Contract from .env!)
+      // 5. Verify Contract
       const GATEWAY_ADDRESS =
         process.env.NIPPY_GATEWAY_ADDRESS?.toLowerCase();
       const USDT_ADDRESS =
         process.env.MOCK_USDT_ADDRESS?.toLowerCase();
 
-      // Safety Check: Fails securely if your .env file is misconfigured
       if (
         !GATEWAY_ADDRESS ||
         !USDT_ADDRESS
@@ -318,7 +351,7 @@ exports.verifyPayment =
           );
       }
 
-      // 6. Decode Input Data (Using the Gateway's ABI, NOT standard ERC20)
+      // 6. Decode Input Data
       const iface =
         new ethers.Interface(
           [
@@ -347,7 +380,6 @@ exports.verifyPayment =
           );
       }
 
-      // Map the decoded arguments from purchaseWithERC20
       const actualToken =
         decoded.args[0].toLowerCase();
       const actualRecipient =
@@ -359,7 +391,7 @@ exports.verifyPayment =
           6,
         ); // USDT has 6 decimals
 
-      // Security Check A: Did they actually pay with our approved USDT?
+      // Security Checks
       if (
         actualToken !==
         USDT_ADDRESS
@@ -375,8 +407,6 @@ exports.verifyPayment =
             },
           );
       }
-
-      // Security Check B: Did the money go to the right creator?
       if (
         actualRecipient !==
         expectedWallet
@@ -392,8 +422,6 @@ exports.verifyPayment =
             },
           );
       }
-
-      // Security Check C: Did they pay enough?
       if (
         Number(
           actualAmount,
@@ -412,7 +440,7 @@ exports.verifyPayment =
           );
       }
 
-      // 7. Calculate Subscription Expiration & Save Purchase
+      // --- THE FIX: YOU MUST ACTUALLY CREATE THE PURCHASE RECORD ---
       let expiresAt =
         null;
       if (
@@ -435,7 +463,13 @@ exports.verifyPayment =
           {
             user: buyerId,
             content:
-              content
+              purchaseType ===
+              "PPV"
+                ? content._id
+                : null,
+            message:
+              purchaseType ===
+              "DM_UNLOCK"
                 ? content._id
                 : null,
             creator:
@@ -452,9 +486,32 @@ exports.verifyPayment =
           },
         );
 
-      // // ==========================================
+      // Fulfill DM Unlock
+      if (
+        purchaseType ===
+        "DM_UNLOCK"
+      ) {
+        const fanUser =
+          await User.findById(
+            buyerId,
+          );
+        if (
+          fanUser.walletAddress
+        ) {
+          await Message.findByIdAndUpdate(
+            content._id,
+            {
+              $addToSet:
+                {
+                  unlockedFor:
+                    fanUser.walletAddress.toLowerCase(),
+                },
+            },
+          );
+        }
+      }
+
       // 7.5. THE CHAT BUNDLE MATH & FULFILLMENT
-      // ==========================================
       if (
         purchaseType ===
         "CHAT_BUNDLE"
@@ -472,7 +529,6 @@ exports.verifyPayment =
             .monetizationSettings
             .messageBundleSize;
 
-        // Calculate how many total bundles they can afford
         const bundlesPurchased =
           Math.floor(
             amountPaid /
@@ -482,7 +538,6 @@ exports.verifyPayment =
           bundlesPurchased *
           bundleSize;
 
-        // Ironclad atomic update using your Conversation model
         await Conversation.findOneAndUpdate(
           {
             fan: buyerId,
@@ -494,7 +549,7 @@ exports.verifyPayment =
               bubblesLeft:
                 bubblesToCredit,
               lifetimeValue:
-                amountPaid, // Instantly updates their LTV!
+                amountPaid,
             },
             $setOnInsert:
               {
@@ -502,7 +557,7 @@ exports.verifyPayment =
                   [
                     creator._id,
                     buyerId,
-                  ], // Required by your schema if it's a new chat
+                  ],
               },
           },
           {
@@ -512,8 +567,6 @@ exports.verifyPayment =
           },
         );
       }
-      // ==========================================
-      // ==========================================
 
       // 8. Automate Creator Ledger Split (Atomic)
       const PLATFORM_FEE = 0.2; // 20%

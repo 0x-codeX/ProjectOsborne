@@ -482,6 +482,7 @@ const FanFeed =
 
                 <div className="relative bg-black w-full min-h-[300px] max-h-[600px] flex items-center justify-center overflow-hidden">
                   {post.isLocked ? (
+                    /* LOCKED TEASER */
                     <video
                       src={
                         post.teaserUrl
@@ -490,16 +491,60 @@ const FanFeed =
                       loop
                       muted
                       playsInline
+                      onContextMenu={(
+                        e,
+                      ) =>
+                        e.preventDefault()
+                      }
                       className="w-full h-auto max-h-[600px] object-cover blur-3xl scale-[1.2] opacity-70 pointer-events-none select-none"
                     />
                   ) : (
-                    <video
-                      controls
-                      className="w-full h-auto max-h-[600px] object-contain"
-                      src={
-                        post.mediaUrl
-                      }
-                    />
+                    /* UNLOCKED FULL CONTENT (Defaults to Video, strictly catches Images) */
+                    <>
+                      {post.mediaUrl
+                        ?.toLowerCase()
+                        .match(
+                          /\.(jpg|jpeg|png|gif|webp)/i,
+                        ) ||
+                      post.fileType?.includes(
+                        "image",
+                      ) ||
+                      post.mediaType?.includes(
+                        "image",
+                      ) ? (
+                        <img
+                          src={
+                            post.mediaUrl
+                          }
+                          alt={
+                            post.title ||
+                            "Unlocked content"
+                          }
+                          onContextMenu={(
+                            e,
+                          ) =>
+                            e.preventDefault()
+                          }
+                          draggable="false"
+                          className="w-full h-auto max-h-[600px] object-contain select-none"
+                        />
+                      ) : (
+                        <video
+                          src={
+                            post.mediaUrl
+                          }
+                          controls
+                          controlsList="nodownload noplaybackrate"
+                          disablePictureInPicture
+                          onContextMenu={(
+                            e,
+                          ) =>
+                            e.preventDefault()
+                          }
+                          className="w-full h-auto max-h-[600px] object-contain"
+                        />
+                      )}
+                    </>
                   )}
 
                   {post.isLocked && (

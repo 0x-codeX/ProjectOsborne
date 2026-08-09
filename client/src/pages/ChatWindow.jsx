@@ -308,13 +308,80 @@ const ChatWindow =
                         </button>
                       </div>
                     ) : (
-                      msg.text && (
-                        <p className="text-[15px] leading-relaxed break-words">
-                          {
-                            msg.text
-                          }
-                        </p>
-                      )
+                      /* --- FREE MEDIA & TEXT RENDERING --- */
+                      <div className="flex flex-col gap-2">
+                        {msg.fileKey &&
+                          !isVoiceNote && (
+                            <>
+                              {/* 1. Explicit check for Video */}
+                              {(msg.fileType?.includes(
+                                "video",
+                              ) ||
+                                msg.fileKey
+                                  .toLowerCase()
+                                  .endsWith(
+                                    ".mp4",
+                                  )) && (
+                                <video
+                                  src={`https://${import.meta.env.VITE_R2_PUBLIC_DOMAIN}/${msg.fileKey}`}
+                                  controls
+                                  className="w-full md:w-[250px] rounded-lg bg-black"
+                                />
+                              )}
+
+                              {/* 2. Explicit check for Image */}
+                              {(msg.fileType?.includes(
+                                "image",
+                              ) ||
+                                msg.fileKey
+                                  .toLowerCase()
+                                  .match(
+                                    /\.(jpg|jpeg|png|gif|webp)$/,
+                                  )) && (
+                                <img
+                                  src={`https://${import.meta.env.VITE_R2_PUBLIC_DOMAIN}/${msg.fileKey}`}
+                                  alt="Media upload"
+                                  className="w-full md:w-[250px] rounded-lg"
+                                />
+                              )}
+
+                              {/* 3. Fallback for other file types (PDFs, Docs, etc.) */}
+                              {!msg.fileType?.includes(
+                                "video",
+                              ) &&
+                                !msg.fileType?.includes(
+                                  "image",
+                                ) &&
+                                !msg.fileKey
+                                  .toLowerCase()
+                                  .match(
+                                    /\.(mp4|jpg|jpeg|png|gif|webp)$/,
+                                  ) && (
+                                  <a
+                                    href={`https://${import.meta.env.VITE_R2_PUBLIC_DOMAIN}/${msg.fileKey}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-500 underline text-sm break-all"
+                                  >
+                                    View
+                                    Attachment
+                                  </a>
+                                )}
+                            </>
+                          )}
+
+                        {/* Ironclad text rendering */}
+                        {msg.text &&
+                          msg.text.trim()
+                            .length >
+                            0 && (
+                            <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">
+                              {
+                                msg.text
+                              }
+                            </p>
+                          )}
+                      </div>
                     )}
 
                     {/* TIMESTAMPS */}

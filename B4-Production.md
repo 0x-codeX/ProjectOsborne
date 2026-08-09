@@ -13,3 +13,5 @@ Before you go to mainnet, you will want to update your GATEWAY_ABI smart contrac
 
 For CloudFlare CORS Policy
 (Note: Using * is fine for development. When you launch the actual business, we will lock AllowedOrigins down to your official production domain name).
+
+Block the attach media contents via chats for now.

@@ -16,6 +16,9 @@ import {
   Loader2,
   AlertCircle,
   MessageSquare,
+  Wallet,
+  CreditCard,
+  X,
 } from "lucide-react";
 import axios from "axios";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
@@ -89,6 +92,36 @@ const FanChatWindow =
       useState(
         5,
       ); // Fallback price
+
+    // --- NEW: PPV CHAT MODAL STATES ---
+    const [
+      paymentModalMsg,
+      setPaymentModalMsg,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      paymentMethod,
+      setPaymentMethod,
+    ] =
+      useState(
+        null,
+      ); // 'CRYPTO' | 'CARD'
+    const [
+      processingId,
+      setProcessingId,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      unlockingMsgId,
+      setUnlockingMsgId,
+    ] =
+      useState(
+        null,
+      );
 
     const currentUser =
       JSON.parse(
@@ -420,6 +453,93 @@ const FanChatWindow =
         }
       };
 
+    const executePayment =
+      async () => {
+        if (
+          !paymentModalMsg ||
+          !paymentMethod
+        )
+          return;
+
+        if (
+          paymentMethod ===
+          "CARD"
+        ) {
+          alert(
+            "Paystack integration pending. Please use Web3 Crypto for now.",
+          );
+          return;
+        }
+
+        try {
+          setProcessingId(
+            paymentModalMsg._id,
+          );
+          if (
+            !chatInfo?.walletAddress
+          ) {
+            throw new Error(
+              "This creator has not set up their Web3 wallet address yet!",
+            );
+          }
+
+          // 1. Web3 Payment Execution on Polygon Amoy
+          const txHash =
+            await transferUSDT(
+              chatInfo.walletAddress,
+              paymentModalMsg.priceInUSDT,
+              paymentModalMsg._id,
+            );
+
+          // 2. THE IRONCLAD FIX: Send the transaction hash to the backend to be cryptographically verified
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          await axios.post(
+            "/api/purchases/verify",
+            {
+              messageId:
+                paymentModalMsg._id,
+              creatorId:
+                chatInfo._id,
+              txHash,
+              purchaseType:
+                "DM_UNLOCK",
+            },
+            {
+              headers:
+                {
+                  Authorization: `Bearer ${token}`,
+                },
+            },
+          );
+
+          // 3. Fetch updated messages only AFTER backend confirms the database is updated
+          await fetchMessages();
+          setPaymentModalMsg(
+            null,
+          );
+        } catch (error) {
+          console.error(
+            "Unlock Error Trace:",
+            error,
+          );
+          alert(
+            error
+              .response
+              ?.data
+              ?.message ||
+              error.message ||
+              "Transaction failed.",
+          );
+        } finally {
+          setProcessingId(
+            null,
+          );
+        }
+      };
+
     return (
       <div className="fixed inset-0 z-50 flex justify-center bg-black/95 md:py-6 font-sans">
         <div className="w-full h-full md:h-[90vh] md:max-w-2xl bg-nippy-onyx md:rounded-3xl md:border md:border-gray-800 md:shadow-2xl flex flex-col relative overflow-hidden">
@@ -503,12 +623,26 @@ const FanChatWindow =
                       "voice-notes",
                     ));
 
-                // 2. Ironclad Rule: Voice notes are ALWAYS free. Only lock non-audio content.
+                // Check if the fan's wallet is in the message's unlockedFor array, OR if the backend flagged it as unlocked
+                const fanWallet =
+                  currentUser.walletAddress?.toLowerCase();
+                const isUnlockedByMe =
+                  msg.unlockedFor?.some(
+                    (
+                      w,
+                    ) =>
+                      w.toLowerCase() ===
+                      fanWallet,
+                  ) ||
+                  msg.hasAccess;
+
+                // Only lock it if it has a price, it isn't yours, it isn't a voice note, AND you haven't bought it
                 const isLockedPPV =
                   msg.priceInUSDT >
                     0 &&
                   !isMe &&
-                  !isVoiceNote;
+                  !isVoiceNote &&
+                  !isUnlockedByMe;
 
                 return (
                   <div
@@ -524,7 +658,6 @@ const FanChatWindow =
                           : "bg-[#262626] text-slate-200 rounded-2xl rounded-tl-sm border border-gray-800"
                       }`}
                     >
-                      {/* --- FREE VOICE NOTE RENDERING --- */}
                       {/* --- FREE VOICE NOTE RENDERING --- */}
                       {isVoiceNote && (
                         <div className="flex flex-col gap-1 mt-1 mb-2">
@@ -565,7 +698,7 @@ const FanChatWindow =
                         </div>
                       )}
 
-                      {/* --- LOCKED PPV OR TEXT RENDERING --- */}
+                      {/* --- LOCKED PPV RENDERING --- */}
                       {isLockedPPV ? (
                         <div className="mt-2 w-64 p-4 bg-black rounded-xl border border-yellow-500/30 flex flex-col items-center">
                           <Lock
@@ -578,7 +711,18 @@ const FanChatWindow =
                             PPV
                             Content
                           </span>
-                          <button className="bg-yellow-500 text-black text-xs font-bold py-2 px-4 rounded-full transition-transform hover:scale-105 hover:bg-yellow-400">
+                          {/* --- IRONCLAD: Added onClick to open modal --- */}
+                          <button
+                            onClick={() => {
+                              setPaymentModalMsg(
+                                msg,
+                              );
+                              setPaymentMethod(
+                                null,
+                              );
+                            }}
+                            className="bg-yellow-500 hover:bg-yellow-400 transition-colors text-black text-xs font-bold py-2 px-4 rounded-full"
+                          >
                             Unlock
                             for{" "}
                             {
@@ -588,19 +732,102 @@ const FanChatWindow =
                           </button>
                         </div>
                       ) : (
-                        // Only render text if the message actually has text (Creators might send audio without text)
-                        msg.text && (
-                          <p className="text-[15px] leading-relaxed break-words">
-                            {
-                              msg.text
-                            }
-                          </p>
-                        )
+                        /* --- FREE MEDIA & TEXT RENDERING --- */
+                        <div className="flex flex-col gap-2">
+                          {msg.fileKey &&
+                            !isVoiceNote && (
+                              <>
+                                {/* 1. Explicit check for Video - LOCKED DOWN */}
+                                {(msg.fileType?.includes(
+                                  "video",
+                                ) ||
+                                  msg.fileKey
+                                    .toLowerCase()
+                                    .endsWith(
+                                      ".mp4",
+                                    )) && (
+                                  <video
+                                    src={`https://${import.meta.env.VITE_R2_PUBLIC_DOMAIN}/${msg.fileKey}`}
+                                    controls
+                                    controlsList="nodownload noplaybackrate"
+                                    disablePictureInPicture
+                                    onContextMenu={(
+                                      e,
+                                    ) =>
+                                      e.preventDefault()
+                                    }
+                                    className="w-full md:w-[250px] rounded-lg bg-black"
+                                  />
+                                )}
+
+                                {/* 2. Explicit check for Image - LOCKED DOWN */}
+                                {(msg.fileType?.includes(
+                                  "image",
+                                ) ||
+                                  msg.fileKey
+                                    .toLowerCase()
+                                    .match(
+                                      /\.(jpg|jpeg|png|gif|webp)$/,
+                                    )) && (
+                                  <img
+                                    src={`https://${import.meta.env.VITE_R2_PUBLIC_DOMAIN}/${msg.fileKey}`}
+                                    alt="Media upload"
+                                    onContextMenu={(
+                                      e,
+                                    ) =>
+                                      e.preventDefault()
+                                    }
+                                    draggable="false"
+                                    className="w-full md:w-[250px] rounded-lg select-none"
+                                  />
+                                )}
+
+                                {/* 3. Fallback for other file types (PDFs, Docs, etc.) */}
+                                {!msg.fileType?.includes(
+                                  "video",
+                                ) &&
+                                  !msg.fileType?.includes(
+                                    "image",
+                                  ) &&
+                                  !msg.fileKey
+                                    .toLowerCase()
+                                    .match(
+                                      /\.(mp4|jpg|jpeg|png|gif|webp)$/,
+                                    ) && (
+                                    <a
+                                      href={`https://${import.meta.env.VITE_R2_PUBLIC_DOMAIN}/${msg.fileKey}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-500 underline text-sm break-all"
+                                    >
+                                      View
+                                      Attachment
+                                    </a>
+                                  )}
+                              </>
+                            )}
+
+                          {/* Ironclad text rendering */}
+                          {msg.text &&
+                            msg.text.trim()
+                              .length >
+                              0 && (
+                              <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">
+                                {
+                                  msg.text
+                                }
+                              </p>
+                            )}
+                        </div>
                       )}
 
                       {/* TIMESTAMPS */}
                       <div
-                        className={`text-[10px] mt-1.5 flex items-center gap-1 ${isMe ? "text-white/70 justify-end" : "text-gray-500"}`}
+                        className={`text-[10px] mt-1.5 flex items-center gap-1 ${
+                          isMe
+                            ? "text-white/70 justify-end"
+                            : "text-gray-500"
+                        }`}
                       >
                         {new Date(
                           msg.createdAt,
@@ -679,7 +906,7 @@ const FanChatWindow =
                     type="text"
                     maxLength={
                       200
-                    } // IRONCLAD RULE: 200 chars max for fans
+                    }
                     value={
                       inputText
                     }
@@ -696,7 +923,12 @@ const FanChatWindow =
                     className="w-full bg-[#262626] border border-gray-700 text-white rounded-full py-3 pl-4 pr-10 focus:outline-none focus:border-emerald-500 transition-colors text-sm"
                   />
                   <span
-                    className={`absolute right-4 top-3 text-xs ${inputText.length >= 200 ? "text-red-400" : "text-gray-500"}`}
+                    className={`absolute right-4 top-3 text-xs ${
+                      inputText.length >=
+                      200
+                        ? "text-red-400"
+                        : "text-gray-500"
+                    }`}
                   >
                     {
                       inputText.length
@@ -721,6 +953,151 @@ const FanChatWindow =
               </form>
             )}
           </div>
+
+          {/* --- THE CHECKOUT MODAL FOR CHAT MEDIA --- */}
+          {paymentModalMsg && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+              <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+                <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                  <h3 className="text-lg font-bold text-white">
+                    Select
+                    Payment
+                    Method
+                  </h3>
+                  <button
+                    onClick={() =>
+                      setPaymentModalMsg(
+                        null,
+                      )
+                    }
+                    className="text-gray-400 hover:text-white transition-colors"
+                    disabled={
+                      processingId ===
+                      paymentModalMsg._id
+                    }
+                  >
+                    <X
+                      size={
+                        24
+                      }
+                    />
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  <p className="text-sm text-gray-400 text-center">
+                    You
+                    are
+                    unlocking
+                    media
+                    from{" "}
+                    <span className="text-white font-bold">
+                      {
+                        chatInfo?.username
+                      }
+                    </span>{" "}
+                    for{" "}
+                    <span className="text-yellow-500 font-bold">
+                      {
+                        paymentModalMsg.priceInUSDT
+                      }{" "}
+                      USDT
+                    </span>
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <button
+                      onClick={() =>
+                        setPaymentMethod(
+                          "CRYPTO",
+                        )
+                      }
+                      className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
+                        paymentMethod ===
+                        "CRYPTO"
+                          ? "border-yellow-500 bg-yellow-500/10 text-yellow-500"
+                          : "border-slate-700 text-gray-400 hover:border-slate-500"
+                      }`}
+                    >
+                      <Wallet
+                        size={
+                          28
+                        }
+                        className="mb-2"
+                      />
+                      <span className="font-bold text-sm">
+                        Crypto
+                      </span>
+                      <span className="text-[10px] opacity-70">
+                        MetaMask
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        setPaymentMethod(
+                          "CARD",
+                        )
+                      }
+                      className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
+                        paymentMethod ===
+                        "CARD"
+                          ? "border-yellow-500 bg-yellow-500/10 text-yellow-500"
+                          : "border-slate-700 text-gray-400 hover:border-slate-500"
+                      }`}
+                    >
+                      <CreditCard
+                        size={
+                          28
+                        }
+                        className="mb-2"
+                      />
+                      <span className="font-bold text-sm">
+                        Card
+                      </span>
+                      <span className="text-[10px] opacity-70">
+                        Paystack
+                        /
+                        Fiat
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* THE FINAL EXECUTION BUTTON - YELLOW THEME */}
+                  <button
+                    onClick={
+                      executePayment
+                    }
+                    disabled={
+                      !paymentMethod ||
+                      processingId ===
+                        paymentModalMsg._id
+                    }
+                    className="w-full mt-4 bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:hover:bg-yellow-500 shadow-lg shadow-yellow-500/20"
+                  >
+                    {processingId ===
+                    paymentModalMsg._id ? (
+                      <span className="animate-pulse">
+                        Processing...
+                      </span>
+                    ) : (
+                      <>
+                        <Lock
+                          size={
+                            18
+                          }
+                          className="opacity-70"
+                        />{" "}
+                        Confirm
+                        &
+                        Pay
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
