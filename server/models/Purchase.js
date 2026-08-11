@@ -96,6 +96,28 @@ const purchaseSchema =
           ],
           required: true,
         },
+      txHash:
+        {
+          type: String,
+          sparse: true, // Replaced 'required' with 'sparse' so fiat transactions can skip this
+          unique: true,
+        },
+      fiatReference:
+        {
+          type: String,
+          sparse: true,
+          unique: true,
+        },
+      paymentMethod:
+        {
+          type: String,
+          enum: [
+            "CRYPTO",
+            "FIAT",
+          ],
+          default:
+            "CRYPTO",
+        },
     },
     {
       timestamps: true,

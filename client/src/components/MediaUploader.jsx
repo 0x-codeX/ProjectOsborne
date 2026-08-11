@@ -14,6 +14,7 @@ import {
   AlignLeft,
   Type,
   Video,
+  Image as ImageIcon,
   HelpCircle,
 } from "lucide-react";
 
@@ -171,7 +172,18 @@ const MediaUploader =
           accept:
             {
               "video/*":
-                [],
+                [
+                  ".mp4",
+                  ".mov",
+                  ".webm",
+                ],
+              "image/*":
+                [
+                  ".jpg",
+                  ".jpeg",
+                  ".png",
+                  ".webp",
+                ],
             },
           maxFiles: 1,
         },
@@ -214,8 +226,10 @@ const MediaUploader =
 
           const formData =
             new FormData();
+          // IRONCLAD FIX: Changed 'video' to 'media' to accurately represent both file types.
+          // Ensure your backend endpoint expects 'media'.
           formData.append(
-            "video",
+            "media",
             selectedFile,
           );
           formData.append(
@@ -227,7 +241,7 @@ const MediaUploader =
             description,
           );
 
-          // If marked as free, force 0. Otherwise, use the inputted price (defaulting to 0 if somehow blank).
+          // If marked as free, force 0. Otherwise, use the inputted price.
           const finalPrice =
             isFree
               ? 0
@@ -241,7 +255,6 @@ const MediaUploader =
             "priceInUSDT",
             finalPrice,
           );
-
           formData.append(
             "isNsfw",
             isNsfw,
@@ -324,9 +337,15 @@ const MediaUploader =
         setProgress(
           0,
         );
-        // Refetch the default PPV price so the next upload is ready to go
         fetchDefaultPPV();
       };
+
+    // Determine if the selected file is an image or video for UI logic
+    const isImageFile =
+      selectedFile &&
+      selectedFile.type.startsWith(
+        "image/",
+      );
 
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl p-8">
@@ -336,7 +355,11 @@ const MediaUploader =
           <div
             {...getRootProps()}
             className={`p-12 text-center transition-all cursor-pointer group border-2 border-dashed m-4 rounded-2xl
-            ${isDragActive ? "border-[#FF5757] bg-slate-800/50" : "border-slate-700 hover:border-[#FF5757]"}`}
+            ${
+              isDragActive
+                ? "border-[#FF5757] bg-slate-800/50"
+                : "border-slate-700 hover:border-[#FF5757]"
+            }`}
           >
             <input
               {...getInputProps()}
@@ -346,20 +369,20 @@ const MediaUploader =
             </div>
             <h2 className="text-xl font-semibold text-white mb-2">
               Select
-              Video
               Media
             </h2>
             <p className="text-slate-400 mb-6 max-w-md mx-auto">
               Upload
-              an
-              MP4
+              high-quality
+              Videos
+              or
+              Photos
               to
               securely
               paywall
-              it
+              them
               or
               post
-              it
               as
               promo
               content.
@@ -379,7 +402,11 @@ const MediaUploader =
           <div>
             <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
               <div className="flex items-center text-emerald-400">
-                <Video className="w-6 h-6 mr-2" />
+                {isImageFile ? (
+                  <ImageIcon className="w-6 h-6 mr-2" />
+                ) : (
+                  <Video className="w-6 h-6 mr-2" />
+                )}
                 <span className="font-medium truncate max-w-[200px]">
                   {
                     selectedFile?.name
@@ -431,7 +458,11 @@ const MediaUploader =
                     "uploading"
                   }
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#FF5757] disabled:opacity-50"
-                  placeholder="E.g., Exclusive Behind the Scenes"
+                  placeholder={
+                    isImageFile
+                      ? "E.g., Exclusive Photoshoot Preview"
+                      : "E.g., Exclusive Behind the Scenes"
+                  }
                 />
               </div>
 
@@ -463,9 +494,8 @@ const MediaUploader =
                 ></textarea>
               </div>
 
-              {/* PRICING SECTION - RESTRUCTURED */}
+              {/* PRICING SECTION */}
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
-                {/* Free Content Checkbox + Tooltip */}
                 <div className="flex items-center">
                   <input
                     type="checkbox"
@@ -499,7 +529,6 @@ const MediaUploader =
                     Content
                   </label>
 
-                  {/* Custom Tooltip */}
                   <div className="relative group ml-2 flex items-center">
                     <HelpCircle className="w-4 h-4 text-slate-400 cursor-help hover:text-white transition-colors" />
                     <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover:block w-72 p-3 bg-slate-800 text-xs text-slate-300 rounded-lg shadow-xl border border-slate-700 z-10 text-center leading-relaxed">
@@ -508,10 +537,13 @@ const MediaUploader =
                       acts
                       as
                       a
-                      promo
-                      video.
+                      promo{" "}
+                      {isImageFile
+                        ? "photo"
+                        : "video"}
+                      .
                       It
-                      plays
+                      displays
                       directly
                       on
                       the
@@ -531,7 +563,7 @@ const MediaUploader =
                       subscriptions
                       or
                       PPV
-                      videos.
+                      content.
                       <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-slate-800"></div>
                     </div>
                   </div>
@@ -540,10 +572,18 @@ const MediaUploader =
                 {/* PPV Price Input */}
                 <div>
                   <label
-                    className={`flex items-center text-sm font-medium mb-1 transition-colors ${isFree ? "text-slate-600" : "text-slate-300"}`}
+                    className={`flex items-center text-sm font-medium mb-1 transition-colors ${
+                      isFree
+                        ? "text-slate-600"
+                        : "text-slate-300"
+                    }`}
                   >
                     <Tag
-                      className={`w-4 h-4 mr-2 transition-colors ${isFree ? "text-slate-600" : "text-[#FF5757]"}`}
+                      className={`w-4 h-4 mr-2 transition-colors ${
+                        isFree
+                          ? "text-slate-600"
+                          : "text-[#FF5757]"
+                      }`}
                     />
                     PPV
                     Unlock

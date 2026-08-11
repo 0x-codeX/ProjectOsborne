@@ -112,7 +112,6 @@ export const useWeb3Transfer =
         }
       };
 
-    // Notice the addition of contentId
     const transferUSDT =
       async (
         creatorAddress,
@@ -163,12 +162,10 @@ export const useWeb3Transfer =
               6,
             );
 
-          // Convert MongoDB ObjectId string to bytes32 for the smart contract
           let bytes32ContentId;
           if (
             contentId
           ) {
-            // Ensure it has the 0x prefix for ethers.js padding
             const hexId =
               contentId.startsWith(
                 "0x",
@@ -183,7 +180,7 @@ export const useWeb3Transfer =
               );
           } else {
             bytes32ContentId =
-              ethers.ZeroHash; // Fallback for subscriptions without a specific post
+              ethers.ZeroHash;
           }
 
           console.log(
@@ -194,12 +191,30 @@ export const useWeb3Transfer =
               GATEWAY_ADDRESS,
               amountParsed,
             );
-          await approveTx.wait(
-            1,
-          );
+
+          // IRONCLAD UPGRADE: Catch flaky RPC rate limits on approval
+          try {
+            await approveTx.wait(
+              1,
+            );
+          } catch (waitError) {
+            console.warn(
+              "RPC dropped the approval poll. Waiting 3 seconds as a fallback...",
+              waitError,
+            );
+            await new Promise(
+              (
+                resolve,
+              ) =>
+                setTimeout(
+                  resolve,
+                  3000,
+                ),
+            );
+          }
 
           console.log(
-            "2. Approval confirmed. Executing Gateway Purchase...",
+            "2. Approval assumed complete. Executing Gateway Purchase...",
           );
           const purchaseTx =
             await gatewayContract.purchaseWithERC20(
@@ -209,15 +224,23 @@ export const useWeb3Transfer =
               amountParsed,
             );
 
-          const receipt =
+          // IRONCLAD UPGRADE: If wait() fails due to a network 400 error, we still return the hash
+          // because the transaction is already in the blockchain mempool. Let the backend verify it!
+          try {
             await purchaseTx.wait(
               1,
             );
+          } catch (waitError) {
+            console.warn(
+              "RPC polling failed during wait, but tx was submitted. Handing off to backend.",
+              waitError,
+            );
+          }
 
           setIsProcessingTx(
             false,
           );
-          return receipt.hash;
+          return purchaseTx.hash; // Return the hash immediately instead of relying on the receipt
         } catch (error) {
           console.error(
             "Web3 Transfer Error:",
@@ -244,7 +267,7 @@ export const useWeb3Transfer =
             )
           ) {
             errorMessage =
-              "Insufficient USDT or MATIC (for gas) in your wallet.";
+              "Insufficient USDT or POL (for gas) in your wallet.";
           } else {
             errorMessage =
               error.message ||

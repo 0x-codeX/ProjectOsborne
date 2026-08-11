@@ -1,4 +1,7 @@
-import React from "react";
+import React, {
+  useState,
+  useEffect,
+} from "react";
 import {
   Outlet,
   Link,
@@ -14,7 +17,9 @@ import {
   User,
   Settings,
   LogOut,
+  Users, // IRONCLAD: Imported for the multi-creator badge
 } from "lucide-react";
+import axios from "axios";
 import landingBackground from "../assets/background7.jpg";
 import nippyLogo from "../assets/NippyLogo.png";
 
@@ -24,6 +29,131 @@ const FanLayout =
       useLocation();
     const navigate =
       useNavigate();
+
+    // IRONCLAD UI: Unified Inbox & Notification State
+    const [
+      unreadData,
+      setUnreadData,
+    ] =
+      useState(
+        {
+          creatorsCount: 0,
+          singleCreatorMessages: 0,
+        },
+      );
+    const [
+      unreadNotifs,
+      setUnreadNotifs,
+    ] =
+      useState(
+        0,
+      );
+
+    // Unified background sync for both badges
+    useEffect(() => {
+      const fetchBadges =
+        async () => {
+          try {
+            const token =
+              localStorage.getItem(
+                "nippy_token",
+              );
+            if (
+              !token
+            )
+              return;
+
+            // 1. Fetch Messages Badge
+            const msgRes =
+              await axios.get(
+                "/api/messages/inbox",
+                {
+                  headers:
+                    {
+                      Authorization: `Bearer ${token}`,
+                    },
+                },
+              );
+            const chats =
+              msgRes.data ||
+              [];
+            const unreadChats =
+              chats.filter(
+                (
+                  chat,
+                ) =>
+                  chat.unreadCount >
+                  0,
+              );
+
+            setUnreadData(
+              {
+                creatorsCount:
+                  unreadChats.length,
+                singleCreatorMessages:
+                  unreadChats.length ===
+                  1
+                    ? unreadChats[0]
+                        .unreadCount
+                    : 0,
+              },
+            );
+
+            // 2. Fetch Notifications Badge
+            const notifRes =
+              await axios.get(
+                "/api/notifications/unread-count",
+                {
+                  headers:
+                    {
+                      Authorization: `Bearer ${token}`,
+                    },
+                },
+              );
+            setUnreadNotifs(
+              notifRes
+                .data
+                .unreadCount ||
+                0,
+            );
+          } catch (error) {
+            console.error(
+              "Failed to sync badges:",
+              error,
+            );
+          }
+        };
+
+      fetchBadges();
+
+      // Listen for instant clear from the NotificationsFeed
+      const handleNotifsRead =
+        () =>
+          setUnreadNotifs(
+            0,
+          );
+      window.addEventListener(
+        "notificationsRead",
+        handleNotifsRead,
+      );
+
+      // Poll every 30 seconds to keep it fresh across tabs
+      const interval =
+        setInterval(
+          fetchBadges,
+          30000,
+        );
+
+      return () => {
+        clearInterval(
+          interval,
+        );
+        window.removeEventListener(
+          "notificationsRead",
+          handleNotifsRead,
+        );
+      };
+    }, []);
 
     const navItems =
       [
@@ -110,7 +240,6 @@ const FanLayout =
               alt="Nippy Logo"
               className="w-8 h-8 object-contain group-hover:scale-105 transition-transform"
             />
-            {/* Cleaned up conflicting text colors - streamlined to White + Emerald */}
             <span className="text-emerald-500 font-bold text-2xl tracking-tight -ml-1 transition-colors">
               ippy
               <span className="text-emerald-500">
@@ -200,11 +329,45 @@ const FanLayout =
                         : "text-gray-400 hover:text-white hover:bg-gray-800/50"
                     }`}
                   >
-                    <Icon
-                      size={
-                        18
-                      }
-                    />
+                    <div className="relative">
+                      <Icon
+                        size={
+                          18
+                        }
+                      />
+
+                      {/* DESKTOP MESSAGES BADGE */}
+                      {item.label ===
+                        "Messages" &&
+                        unreadData.creatorsCount >
+                          0 && (
+                          <span className="absolute -top-1.5 -right-2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-nippy-obsidian shadow-sm">
+                            {unreadData.creatorsCount >
+                            1 ? (
+                              <>
+                                <Users
+                                  size={
+                                    8
+                                  }
+                                />{" "}
+                                {
+                                  unreadData.creatorsCount
+                                }
+                              </>
+                            ) : (
+                              unreadData.singleCreatorMessages
+                            )}
+                          </span>
+                        )}
+
+                      {/* DESKTOP NOTIFICATIONS RED DOT */}
+                      {item.label ===
+                        "Notifications" &&
+                        unreadNotifs >
+                          0 && (
+                          <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-nippy-obsidian shadow-sm shadow-red-500/50"></span>
+                        )}
+                    </div>
                     <span className="text-sm">
                       {
                         item.label
@@ -273,16 +436,50 @@ const FanLayout =
                         : "text-gray-500 hover:text-gray-300"
                     }`}
                   >
-                    <Icon
-                      size={
-                        24
-                      }
-                      className={
-                        isActive
-                          ? "fill-emerald-500/20"
-                          : ""
-                      }
-                    />
+                    <div className="relative">
+                      <Icon
+                        size={
+                          24
+                        }
+                        className={
+                          isActive
+                            ? "fill-emerald-500/20"
+                            : ""
+                        }
+                      />
+
+                      {/* MOBILE MESSAGES BADGE */}
+                      {item.label ===
+                        "Messages" &&
+                        unreadData.creatorsCount >
+                          0 && (
+                          <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-nippy-obsidian shadow-sm shadow-black">
+                            {unreadData.creatorsCount >
+                            1 ? (
+                              <>
+                                <Users
+                                  size={
+                                    8
+                                  }
+                                />{" "}
+                                {
+                                  unreadData.creatorsCount
+                                }
+                              </>
+                            ) : (
+                              unreadData.singleCreatorMessages
+                            )}
+                          </span>
+                        )}
+
+                      {/* MOBILE NOTIFICATIONS RED DOT */}
+                      {item.label ===
+                        "Notifications" &&
+                        unreadNotifs >
+                          0 && (
+                          <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border border-nippy-obsidian shadow-sm shadow-red-500/50"></span>
+                        )}
+                    </div>
                     <span className="text-[10px] mt-1 font-medium">
                       {
                         item.label

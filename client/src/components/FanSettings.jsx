@@ -1,5 +1,6 @@
 import React, {
   useState,
+  useEffect,
 } from "react";
 import {
   ShieldAlert,
@@ -9,9 +10,21 @@ import {
   Save,
   Loader2,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ethers } from "ethers";
 
 const FanSettings =
   () => {
+    const navigate =
+      useNavigate();
+    const [
+      user,
+      setUser,
+    ] =
+      useState(
+        null,
+      );
+
     const [
       formData,
       setFormData,
@@ -28,6 +41,7 @@ const FanSettings =
             "",
         },
       );
+
     const [
       loading,
       setLoading,
@@ -45,6 +59,38 @@ const FanSettings =
           text: "",
         },
       );
+
+    // Deletion state management
+    const [
+      showDeleteConfirm,
+      setShowDeleteConfirm,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      deletePassword,
+      setDeletePassword,
+    ] =
+      useState(
+        "",
+      );
+
+    useEffect(() => {
+      const storedData =
+        JSON.parse(
+          localStorage.getItem(
+            "nippy_user",
+          ),
+        );
+      if (
+        storedData
+      ) {
+        setUser(
+          storedData,
+        );
+      }
+    }, []);
 
     const handleChange =
       (
@@ -125,7 +171,7 @@ const FanSettings =
                 text: data.message,
               },
             );
-            // Clear form on success, except perhaps the email if they updated it
+            // Clear form on success
             setFormData(
               {
                 currentPassword:
@@ -157,6 +203,152 @@ const FanSettings =
           setLoading(
             false,
           );
+        }
+      };
+
+    const handleDeleteAccount =
+      async () => {
+        setMessage(
+          {
+            type: "",
+            text: "",
+          },
+        );
+
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            ) ||
+            localStorage.getItem(
+              "token",
+            );
+          let payload =
+            {};
+
+          if (
+            user?.walletAddress
+          ) {
+            if (
+              !window.ethereum
+            ) {
+              setMessage(
+                {
+                  type: "error",
+                  text: "MetaMask wallet is required to sign the deletion request.",
+                },
+              );
+              return;
+            }
+            let targetProvider =
+              window.ethereum;
+            if (
+              window
+                .ethereum
+                .providers
+                ?.length
+            ) {
+              targetProvider =
+                window.ethereum.providers.find(
+                  (
+                    p,
+                  ) =>
+                    p.isMetaMask,
+                ) ||
+                window
+                  .ethereum
+                  .providers[0];
+            }
+            const provider =
+              new ethers.BrowserProvider(
+                targetProvider,
+              );
+            const signer =
+              await provider.getSigner();
+            const deletionMessage = `CONFIRM_ACCOUNT_DELETION: I confirm that I want to permanently delete my Nippy account (${user.walletAddress.toLowerCase()}).`;
+            const signature =
+              await signer.signMessage(
+                deletionMessage,
+              );
+            payload =
+              {
+                signature,
+              };
+          } else {
+            if (
+              !deletePassword
+            ) {
+              setMessage(
+                {
+                  type: "error",
+                  text: "Please enter your password to confirm deletion.",
+                },
+              );
+              return;
+            }
+            payload =
+              {
+                password:
+                  deletePassword,
+              };
+          }
+
+          const res =
+            await fetch(
+              "http://localhost:5000/api/users/profile",
+              {
+                method:
+                  "DELETE",
+                headers:
+                  {
+                    "Content-Type":
+                      "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                body: JSON.stringify(
+                  payload,
+                ),
+              },
+            );
+
+          if (
+            res.ok
+          ) {
+            localStorage.clear();
+            navigate(
+              "/home",
+            );
+          } else {
+            const data =
+              await res.json();
+            setMessage(
+              {
+                type: "error",
+                text:
+                  data.message ||
+                  "Failed to delete account.",
+              },
+            );
+          }
+        } catch (err) {
+          if (
+            err.code ===
+            "ACTION_REJECTED"
+          ) {
+            setMessage(
+              {
+                type: "error",
+                text: "You rejected the signature request in MetaMask.",
+              },
+            );
+          } else {
+            setMessage(
+              {
+                type: "error",
+                text: "Error processing account deletion.",
+              },
+            );
+          }
         }
       };
 
@@ -323,7 +515,12 @@ const FanSettings =
 
             {message.text && (
               <div
-                className={`p-4 rounded-xl font-bold text-sm text-center ${message.type === "error" ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-green-500/10 text-green-400 border border-green-500/20"}`}
+                className={`p-4 rounded-xl font-bold text-sm text-center ${
+                  message.type ===
+                  "error"
+                    ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                    : "bg-green-500/10 text-green-400 border border-green-500/20"
+                }`}
               >
                 {
                   message.text
@@ -358,6 +555,114 @@ const FanSettings =
                 : "Update Security Settings"}
             </button>
           </form>
+
+          {/* DANGER ZONE - Compact & Multi-Step */}
+          <div className="mt-8 border border-red-900/40 rounded-xl bg-red-950/20 p-5">
+            <h3 className="text-base font-bold text-red-500 mb-2">
+              Danger
+              Zone
+            </h3>
+
+            {!showDeleteConfirm ? (
+              <button
+                onClick={() =>
+                  setShowDeleteConfirm(
+                    true,
+                  )
+                }
+                className="text-sm bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 px-4 py-2 rounded-lg transition-colors font-medium"
+              >
+                Delete
+                Account
+              </button>
+            ) : (
+              <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                <p className="text-slate-300 text-xs leading-relaxed mb-4 border-l-2 border-red-500 pl-3">
+                  Deleting
+                  your
+                  account
+                  is
+                  permanent.
+                  This
+                  will
+                  erase
+                  your
+                  profile,
+                  revoke
+                  your
+                  Creator
+                  Vault
+                  access,
+                  remove
+                  your
+                  uploaded
+                  content,
+                  cancel
+                  your
+                  subscriptions,
+                  and
+                  permanently
+                  wipe
+                  your
+                  account
+                  data.
+                </p>
+
+                {(!user ||
+                  !user.walletAddress) && (
+                  <input
+                    type="password"
+                    placeholder="Enter your password to confirm"
+                    value={
+                      deletePassword
+                    }
+                    onChange={(
+                      e,
+                    ) =>
+                      setDeletePassword(
+                        e
+                          .target
+                          .value,
+                      )
+                    }
+                    className="w-full bg-slate-900 border border-red-900/50 rounded-lg py-2 px-4 text-white text-sm mb-4 focus:outline-none focus:border-red-500"
+                  />
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={
+                      handleDeleteAccount
+                    }
+                    className="bg-red-600 hover:bg-red-700 text-white text-sm px-4 py-2 rounded-lg font-bold transition-colors flex items-center gap-2"
+                  >
+                    {user?.walletAddress
+                      ? "Sign in MetaMask to Delete"
+                      : "Confirm Deletion"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowDeleteConfirm(
+                        false,
+                      );
+                      setDeletePassword(
+                        "",
+                      );
+                      setMessage(
+                        {
+                          type: "",
+                          text: "",
+                        },
+                      );
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );

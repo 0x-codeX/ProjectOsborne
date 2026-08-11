@@ -12,6 +12,7 @@ const {
   verifyMessagePayment,
   getSecureMessageMedia,
   buyMessageBundle,
+  getUnreadCount,
 } = require("../controllers/messageController");
 
 // Use memory storage so we don't write files to your server disk
@@ -43,6 +44,12 @@ router.get(
   "/inbox",
   requireAuth,
   getInbox,
+);
+
+router.get(
+  "/unread-count",
+  requireAuth,
+  getUnreadCount,
 );
 
 router.get(

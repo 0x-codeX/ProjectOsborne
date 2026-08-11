@@ -2,13 +2,17 @@ import React, {
   useState,
   useEffect,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Bell,
   PlaySquare,
   ShieldAlert,
   CreditCard,
   Sparkles,
-  Check,
+  Radio,
+  MessageCircleHeart,
+  Unlock,
+  Tag,
 } from "lucide-react";
 
 const NotificationsFeed =
@@ -27,6 +31,8 @@ const NotificationsFeed =
       useState(
         true,
       );
+    const navigate =
+      useNavigate();
 
     useEffect(() => {
       fetchNotifications();
@@ -49,6 +55,7 @@ const NotificationsFeed =
                   },
               },
             );
+
           if (
             response.ok
           ) {
@@ -58,6 +65,8 @@ const NotificationsFeed =
               data,
             );
 
+            // Tell the backend to mark as read, but KEEP local state as is
+            // so the user can see what was newly unread when they opened the page
             if (
               data.some(
                 (
@@ -98,61 +107,125 @@ const NotificationsFeed =
               },
           },
         );
+        // Optional: Dispatch an event here if you want the layout badge to disappear instantly
+        window.dispatchEvent(
+          new Event(
+            "notificationsRead",
+          ),
+        );
       };
 
-    const getIconForType =
+    const handleNotificationClick =
       (
-        type,
+        notif,
       ) => {
+        if (
+          notif.actionUrl
+        ) {
+          navigate(
+            notif.actionUrl,
+          );
+        }
+      };
+
+    const renderIcon =
+      (
+        notif,
+      ) => {
+        // If it's from a creator and we have their image, show their face. It converts better.
+        if (
+          notif
+            .sender
+            ?.profileImage
+        ) {
+          return (
+            <img
+              src={
+                notif
+                  .sender
+                  .profileImage
+              }
+              alt={
+                notif
+                  .sender
+                  .username
+              }
+              className="w-10 h-10 rounded-full object-cover border border-gray-700"
+            />
+          );
+        }
+
+        // Fallback to strict iconography
+        const iconProps =
+          {
+            size: 20,
+            className:
+              "text-gray-400",
+          };
+        let IconComponent =
+          Bell;
+
         switch (
-          type
+          notif.type
         ) {
           case "NEW_CONTENT":
-            return (
-              <PlaySquare
-                size={
-                  20
-                }
-                className="text-blue-400"
-              />
-            );
+            IconComponent =
+              PlaySquare;
+            iconProps.className =
+              "text-blue-400";
+            break;
           case "SYSTEM":
-            return (
-              <ShieldAlert
-                size={
-                  20
-                }
-                className="text-red-500"
-              />
-            );
+            IconComponent =
+              ShieldAlert;
+            iconProps.className =
+              "text-red-500";
+            break;
           case "SUBSCRIPTION_RENEWAL":
-            return (
-              <CreditCard
-                size={
-                  20
-                }
-                className="text-emerald-400"
-              />
-            );
+          case "PAYMENT_SUCCESS":
+            IconComponent =
+              CreditCard;
+            iconProps.className =
+              "text-emerald-400";
+            break;
           case "RECOMMENDATION":
-            return (
-              <Sparkles
-                size={
-                  20
-                }
-                className="text-purple-400"
-              />
-            );
-          default:
-            return (
-              <Bell
-                size={
-                  20
-                }
-                className="text-gray-400"
-              />
-            );
+            IconComponent =
+              Sparkles;
+            iconProps.className =
+              "text-purple-400";
+            break;
+          case "GO_LIVE":
+            IconComponent =
+              Radio;
+            iconProps.className =
+              "text-rose-500 animate-pulse";
+            break;
+          case "WELCOME_MESSAGE":
+            IconComponent =
+              MessageCircleHeart;
+            iconProps.className =
+              "text-pink-400";
+            break;
+          case "PPV_UNLOCK":
+            IconComponent =
+              Unlock;
+            iconProps.className =
+              "text-yellow-400";
+            break;
+          case "NIPPY_OFFER":
+            IconComponent =
+              Tag;
+            iconProps.className =
+              "text-emerald-400";
+            break;
         }
+
+        return (
+          <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center shrink-0 border border-gray-800">
+            <IconComponent
+              {...iconProps}
+            />
+          </div>
+        );
       };
 
     if (
@@ -160,7 +233,7 @@ const NotificationsFeed =
     ) {
       return (
         <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse">
-          Loading
+          Decrypting
           alerts...
         </div>
       );
@@ -200,17 +273,20 @@ const NotificationsFeed =
                   key={
                     notif._id
                   }
-                  className={`flex items-start gap-4 p-4 rounded-xl border transition-all ${
+                  onClick={() =>
+                    handleNotificationClick(
+                      notif,
+                    )
+                  }
+                  className={`flex items-start gap-4 p-4 rounded-xl border transition-all ${notif.actionUrl ? "cursor-pointer hover:bg-gray-800/80" : ""} ${
                     notif.isRead
                       ? "bg-nippy-obsidian border-gray-800/50 opacity-75"
                       : "bg-gray-800/50 border-gray-700 shadow-lg shadow-black/20"
                   }`}
                 >
-                  <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center shrink-0 border border-gray-800">
-                    {getIconForType(
-                      notif.type,
-                    )}
-                  </div>
+                  {renderIcon(
+                    notif,
+                  )}
 
                   <div className="flex-1">
                     <h3
@@ -220,7 +296,7 @@ const NotificationsFeed =
                         notif.title
                       }
                     </h3>
-                    <p className="text-sm text-gray-400 mt-1 leading-snug">
+                    <p className="text-sm text-gray-400 mt-1 leading-snug whitespace-pre-wrap">
                       {
                         notif.message
                       }
@@ -244,7 +320,7 @@ const NotificationsFeed =
                   </div>
 
                   {!notif.isRead && (
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 mt-2" />
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 mt-2 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
                   )}
                 </div>
               ),

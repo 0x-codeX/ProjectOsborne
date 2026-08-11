@@ -15,6 +15,8 @@ import {
   Wallet,
   CreditCard,
   X,
+  UserPlus,
+  UserCheck,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -123,6 +125,68 @@ const BookmarksFeed =
         } finally {
           setLoading(
             false,
+          );
+        }
+      };
+
+    // --- FOLLOW TOGGLE ---
+    const handleFollowToggle =
+      async (
+        creatorId,
+      ) => {
+        setFeed(
+          (
+            prevFeed,
+          ) =>
+            prevFeed.map(
+              (
+                post,
+              ) => {
+                if (
+                  post
+                    .creator
+                    ?._id ===
+                  creatorId
+                ) {
+                  return {
+                    ...post,
+                    creator:
+                      {
+                        ...post.creator,
+                        isFollowed:
+                          !post
+                            .creator
+                            .isFollowed,
+                      },
+                  };
+                }
+                return post;
+              },
+            ),
+        );
+
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          await fetch(
+            `http://localhost:5000/api/users/${creatorId}/follow`,
+            {
+              method:
+                "POST",
+              headers:
+                {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type":
+                    "application/json",
+                },
+            },
+          );
+        } catch (error) {
+          console.error(
+            "Failed to sync follow state",
+            error,
           );
         }
       };
@@ -468,17 +532,60 @@ const BookmarksFeed =
                     </div>
                   </Link>
 
-                  {post.actualPrice >
-                    0 && (
-                    <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
-                      <BadgeDollarSign
-                        size={
-                          14
-                        }
-                      />{" "}
-                      PPV
-                    </div>
-                  )}
+                  {/* IRONCLAD UPDATE: Decoupled Follow & PPV Badges */}
+                  <div className="flex items-center gap-3">
+                    {post.actualPrice >
+                      0 && (
+                      <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
+                        <BadgeDollarSign
+                          size={
+                            14
+                          }
+                        />{" "}
+                        PPV
+                      </div>
+                    )}
+
+                    {/* Follow Button */}
+                    <button
+                      onClick={() =>
+                        handleFollowToggle(
+                          post
+                            .creator
+                            ?._id,
+                        )
+                      }
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                        post
+                          .creator
+                          ?.isFollowed
+                          ? "bg-transparent text-gray-400 border-gray-700 hover:border-rose-500 hover:text-rose-500"
+                          : "bg-white text-black border-transparent hover:bg-gray-200"
+                      }`}
+                    >
+                      {post
+                        .creator
+                        ?.isFollowed ? (
+                        <>
+                          <UserCheck
+                            size={
+                              14
+                            }
+                          />{" "}
+                          Following
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus
+                            size={
+                              14
+                            }
+                          />{" "}
+                          Follow
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="relative bg-black w-full min-h-[300px] max-h-[600px] flex items-center justify-center overflow-hidden">

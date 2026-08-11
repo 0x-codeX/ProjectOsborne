@@ -2,6 +2,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
+// import { usePaystackPayment } from "react-paystack";
 import {
   useParams,
   useNavigate,
@@ -18,6 +19,7 @@ import {
   MessageSquare,
   Plus,
   Minus,
+  Check,
 } from "lucide-react";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 
@@ -28,7 +30,7 @@ const CreatorPublicProfile =
     } =
       useParams();
     const navigate =
-      useNavigate(); // Added for navigating to chat
+      useNavigate();
     const [
       profileData,
       setProfileData,
@@ -59,8 +61,6 @@ const CreatorPublicProfile =
       useState(
         false,
       );
-
-    // NEW: Chat Bundle Pre-Checkout Config
     const [
       showBundleConfig,
       setShowBundleConfig,
@@ -76,7 +76,7 @@ const CreatorPublicProfile =
         1,
       );
 
-    // Checkout Data: { type: 'PPV' | 'SUBS' | 'CHAT_BUNDLE', post, amount, bubbles (optional) }
+    // Checkout Data
     const [
       checkoutData,
       setCheckoutData,
@@ -141,6 +141,58 @@ const CreatorPublicProfile =
         }
       };
 
+    // --- NEW: FOLLOW TOGGLE ---
+    const handleFollowToggle =
+      async () => {
+        const previousState =
+          profileData.isFollowed;
+        // Optimistic UI Update
+        setProfileData(
+          (
+            prev,
+          ) => ({
+            ...prev,
+            isFollowed:
+              !previousState,
+          }),
+        );
+
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          await fetch(
+            `http://localhost:5000/api/users/${id}/follow`,
+            {
+              method:
+                "POST",
+              headers:
+                {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type":
+                    "application/json",
+                },
+            },
+          );
+        } catch (error) {
+          console.error(
+            "Failed to sync follow state",
+            error,
+          );
+          // Revert on failure
+          setProfileData(
+            (
+              prev,
+            ) => ({
+              ...prev,
+              isFollowed:
+                previousState,
+            }),
+          );
+        }
+      };
+
     const executePayment =
       async () => {
         if (
@@ -177,11 +229,6 @@ const CreatorPublicProfile =
             );
           }
 
-          console.log(
-            "1. Starting Web3 Transfer...",
-          );
-
-          // STEP 1: Execute the blockchain transaction and CAPTURE THE HASH
           const txHash =
             await transferUSDT(
               profileData
@@ -197,21 +244,11 @@ const CreatorPublicProfile =
 
           if (
             !txHash
-          ) {
+          )
             throw new Error(
               "Transaction completed but no hash was returned.",
             );
-          }
 
-          console.log(
-            "2. Blockchain success! Hash:",
-            txHash,
-          );
-          console.log(
-            "3. Notifying backend to unlock content/bubbles...",
-          );
-
-          // STEP 2: Send the hash and purchase details to the backend to unlock the goods!
           const token =
             localStorage.getItem(
               "nippy_token",
@@ -233,7 +270,7 @@ const CreatorPublicProfile =
                     txHash:
                       txHash,
                     creatorId:
-                      id, // 'id' comes from your useParams() at the top of the file
+                      id,
                     contentId:
                       checkoutData.post
                         ? checkoutData
@@ -241,7 +278,10 @@ const CreatorPublicProfile =
                             ._id
                         : null,
                     purchaseType:
-                      checkoutData.type, // Tells the backend if it's PPV, SUBSCRIPTION, or CHAT_BUNDLE
+                      checkoutData.type,
+                    subscriptionTier:
+                      checkoutData.tier ||
+                      null,
                   },
                 ),
               },
@@ -259,11 +299,6 @@ const CreatorPublicProfile =
             );
           }
 
-          console.log(
-            "4. Backend verified! Unlocking UI...",
-          );
-
-          // STEP 3: Refresh the profile to get the new chatBubblesLeft and unlocked videos
           await fetchProfile();
           setCheckoutData(
             null,
@@ -309,13 +344,12 @@ const CreatorPublicProfile =
       creator,
       isSubscribed,
       content,
+      isFollowed,
     } =
       profileData;
     const settings =
       creator.monetizationSettings ||
       {};
-
-    // Check if fan has active chat bubbles with this creator (Assumes backend sends this in profileData)
     const hasActiveChat =
       profileData.chatBubblesLeft >
         0 ||
@@ -362,28 +396,62 @@ const CreatorPublicProfile =
     return (
       <div className="max-w-4xl mx-auto pb-12 relative">
         <div className="h-48 bg-gradient-to-r from-gray-900 to-black border-b border-gray-800 relative">
-          <div className="absolute -bottom-12 left-8 flex items-end gap-4">
-            <div className="w-24 h-24 bg-gray-800 rounded-full border-4 border-black flex items-center justify-center overflow-hidden">
-              {creator.profileImage ? (
-                <img
-                  src={
-                    creator.profileImage
-                  }
-                  alt={
-                    creator.username
-                  }
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <span className="text-3xl font-bold text-gray-400">
-                  {creator.username
-                    .charAt(
-                      0,
-                    )
-                    .toUpperCase()}
-                </span>
-              )}
+          <div className="absolute -bottom-12 left-4 sm:left-8 flex items-end gap-4">
+            {/* TikTok Style Avatar with Follow Button */}
+            <div className="relative">
+              <div className="w-24 h-24 bg-gray-800 rounded-full border-4 border-black flex items-center justify-center overflow-hidden">
+                {creator.profileImage ? (
+                  <img
+                    src={
+                      creator.profileImage
+                    }
+                    alt={
+                      creator.username
+                    }
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-3xl font-bold text-gray-400">
+                    {creator.username
+                      .charAt(
+                        0,
+                      )
+                      .toUpperCase()}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={
+                  handleFollowToggle
+                }
+                className={`absolute -bottom-2 left-1/2 -translate-x-1/2 p-1.5 rounded-full border-2 border-black transition-all ${
+                  isFollowed
+                    ? "bg-gray-700 text-white hover:bg-gray-600"
+                    : "bg-rose-500 text-white hover:bg-rose-600"
+                }`}
+              >
+                {isFollowed ? (
+                  <Check
+                    size={
+                      16
+                    }
+                    strokeWidth={
+                      3
+                    }
+                  />
+                ) : (
+                  <Plus
+                    size={
+                      16
+                    }
+                    strokeWidth={
+                      3
+                    }
+                  />
+                )}
+              </button>
             </div>
+
             <div className="mb-2">
               <h1 className="text-2xl font-bold text-white flex items-center gap-2">
                 {
@@ -406,8 +474,9 @@ const CreatorPublicProfile =
             </div>
           </div>
 
-          <div className="absolute -bottom-6 right-8 flex items-center gap-3">
-            {/* DYNAMIC CHAT BUTTON FIX */}
+          {/* Sleek, compact action row on the right */}
+          <div className="absolute -bottom-5 right-4 sm:right-8 flex items-center gap-2">
+            {/* DM / CHAT BUTTON - COLOR LOGIC UPDATED HERE */}
             {settings.messageBundlePrice >
               0 &&
               (hasActiveChat ? (
@@ -417,46 +486,50 @@ const CreatorPublicProfile =
                       "/messages",
                     )
                   }
-                  className="bg-blue-600/10 text-blue-400 border border-blue-500/30 px-6 py-2 rounded-full font-bold hover:bg-blue-600/20 transition-all flex items-center gap-2 shadow-lg"
+                  // Changed from outline to solid blue when active
+                  className="bg-blue-600 text-white border border-blue-500 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-500/20"
                 >
                   <MessageSquare
                     size={
-                      18
+                      16
                     }
-                  />{" "}
-                  Chat
-                  with
-                  Creator
+                  />
+                  <span className="hidden sm:inline text-sm">
+                    DM
+                    Now
+                  </span>
                 </button>
               ) : (
                 <button
                   onClick={() => {
                     setBundleQuantity(
                       1,
-                    ); // Reset to 1 on open
+                    );
                     setShowBundleConfig(
                       true,
-                    ); // Open config modal instead of straight to checkout
+                    );
                   }}
-                  className="bg-slate-900 text-emerald-400 border border-emerald-500/30 px-6 py-2 rounded-full font-bold hover:bg-slate-800 transition-all flex items-center gap-2 shadow-lg"
+                  // Remains outline when they need to buy
+                  className="bg-slate-900 text-gray-400 border border-gray-600 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-slate-800 hover:text-white transition-all flex items-center gap-2 shadow-lg"
                 >
                   <MessageSquare
                     size={
-                      18
+                      16
                     }
-                  />{" "}
-                  Buy
-                  Chat
-                  Bundle
+                  />
+                  <span className="hidden sm:inline text-sm">
+                    Buy
+                    DM
+                  </span>
                 </button>
               ))}
 
-            {/* Subscription Buttons */}
+            {/* SUBSCRIBE BUTTON */}
             {isSubscribed ? (
-              <button className="bg-gray-800 text-emerald-400 px-6 py-2 rounded-full font-bold flex items-center gap-2 border border-gray-700 cursor-default">
+              <button className="bg-gray-800 text-emerald-400 px-4 py-2 rounded-full font-bold flex items-center gap-1.5 border border-gray-700 cursor-default text-sm">
                 <Unlock
                   size={
-                    18
+                    16
                   }
                 />{" "}
                 Subscribed
@@ -469,17 +542,17 @@ const CreatorPublicProfile =
                     true,
                   )
                 }
-                className="bg-white text-black px-8 py-2 rounded-full font-bold hover:bg-gray-200 transition-all flex items-center gap-2 shadow-lg"
+                className="bg-white text-black px-4 py-2 rounded-full font-bold hover:bg-gray-200 transition-all flex items-center gap-1.5 shadow-lg text-sm"
               >
                 <Star
                   size={
-                    18
+                    16
                   }
                 />{" "}
                 Subscribe
               </button>
             ) : (
-              <button className="bg-gray-800 text-white px-8 py-2 rounded-full font-bold border border-gray-700">
+              <button className="bg-gray-800 text-white px-4 py-2 rounded-full font-bold border border-gray-700 text-sm">
                 Free
                 Profile
               </button>
@@ -593,7 +666,7 @@ const CreatorPublicProfile =
           )}
         </div>
 
-        {/* 1. SUBSCRIPTION TIER MODAL */}
+        {/* Subscription Modal */}
         {showSubModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -650,7 +723,8 @@ const CreatorPublicProfile =
                         );
                         setCheckoutData(
                           {
-                            type: "SUBS",
+                            type: "SUBSCRIPTION",
+                            tier: tier.label,
                             post: null,
                             amount:
                               tier.price,
@@ -687,7 +761,7 @@ const CreatorPublicProfile =
           </div>
         )}
 
-        {/* 2. CHAT BUNDLE CONFIGURATION MODAL */}
+        {/* Chat Bundle Config Modal */}
         {showBundleConfig && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -746,7 +820,6 @@ const CreatorPublicProfile =
                   .
                 </p>
 
-                {/* Quantity Selector */}
                 <div className="flex items-center gap-6 mb-8 bg-slate-950 p-2 rounded-2xl border border-slate-800">
                   <button
                     onClick={() =>
@@ -803,7 +876,6 @@ const CreatorPublicProfile =
                   </button>
                 </div>
 
-                {/* Total Calculation */}
                 <div className="w-full bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex justify-between items-center mb-6">
                   <div>
                     <p className="text-xs text-emerald-500 font-bold uppercase">
@@ -845,7 +917,7 @@ const CreatorPublicProfile =
                           settings.messageBundlePrice,
                         bubbles:
                           bundleQuantity *
-                          settings.messageBundleSize, // Stored so the checkout modal can read it!
+                          settings.messageBundleSize,
                       },
                     );
                     setPaymentMethod(
@@ -863,7 +935,7 @@ const CreatorPublicProfile =
           </div>
         )}
 
-        {/* 3. UNIVERSAL CHECKOUT MODAL */}
+        {/* Checkout Modal */}
         {checkoutData && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -894,7 +966,6 @@ const CreatorPublicProfile =
               </div>
 
               <div className="p-6 space-y-4">
-                {/* Dynamic Text reflecting the custom bubbles count */}
                 <p className="text-sm text-gray-400 text-center">
                   {checkoutData.type ===
                   "PPV"

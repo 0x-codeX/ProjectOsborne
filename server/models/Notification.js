@@ -15,10 +15,15 @@ const notificationSchema =
       type: {
         type: String,
         enum: [
-          "SYSTEM",
           "NEW_CONTENT",
+          "SYSTEM",
+          "PAYMENT_SUCCESS",
           "SUBSCRIPTION_RENEWAL",
           "RECOMMENDATION",
+          "GO_LIVE",
+          "WELCOME_MESSAGE",
+          "PPV_UNLOCK",
+          "NIPPY_OFFER",
         ],
         required: true,
       },
@@ -32,7 +37,13 @@ const notificationSchema =
           type: String,
           required: true,
         },
-      // Optional: Link to the creator who triggered this (for avatars)
+      // The exact route the frontend should navigate to when clicked
+      actionUrl:
+        {
+          type: String,
+          default:
+            null,
+        },
       sender:
         {
           type: mongoose
@@ -41,7 +52,6 @@ const notificationSchema =
             .ObjectId,
           ref: "User",
         },
-      // Optional: Link to the specific video if it's a NEW_CONTENT alert
       relatedContent:
         {
           type: mongoose
@@ -69,4 +79,3 @@ module.exports =
     "Notification",
     notificationSchema,
   );
-

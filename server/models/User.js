@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
 const userSchema =
   new mongoose.Schema(
@@ -252,6 +253,26 @@ const userSchema =
               .Types
               .ObjectId,
             ref: "Content",
+          },
+        ],
+      followers:
+        [
+          {
+            type: mongoose
+              .Schema
+              .Types
+              .ObjectId,
+            ref: "User",
+          },
+        ],
+      following:
+        [
+          {
+            type: mongoose
+              .Schema
+              .Types
+              .ObjectId,
+            ref: "User",
           },
         ],
     },

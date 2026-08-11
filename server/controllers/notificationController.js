@@ -28,7 +28,7 @@ exports.getNotifications =
           )
           .limit(
             50,
-          ); // Keep it snappy, only load the latest 50
+          );
 
       res
         .status(
@@ -40,6 +40,51 @@ exports.getNotifications =
     } catch (error) {
       console.error(
         "Error fetching notifications:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Server error",
+          },
+        );
+    }
+  };
+
+// GET /api/notifications/unread-count
+exports.getUnreadCount =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const count =
+        await Notification.countDocuments(
+          {
+            recipient:
+              req
+                .user
+                ._id,
+            isRead: false,
+          },
+        );
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            unreadCount:
+              count,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Error fetching unread count:",
         error,
       );
       res

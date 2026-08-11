@@ -615,3 +615,42 @@ exports.updateProfile = async (req, res) => {
     res.status(500).json({ message: "Server error updating profile" });
   }
 };
+
+// POST /api/users/:id/follow
+// Toggles the follow state between the viewer and the target creator
+exports.toggleFollow = async (req, res) => {
+  try {
+    const targetUserId = req.params.id;
+    const viewerId = req.user._id || req.user.id;
+
+    // 1. Prevent users from following themselves
+    if (targetUserId.toString() === viewerId.toString()) {
+      return res.status(400).json({ message: "You cannot follow yourself." });
+    }
+
+    const viewer = await User.findById(viewerId);
+    if (!viewer) {
+      return res.status(404).json({ message: "Viewer not found." });
+    }
+
+    // 2. Check current state
+    const isFollowing = viewer.following.includes(targetUserId);
+
+    if (isFollowing) {
+      // UNFOLLOW: Remove from both arrays
+      await User.findByIdAndUpdate(viewerId, { $pull: { following: targetUserId } });
+      await User.findByIdAndUpdate(targetUserId, { $pull: { followers: viewerId } });
+      
+      return res.status(200).json({ message: "Unfollowed successfully", isFollowed: false });
+    } else {
+      // FOLLOW: Add to both arrays
+      await User.findByIdAndUpdate(viewerId, { $addToSet: { following: targetUserId } });
+      await User.findByIdAndUpdate(targetUserId, { $addToSet: { followers: viewerId } });
+      
+      return res.status(200).json({ message: "Followed successfully", isFollowed: true });
+    }
+  } catch (error) {
+    console.error("Follow toggle error:", error);
+    res.status(500).json({ message: "Server error toggling follow status." });
+  }
+};

@@ -1,6 +1,7 @@
 import React, {
   useState,
   useEffect,
+  useRef,
 } from "react";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import {
@@ -14,6 +15,8 @@ import {
   Wallet,
   CreditCard,
   X,
+  UserPlus,
+  UserCheck,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -44,6 +47,19 @@ const FanFeed =
       transferUSDT,
     } =
       useWeb3Transfer();
+
+    // Staging Area for new posts
+    const [
+      pendingPosts,
+      setPendingPosts,
+    ] =
+      useState(
+        [],
+      );
+    const feedRef =
+      useRef(
+        [],
+      ); // Tracks current feed for the background poller
 
     // Interaction States
     const [
@@ -82,14 +98,42 @@ const FanFeed =
     ] =
       useState(
         null,
-      ); // 'CRYPTO' | 'CARD'
+      );
 
+    // Keep the ref strictly synced with the visual feed
     useEffect(() => {
+      feedRef.current =
+        feed;
+    }, [
+      feed,
+    ]);
+
+    // Silent Polling Architecture
+    useEffect(() => {
+      // 1. Initial heavy load (shows the loading skeleton)
       fetchFeed();
+
+      // 2. Silent background polling every 15 seconds
+      const pollInterval =
+        setInterval(
+          () => {
+            pollForNewPosts();
+          },
+          15000,
+        );
+
+      return () =>
+        clearInterval(
+          pollInterval,
+        );
     }, []);
 
+    // Initial load: Only runs once when component mounts
     const fetchFeed =
       async () => {
+        setLoading(
+          true,
+        );
         try {
           const token =
             localStorage.getItem(
@@ -114,7 +158,7 @@ const FanFeed =
             !response.ok
           )
             throw new Error(
-              "Failed to load feed from server",
+              "Failed to load feed",
             );
           const data =
             await response.json();
@@ -129,6 +173,195 @@ const FanFeed =
         } finally {
           setLoading(
             false,
+          );
+        }
+      };
+
+    // Background Poll: Fetches data but DOES NOT shift the UI
+    const pollForNewPosts =
+      async () => {
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          const response =
+            await fetch(
+              "http://localhost:5000/api/content/feed",
+              {
+                method:
+                  "GET",
+                headers:
+                  {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type":
+                      "application/json",
+                  },
+              },
+            );
+
+          if (
+            !response.ok
+          )
+            return;
+          const freshData =
+            await response.json();
+
+          const currentFeed =
+            feedRef.current;
+          if (
+            currentFeed.length ===
+            0
+          )
+            return; // Nothing to compare against
+
+          // Create a Set of existing IDs for ultra-fast O(1) lookups
+          const existingIds =
+            new Set(
+              currentFeed.map(
+                (
+                  post,
+                ) =>
+                  post._id,
+              ),
+            );
+
+          // Find posts that exist in the database but NOT in our current feed
+          const newPosts =
+            freshData.filter(
+              (
+                post,
+              ) =>
+                !existingIds.has(
+                  post._id,
+                ),
+            );
+
+          if (
+            newPosts.length >
+            0
+          ) {
+            // Push them to the Staging Area (pendingPosts), NOT the main feed
+            setPendingPosts(
+              (
+                prev,
+              ) => {
+                const pendingIds =
+                  new Set(
+                    prev.map(
+                      (
+                        p,
+                      ) =>
+                        p._id,
+                    ),
+                  );
+                const trulyNew =
+                  newPosts.filter(
+                    (
+                      p,
+                    ) =>
+                      !pendingIds.has(
+                        p._id,
+                      ),
+                  );
+                return [
+                  ...trulyNew,
+                  ...prev,
+                ];
+              },
+            );
+          }
+        } catch (error) {
+          // Silently fail in the background so the user isn't bothered by network blips
+          console.error(
+            "Silent poll failed",
+            error,
+          );
+        }
+      };
+
+    // When the user clicks the "New Posts" pill
+    const injectPendingPosts =
+      () => {
+        setFeed(
+          (
+            prev,
+          ) => [
+            ...pendingPosts,
+            ...prev,
+          ],
+        );
+        setPendingPosts(
+          [],
+        );
+        window.scrollTo(
+          {
+            top: 0,
+            behavior:
+              "smooth",
+          },
+        );
+      };
+
+    // --- FOLLOW TOGGLE ---
+    const handleFollowToggle =
+      async (
+        creatorId,
+      ) => {
+        // Optimistic UI Update: Find all posts by this creator and toggle follow state
+        setFeed(
+          (
+            prevFeed,
+          ) =>
+            prevFeed.map(
+              (
+                post,
+              ) => {
+                if (
+                  post
+                    .creator
+                    ?._id ===
+                  creatorId
+                ) {
+                  return {
+                    ...post,
+                    creator:
+                      {
+                        ...post.creator,
+                        isFollowed:
+                          !post
+                            .creator
+                            .isFollowed,
+                      },
+                  };
+                }
+                return post;
+              },
+            ),
+        );
+
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          await fetch(
+            `http://localhost:5000/api/users/${creatorId}/follow`,
+            {
+              method:
+                "POST",
+              headers:
+                {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type":
+                    "application/json",
+                },
+            },
+          );
+        } catch (error) {
+          console.error(
+            "Failed to sync follow state",
+            error,
           );
         }
       };
@@ -334,7 +567,6 @@ const FanFeed =
         }
       };
 
-    // --- FINAL EXECUTION HANDLER ---
     const executePayment =
       async () => {
         if (
@@ -367,14 +599,13 @@ const FanFeed =
             );
           }
 
-          const txHash =
-            await transferUSDT(
-              paymentModalPost
-                .creator
-                .walletAddress,
-              paymentModalPost.actualPrice,
-              paymentModalPost._id,
-            );
+          await transferUSDT(
+            paymentModalPost
+              .creator
+              .walletAddress,
+            paymentModalPost.actualPrice,
+            paymentModalPost._id,
+          );
 
           await new Promise(
             (
@@ -388,7 +619,7 @@ const FanFeed =
           await fetchFeed();
           setPaymentModalPost(
             null,
-          ); // Close modal on success
+          );
         } catch (error) {
           console.error(
             "Unlock Error Trace:",
@@ -418,6 +649,30 @@ const FanFeed =
 
     return (
       <div className="max-w-2xl mx-auto py-8 px-4 relative">
+        {/* THE PILL: Only shows if there are pending posts */}
+        {pendingPosts.length >
+          0 && (
+          <div className="sticky top-4 z-50 flex justify-center mb-6 animate-in slide-in-from-top-2 duration-300">
+            <button
+              onClick={
+                injectPendingPosts
+              }
+              className="bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-bold py-2.5 px-6 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] flex items-center gap-2 transition-all transform hover:scale-105 border border-emerald-400/50"
+            >
+              ↑{" "}
+              {
+                pendingPosts.length
+              }{" "}
+              New
+              Post
+              {pendingPosts.length >
+              1
+                ? "s"
+                : ""}
+            </button>
+          </div>
+        )}
+
         {feed.length ===
         0 ? (
           <p className="text-center text-gray-500 mt-10">
@@ -466,23 +721,64 @@ const FanFeed =
                     </div>
                   </Link>
 
-                  {/* IRONCLAD UPDATE: Money tag is now Emerald */}
-                  {post.actualPrice >
-                    0 && (
-                    <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
-                      <BadgeDollarSign
-                        size={
-                          14
-                        }
-                      />{" "}
-                      PPV
-                    </div>
-                  )}
+                  {/* Right-aligned Follow & PPV Badges */}
+                  <div className="flex items-center gap-3">
+                    {post.actualPrice >
+                      0 && (
+                      <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
+                        <BadgeDollarSign
+                          size={
+                            14
+                          }
+                        />{" "}
+                        PPV
+                      </div>
+                    )}
+
+                    {/* Follow Button */}
+                    <button
+                      onClick={() =>
+                        handleFollowToggle(
+                          post
+                            .creator
+                            ?._id,
+                        )
+                      }
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                        post
+                          .creator
+                          ?.isFollowed
+                          ? "bg-transparent text-gray-400 border-gray-700 hover:border-rose-500 hover:text-rose-500"
+                          : "bg-white text-black border-transparent hover:bg-gray-200"
+                      }`}
+                    >
+                      {post
+                        .creator
+                        ?.isFollowed ? (
+                        <>
+                          <UserCheck
+                            size={
+                              14
+                            }
+                          />{" "}
+                          Following
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus
+                            size={
+                              14
+                            }
+                          />{" "}
+                          Follow
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="relative bg-black w-full min-h-[300px] max-h-[600px] flex items-center justify-center overflow-hidden">
                   {post.isLocked ? (
-                    /* LOCKED TEASER */
                     <video
                       src={
                         post.teaserUrl
@@ -499,7 +795,6 @@ const FanFeed =
                       className="w-full h-auto max-h-[600px] object-cover blur-3xl scale-[1.2] opacity-70 pointer-events-none select-none"
                     />
                   ) : (
-                    /* UNLOCKED FULL CONTENT (Defaults to Video, strictly catches Images) */
                     <>
                       {post.mediaUrl
                         ?.toLowerCase()
@@ -567,7 +862,6 @@ const FanFeed =
                       </p>
 
                       <div className="flex flex-col gap-3 w-full max-w-xs">
-                        {/* IRONCLAD UPDATE: Neutral action button that opens checkout */}
                         <button
                           onClick={() => {
                             setPaymentModalPost(
@@ -592,7 +886,6 @@ const FanFeed =
                           USDT
                         </button>
 
-                        {/* IRONCLAD UPDATE: Neutral Navigation button */}
                         <Link
                           to={`/creator/${post.creator?._id}`}
                           className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-gray-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
@@ -620,7 +913,6 @@ const FanFeed =
 
                   <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
                     <div className="flex items-center gap-6">
-                      {/* Keep Heart Red - That is universally understood for 'Likes' */}
                       <button
                         onClick={() =>
                           handleLike(
@@ -802,7 +1094,6 @@ const FanFeed =
           )
         )}
 
-        {/* IRONCLAD UPDATE: The Checkout Modal */}
         {paymentModalPost && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -913,7 +1204,6 @@ const FanFeed =
                   </button>
                 </div>
 
-                {/* THE FINAL EXECUTION BUTTON - EMERALD GREEN */}
                 <button
                   onClick={
                     executePayment

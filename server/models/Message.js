@@ -54,14 +54,27 @@ const messageSchema =
         {
           type: String,
         },
-      unlockedFor: [{ type: String, lowercase: true }],
+      unlockedFor:
+        [
+          {
+            type: String,
+            lowercase: true,
+          },
+        ],
 
       // Monetization Engine
-      priceInUSDT: { 
-  type: Number, 
-  min: 0, 
-  default: 0 
-}, // If > 0, the message is locked
+      priceInUSDT:
+        {
+          type: Number,
+          min: 0,
+          default: 0,
+        }, // If > 0, the message is locked
+      // IRONCLAD FIX: Added isRead tracker
+      isRead:
+        {
+          type: Boolean,
+          default: false,
+        },
 
       // For later: allows creators to blast a PPV message to ALL subscribers at once
       isMassMessage:

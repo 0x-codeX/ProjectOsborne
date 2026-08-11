@@ -221,6 +221,23 @@ const CreatorMessages =
         !selectedChat
       )
         return;
+      setInbox(
+        (
+          prev,
+        ) =>
+          prev.map(
+            (
+              c,
+            ) =>
+              c._id ===
+              selectedChat._id
+                ? {
+                    ...c,
+                    unreadCount: 0,
+                  }
+                : c,
+          ),
+      );
 
       const fetchMessages =
         async () => {
@@ -830,13 +847,17 @@ const CreatorMessages =
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-1">
-                        <h3 className="font-bold text-slate-200 text-sm truncate">
+                        <h3
+                          className={`font-bold text-sm truncate ${chat.unreadCount > 0 ? "text-white" : "text-slate-200"}`}
+                        >
                           {chat
                             .otherUser
                             ?.username ||
                             "Unknown Fan"}
                         </h3>
-                        <span className="text-xs text-slate-500">
+                        <span
+                          className={`text-xs ${chat.unreadCount > 0 ? "text-[#FF5757] font-bold" : "text-slate-500"}`}
+                        >
                           {chat.updatedAt
                             ? new Date(
                                 chat.updatedAt,
@@ -852,7 +873,9 @@ const CreatorMessages =
                         </span>
                       </div>
                       <div className="flex justify-between items-center mt-1">
-                        <p className="text-xs text-slate-500 truncate max-w-[70%] flex items-center gap-1">
+                        <p
+                          className={`text-xs truncate max-w-[65%] flex items-center gap-1 ${chat.unreadCount > 0 ? "text-white font-bold" : "text-slate-500"}`}
+                        >
                           {chat
                             .lastMessage
                             ?.isLockedPPV && (
@@ -868,18 +891,29 @@ const CreatorMessages =
                             ?.text ||
                             "Started a conversation"}
                         </p>
-                        <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                            chat.bubblesLeft >
-                            0
-                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                              : "bg-red-500/10 text-red-400 border border-red-500/20"
-                          }`}
-                        >
-                          {chat.bubblesLeft ||
-                            0}{" "}
-                          💬
-                        </span>
+
+                        <div className="flex items-center gap-2">
+                          {chat.unreadCount >
+                            0 && (
+                            <span className="bg-[#FF5757] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                              {
+                                chat.unreadCount
+                              }
+                            </span>
+                          )}
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                              chat.bubblesLeft >
+                              0
+                                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                : "bg-red-500/10 text-red-400 border border-red-500/20"
+                            }`}
+                          >
+                            {chat.bubblesLeft ||
+                              0}{" "}
+                            💬
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -13,6 +13,11 @@ const {
   getProfile,
   updateSettings,
 } = require("../controllers/userController");
+const {
+  toggleFollow,
+} = require("../controllers/userController");
+
+
 
 // --- GET Routes ---
 router.get(
@@ -60,6 +65,12 @@ router.delete(
   "/profile",
   requireAuth,
   deleteProfile,
+);
+
+router.post(
+  "/:id/follow",
+  requireAuth,
+  toggleFollow,
 );
 
 module.exports =

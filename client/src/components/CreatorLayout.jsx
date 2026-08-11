@@ -1,14 +1,18 @@
-import React from "react";
+import React, {
+  useState,
+  useEffect,
+} from "react";
 import {
   Outlet,
   Link,
   useLocation,
   useNavigate,
 } from "react-router-dom";
+import axios from "axios";
 import {
   LayoutDashboard,
   FolderKanban,
-  Rss, // Added for Feed
+  Rss,
   Bell,
   MessageCircle,
   User,
@@ -26,8 +30,64 @@ const CreatorLayout =
       useLocation();
     const navigate =
       useNavigate();
+    const [
+      globalUnread,
+      setGlobalUnread,
+    ] =
+      useState(
+        0,
+      );
 
-    // ALL Desktop Navigation Items
+    // Fetch lightweight unread count for the sidebar badge
+    useEffect(() => {
+      const fetchUnreadCount =
+        async () => {
+          try {
+            const token =
+              localStorage.getItem(
+                "nippy_token",
+              );
+            if (
+              !token
+            )
+              return;
+            const res =
+              await axios.get(
+                "/api/messages/unread-count",
+                {
+                  headers:
+                    {
+                      Authorization: `Bearer ${token}`,
+                    },
+                },
+              );
+            setGlobalUnread(
+              res
+                .data
+                .unreadCount ||
+                0,
+            );
+          } catch (error) {
+            console.error(
+              "Failed to fetch unread count:",
+              error,
+            );
+          }
+        };
+      fetchUnreadCount();
+
+      // Optional: Poll every 30s to keep the layout badge updated without full sockets
+      const interval =
+        setInterval(
+          fetchUnreadCount,
+          30000,
+        );
+      return () =>
+        clearInterval(
+          interval,
+        );
+    }, []);
+
     const desktopNavItems =
       [
         {
@@ -68,8 +128,6 @@ const CreatorLayout =
         },
       ];
 
-    // STRICT Mobile Navigation Items (Max 5 to prevent UI clutter)
-    // We filter out 'Alerts' and move it to the top mobile header
     const mobileNavItems =
       desktopNavItems.filter(
         (
@@ -97,7 +155,6 @@ const CreatorLayout =
 
     return (
       <div className="relative min-h-screen text-slate-200 flex flex-col font-sans">
-        {/* BACKGROUND INJECTION */}
         <div className="fixed inset-0 z-[-1] pointer-events-none overflow-hidden">
           <img
             src={
@@ -109,9 +166,8 @@ const CreatorLayout =
           <div className="absolute inset-0 bg-slate-950/95"></div>
         </div>
 
-        {/* --- DESKTOP TOP NAV --- (Hidden on Mobile) */}
+        {/* --- DESKTOP TOP NAV --- */}
         <header className="hidden md:flex justify-between items-center py-4 px-10 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-50">
-          {/* Logo */}
           <div
             className="flex items-center cursor-pointer group"
             onClick={() =>
@@ -138,7 +194,6 @@ const CreatorLayout =
             </span>
           </div>
 
-          {/* Center Nav Links */}
           <nav className="flex gap-2">
             {desktopNavItems.map(
               (
@@ -156,7 +211,6 @@ const CreatorLayout =
                 const Icon =
                   item.icon;
 
-                // Profile Dropdown Setup
                 if (
                   item.label ===
                   "Profile"
@@ -231,17 +285,31 @@ const CreatorLayout =
                     to={
                       item.path
                     }
-                    className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
+                    className={`relative flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
                       isActive
                         ? "bg-slate-800 text-[#FF5757] font-bold shadow-lg"
                         : "text-slate-400 hover:text-white hover:bg-slate-800/50"
                     }`}
                   >
-                    <Icon
-                      size={
-                        18
-                      }
-                    />
+                    <div className="relative">
+                      <Icon
+                        size={
+                          18
+                        }
+                      />
+                      {/* UNREAD BADGE INJECTION */}
+                      {item.label ===
+                        "Messages" &&
+                        globalUnread >
+                          0 && (
+                          <span className="absolute -top-1.5 -right-2 bg-[#FF5757] text-white text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full border border-slate-900">
+                            {globalUnread >
+                            99
+                              ? "99+"
+                              : globalUnread}
+                          </span>
+                        )}
+                    </div>
                     <span className="text-sm">
                       {
                         item.label
@@ -253,7 +321,6 @@ const CreatorLayout =
             )}
           </nav>
 
-          {/* Logout Button */}
           <button
             onClick={
               handleLogout
@@ -273,8 +340,7 @@ const CreatorLayout =
           </button>
         </header>
 
-        {/* --- MOBILE TOP HEADER --- (Hidden on Desktop) */}
-        {/* This secures the layout space and gives a home to the Alerts icon */}
+        {/* --- MOBILE TOP HEADER --- */}
         <header className="md:hidden flex justify-between items-center py-3 px-5 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-50">
           <div
             className="flex items-center"
@@ -295,8 +361,6 @@ const CreatorLayout =
               ippy.
             </span>
           </div>
-
-          {/* Mobile Alerts Bell (Moved here to save bottom nav space) */}
           <Link
             to="/creator/notifications"
             className={`relative p-2 rounded-full transition-colors ${
@@ -312,17 +376,14 @@ const CreatorLayout =
                 22
               }
             />
-            {/* Faux Unread Indicator - Hook this up to real data later */}
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#FF5757] rounded-full border border-slate-900"></span>
           </Link>
         </header>
 
-        {/* MAIN CONTENT AREA */}
         <main className="flex-grow pb-20 md:pb-0">
           <Outlet />
         </main>
 
-        {/* --- MOBILE BOTTOM NAV --- (Hidden on Desktop) */}
+        {/* --- MOBILE BOTTOM NAV --- */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 z-50 flex justify-around items-center py-2 px-2 pb-safe shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.5)]">
           {mobileNavItems.map(
             (
@@ -350,7 +411,7 @@ const CreatorLayout =
                   }`}
                 >
                   <div
-                    className={`p-1.5 rounded-lg transition-colors ${isActive ? "bg-[#FF5757]/10" : "bg-transparent"}`}
+                    className={`relative p-1.5 rounded-lg transition-colors ${isActive ? "bg-[#FF5757]/10" : "bg-transparent"}`}
                   >
                     <Icon
                       size={
@@ -362,6 +423,19 @@ const CreatorLayout =
                           : ""
                       }
                     />
+
+                    {/* UNREAD BADGE INJECTION MOBILE */}
+                    {item.label ===
+                      "Messages" &&
+                      globalUnread >
+                        0 && (
+                        <span className="absolute -top-0.5 -right-1 bg-[#FF5757] text-white text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full border border-slate-950">
+                          {globalUnread >
+                          99
+                            ? "99+"
+                            : globalUnread}
+                        </span>
+                      )}
                   </div>
                   <span className="text-[10px] mt-1 font-bold tracking-wide">
                     {

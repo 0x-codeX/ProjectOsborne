@@ -104,7 +104,14 @@ router.get("/:id/payload", requireAuth, async (req, res) => {
 
 
 // The 'video' string must match the FormData field name from your frontend
-router.post("/upload", requireAuth, upload.single("video"), createContentPost);
+router.post(
+  "/upload",
+  requireAuth,
+  upload.single(
+    "media",
+  ),
+  createContentPost,
+);
 
 module.exports =
   router;

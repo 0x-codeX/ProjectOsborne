@@ -14,6 +14,7 @@ import {
   Unlock,
   AlertCircle,
 } from "lucide-react";
+import { io } from "socket.io-client"; // <-- IRONCLAD FIX: Added Sockets to the Fan side
 
 const ChatWindow =
   () => {
@@ -49,13 +50,6 @@ const ChatWindow =
       useState(
         "",
       );
-    // const [
-    //   requiresPurchase,
-    //   setRequiresPurchase,
-    // ] =
-    //   useState(
-    //     false,
-    //   ); // Triggers the 24hr block UI
 
     const currentUser =
       JSON.parse(
@@ -69,8 +63,63 @@ const ChatWindow =
         null,
       );
 
+    // Keep track of the socket instance
+    const socketRef =
+      useRef(
+        null,
+      );
+
     useEffect(() => {
       fetchMessages();
+
+      // IRONCLAD FIX: Wire up Socket.io for Fans
+      socketRef.current =
+        io(
+          import.meta
+            .env
+            .VITE_BACKEND_URL ||
+            "http://localhost:5000",
+        );
+      socketRef.current.emit(
+        "join_chat",
+        conversationId,
+      );
+
+      socketRef.current.on(
+        "receive_message",
+        (
+          newMessage,
+        ) => {
+          setMessages(
+            (
+              prev,
+            ) => {
+              if (
+                prev.some(
+                  (
+                    msg,
+                  ) =>
+                    msg._id ===
+                    newMessage._id,
+                )
+              )
+                return prev;
+              return [
+                ...prev,
+                newMessage,
+              ];
+            },
+          );
+          scrollToBottom();
+        },
+      );
+
+      return () => {
+        if (
+          socketRef.current
+        )
+          socketRef.current.disconnect();
+      };
     }, [
       conversationId,
     ]);
@@ -143,8 +192,8 @@ const ChatWindow =
           0
             ? messages[0]
                 .sender ===
-                currentUser._id ||
-              currentUser.id
+              (currentUser._id ||
+                currentUser.id)
               ? messages[0]
                   .receiver
               : messages[0]
@@ -172,9 +221,12 @@ const ChatWindow =
               },
             );
 
+          // We rely on the socket to append the message, or append optimistically:
           setMessages(
-            [
-              ...messages,
+            (
+              prev,
+            ) => [
+              ...prev,
               res
                 .data
                 .data,
@@ -198,7 +250,6 @@ const ChatWindow =
         }
       };
 
-    // Mock function to represent the Web3 payment flow for PPV messages
     const handleUnlockMessage =
       async (
         messageId,
@@ -237,7 +288,6 @@ const ChatWindow =
                 msg.sender ===
                 myId;
 
-              // Bulletproof check
               const isVoiceNote =
                 msg.fileType?.includes(
                   "audio",
@@ -266,7 +316,6 @@ const ChatWindow =
                         : "bg-slate-900 text-slate-200 rounded-2xl rounded-tl-sm border border-slate-700"
                     }`}
                   >
-                    {/* --- VOICE NOTE RENDERING --- */}
                     {isVoiceNote && (
                       <div className="flex flex-col gap-1 mt-1 mb-2">
                         <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">
@@ -285,7 +334,6 @@ const ChatWindow =
                       </div>
                     )}
 
-                    {/* --- LOCKED PPV RENDERING --- */}
                     {isLockedPPV ? (
                       <div className="mt-2 w-64 p-4 bg-black rounded-xl border border-yellow-500/30 flex flex-col items-center">
                         <Lock
@@ -308,12 +356,10 @@ const ChatWindow =
                         </button>
                       </div>
                     ) : (
-                      /* --- FREE MEDIA & TEXT RENDERING --- */
                       <div className="flex flex-col gap-2">
                         {msg.fileKey &&
                           !isVoiceNote && (
                             <>
-                              {/* 1. Explicit check for Video */}
                               {(msg.fileType?.includes(
                                 "video",
                               ) ||
@@ -328,8 +374,6 @@ const ChatWindow =
                                   className="w-full md:w-[250px] rounded-lg bg-black"
                                 />
                               )}
-
-                              {/* 2. Explicit check for Image */}
                               {(msg.fileType?.includes(
                                 "image",
                               ) ||
@@ -344,8 +388,6 @@ const ChatWindow =
                                   className="w-full md:w-[250px] rounded-lg"
                                 />
                               )}
-
-                              {/* 3. Fallback for other file types (PDFs, Docs, etc.) */}
                               {!msg.fileType?.includes(
                                 "video",
                               ) &&
@@ -369,8 +411,6 @@ const ChatWindow =
                                 )}
                             </>
                           )}
-
-                        {/* Ironclad text rendering */}
                         {msg.text &&
                           msg.text.trim()
                             .length >
@@ -384,7 +424,6 @@ const ChatWindow =
                       </div>
                     )}
 
-                    {/* TIMESTAMPS */}
                     <div
                       className={`text-[10px] mt-1.5 flex items-center gap-1 ${isMe ? "text-white/70 justify-end" : "text-slate-500"}`}
                     >
@@ -411,9 +450,6 @@ const ChatWindow =
           />
         </div>
 
-        {/* ❌ DELETE THE 24-HOUR RULE BLOCKER UI YOU HAD HERE ❌ */}
-
-        {/* INPUT AREA */}
         <form
           onSubmit={
             handleSendMessage

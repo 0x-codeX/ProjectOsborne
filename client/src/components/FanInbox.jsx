@@ -46,7 +46,6 @@ const FanInbox =
               localStorage.getItem(
                 "nippy_token",
               );
-            // Assuming your getInbox controller returns a list of conversations populated with creator info
             const res =
               await axios.get(
                 "/api/messages/inbox",
@@ -57,8 +56,37 @@ const FanInbox =
                     },
                 },
               );
+
+            // IRONCLAD FIX: Sort conversations so the most recent is always at the top
+            const sortedChats =
+              res.data.sort(
+                (
+                  a,
+                  b,
+                ) => {
+                  const dateA =
+                    new Date(
+                      a
+                        .lastMessage
+                        ?.createdAt ||
+                        0,
+                    );
+                  const dateB =
+                    new Date(
+                      b
+                        .lastMessage
+                        ?.createdAt ||
+                        0,
+                    );
+                  return (
+                    dateB -
+                    dateA
+                  );
+                },
+              );
+
             setConversations(
-              res.data,
+              sortedChats,
             );
           } catch (error) {
             console.error(
@@ -91,6 +119,44 @@ const FanInbox =
             );
         },
       );
+
+    // Helper function to format time like WhatsApp (e.g., "10:45 AM" or "Yesterday")
+    const formatTime =
+      (
+        dateString,
+      ) => {
+        if (
+          !dateString
+        )
+          return "";
+        const date =
+          new Date(
+            dateString,
+          );
+        const today =
+          new Date();
+        const isToday =
+          date.getDate() ===
+            today.getDate() &&
+          date.getMonth() ===
+            today.getMonth() &&
+          date.getFullYear() ===
+            today.getFullYear();
+
+        if (
+          isToday
+        ) {
+          return date.toLocaleTimeString(
+            [],
+            {
+              hour: "2-digit",
+              minute:
+                "2-digit",
+            },
+          );
+        }
+        return date.toLocaleDateString();
+      };
 
     return (
       <div className="w-full max-w-3xl mx-auto flex flex-col h-full min-h-screen bg-nippy-onyx">
@@ -188,13 +254,6 @@ const FanInbox =
                             className="text-emerald-500"
                           />
                         </h2>
-                        <span className="text-xs text-gray-500 whitespace-nowrap ml-2">
-                          {new Date(
-                            chat
-                              .lastMessage
-                              ?.createdAt,
-                          ).toLocaleDateString()}
-                        </span>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -210,7 +269,9 @@ const FanInbox =
                             PPV
                           </span>
                         )}
-                        <p className="text-sm truncate text-gray-500">
+                        <p
+                          className={`text-sm truncate ${chat.unreadCount > 0 ? "text-slate-200 font-semibold" : "text-gray-500"}`}
+                        >
                           {chat
                             .lastMessage
                             ?.text ||
@@ -219,12 +280,33 @@ const FanInbox =
                       </div>
                     </div>
 
-                    <ChevronRight
-                      size={
-                        20
-                      }
-                      className="text-gray-600 flex-shrink-0"
-                    />
+                    {/* IRONCLAD UI: WhatsApp style right-column for date and badges */}
+                    <div className="flex flex-col items-end justify-center min-w-[50px] gap-1.5">
+                      <span
+                        className={`text-xs whitespace-nowrap ${chat.unreadCount > 0 ? "text-emerald-500 font-bold" : "text-gray-500"}`}
+                      >
+                        {formatTime(
+                          chat
+                            .lastMessage
+                            ?.createdAt,
+                        )}
+                      </span>
+                      {chat.unreadCount >
+                      0 ? (
+                        <div className="bg-red-500 text-white text-[10px] font-bold min-w-[20px] h-[20px] px-1.5 flex items-center justify-center rounded-full">
+                          {
+                            chat.unreadCount
+                          }
+                        </div>
+                      ) : (
+                        <ChevronRight
+                          size={
+                            18
+                          }
+                          className="text-gray-600 flex-shrink-0"
+                        />
+                      )}
+                    </div>
                   </div>
                 ),
               )}

@@ -7,8 +7,10 @@ import {
   Users,
   PlaySquare,
   ChevronRight,
+  Image as ImageIcon,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+
 
 const FanDashboard =
   () => {
@@ -160,7 +162,7 @@ const FanDashboard =
           <div className="space-y-4">
             {data
               .subscriptions
-              .length ===
+              ?.length ===
             0 ? (
               <p className="text-center text-gray-500 mt-10">
                 You
@@ -229,67 +231,82 @@ const FanDashboard =
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {data
               .ppv
-              .length ===
+              ?.length ===
             0 ? (
               <p className="text-center text-gray-500 mt-10 col-span-2">
-                No
-                PPV
-                content
-                unlocked
-                yet.
+                No PPV content unlocked yet.
               </p>
             ) : (
-              data.ppv.map(
-                (
-                  item,
-                ) => (
+              data.ppv.map((item) => {
+                // 1. Extract the nested content object from the Purchase record
+                const contentObj = item.content;
+
+                // If for some reason the content was deleted from the DB but the purchase remains, fail gracefully
+                if (!contentObj) return null;
+
+                // 2. Safely grab the media URL from the nested object
+                const mediaSource =
+                  contentObj.mediaUrl ||
+                  `https://pub-${import.meta.env.VITE_CLOUDFLARE_R2_DEV_DOMAIN}.r2.dev/${contentObj.fileKey}`;
+
+                // 3. Robust image checking using the same logic from FanFeed
+                const isImage =
+                  contentObj.fileType?.includes("image") ||
+                  contentObj.mediaType?.includes("image") ||
+                  mediaSource?.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)/i);
+
+                return (
                   <div
-                    key={
-                      item._id
-                    }
+                    key={item._id}
                     className="bg-nippy-obsidian border border-gray-800 rounded-xl overflow-hidden shadow-md flex flex-col"
                   >
-                    <div className="bg-black aspect-video flex items-center justify-center">
-                      <video
-                        controls
-                        className="w-full h-full object-contain"
-                        src={`https://pub-${import.meta.env.VITE_CLOUDFLARE_R2_DEV_DOMAIN}.r2.dev/${item.content?.fileKey}`}
-                      >
-                        Unsupported
-                        browser.
-                      </video>
+                    <div className="bg-black aspect-video flex items-center justify-center relative overflow-hidden">
+                      {isImage ? (
+                        <img
+                          src={mediaSource}
+                          alt={contentObj.title || "Unlocked Content"}
+                          onContextMenu={(e) => e.preventDefault()}
+                          draggable="false"
+                          className="w-full h-full object-contain select-none"
+                        />
+                      ) : (
+                        <video
+                          src={mediaSource}
+                          controls
+                          controlsList="nodownload noplaybackrate"
+                          disablePictureInPicture
+                          onContextMenu={(e) => e.preventDefault()}
+                          className="w-full h-full object-contain"
+                        >
+                          Unsupported browser.
+                        </video>
+                      )}
                     </div>
                     <div className="p-4 flex-1 flex flex-col justify-between">
                       <div>
-                        <h3 className="font-bold text-white mb-1">
-                          {item
-                            .content
-                            ?.title ||
-                            "Deleted Content"}
+                        <h3 className="font-bold text-white mb-1 flex items-center gap-2">
+                          {isImage ? (
+                            <ImageIcon size={16} className="text-gray-400" />
+                          ) : (
+                            <PlaySquare size={16} className="text-gray-400" />
+                          )}
+                          {contentObj.title || "Deleted Content"}
                         </h3>
                         <p className="text-xs text-gray-500 mb-3">
-                          By{" "}
-                          {
-                            item
-                              .creator
-                              ?.username
-                          }
+                          By {item.creator?.username || "Unknown"}
                         </p>
                       </div>
                       <div className="text-xs font-medium bg-emerald-500/10 text-emerald-500 inline-block px-3 py-1 rounded-full self-start border border-emerald-500/20">
-                        Purchased
-                        on{" "}
-                        {new Date(
-                          item.createdAt,
-                        ).toLocaleDateString()}
+                        Purchased on {new Date(item.createdAt).toLocaleDateString()}
                       </div>
                     </div>
                   </div>
-                ),
-              )
+                );
+              })
             )}
           </div>
         )}
+
       </div>
     );
   };
