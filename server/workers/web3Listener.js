@@ -9,6 +9,33 @@ const Purchase = require("../models/Purchase");
 const Wallet = require("../models/Wallet");
 const Notification = require("../models/Notification");
 
+// SIMPLE IN-MEMORY / MONGO BLOCK TRACKER
+const SyncStateSchema =
+  new mongoose.Schema(
+    {
+      key: {
+        type: String,
+        default:
+          "web3_listener_last_block",
+        unique: true,
+      },
+      lastBlock:
+        {
+          type: Number,
+          required: true,
+        },
+    },
+  );
+
+const SyncState =
+  mongoose
+    .models
+    .SyncState ||
+  mongoose.model(
+    "SyncState",
+    SyncStateSchema,
+  );
+
 const RPC_HTTP_URL =
   process
     .env
@@ -29,28 +56,24 @@ const GATEWAY_ABI =
 
 /**
  * FULL Idempotent Fulfillment Engine
- * Executed whenever a raw blockchain purchase is detected by WebSocket or Sweep.
  */
 async function processPurchaseEvent(
   buyerWallet,
   creatorWallet,
   contentIdBytes32,
   rawPrice,
+  rawCreatorCut, // The exact 80% cut from the smart contract
   txHash,
 ) {
   try {
-    // 1. Guard against Subscriptions (Handle via separate pipeline if needed)
+    // 1. Guard against Subscriptions
     if (
       contentIdBytes32 ===
       ethers.ZeroHash
-    ) {
-      console.log(
-        `[!] Subscription detected from ${buyerWallet} | Tx: ${txHash}. Skipping PPV flow.`,
-      );
+    )
       return;
-    }
 
-    // 2. IDEMPOTENCY CHECK: Has this transaction already been processed by the API or Listener?
+    // 2. IDEMPOTENCY CHECK
     const existingPurchase =
       await Purchase.findOne(
         {
@@ -61,13 +84,13 @@ async function processPurchaseEvent(
       existingPurchase
     ) {
       console.log(
-        `[i] Transaction ${txHash} already fulfilled. Skipping listener processing.`,
+        `[i] Transaction ${txHash} already fulfilled.`,
       );
       return;
     }
 
-    // 3. Resolve Content & Mongo IDs
-    const extractedMongoId =
+    // 3. BULLETPROOF ID EXTRACTION
+    let extractedMongoId =
       contentIdBytes32.slice(
         -24,
       );
@@ -76,8 +99,20 @@ async function processPurchaseEvent(
         extractedMongoId,
       )
     ) {
+      extractedMongoId =
+        contentIdBytes32.slice(
+          2,
+          26,
+        );
+    }
+
+    if (
+      !mongoose.Types.ObjectId.isValid(
+        extractedMongoId,
+      )
+    ) {
       console.error(
-        `[-] Invalid Mongo ObjectId derived from bytes32: ${extractedMongoId}`,
+        `[-] Invalid Mongo ObjectId derived from bytes32: ${contentIdBytes32}`,
       );
       return;
     }
@@ -92,22 +127,29 @@ async function processPurchaseEvent(
       !content
     ) {
       console.error(
-        `[-] Content ${extractedMongoId} not found for tx ${txHash}`,
+        `[-] Content ${extractedMongoId} not found.`,
       );
       return;
     }
 
     const creator =
       content.creator;
-    const amountPaid =
+    const amountPaidUSDT =
       Number(
         ethers.formatUnits(
           rawPrice,
           6,
         ),
-      ); // USDT standard = 6 decimals
+      );
+    const creatorEarningsUSDT =
+      Number(
+        ethers.formatUnits(
+          rawCreatorCut,
+          6,
+        ),
+      );
 
-    // 4. Resolve Fan User Account via Wallet Address
+    // 4. RESOLVE FAN USER ACCOUNT
     const fanUser =
       await User.findOne(
         {
@@ -121,13 +163,12 @@ async function processPurchaseEvent(
             },
         },
       );
-
     const buyerId =
       fanUser
         ? fanUser._id
         : null;
 
-    // 5. UNLOCK CONTENT
+    // 5. UNLOCK CONTENT IN DATABASE
     await Content.findByIdAndUpdate(
       content._id,
       {
@@ -145,7 +186,9 @@ async function processPurchaseEvent(
     );
 
     // 6. CREATE PURCHASE RECORD
-    const purchase =
+    if (
+      buyerId
+    ) {
       await Purchase.create(
         {
           user: buyerId,
@@ -155,49 +198,72 @@ async function processPurchaseEvent(
             creator._id ||
             creator,
           txHash,
-          amountPaid,
+          amountPaid:
+            amountPaidUSDT,
           purchaseType:
             "PPV",
           status:
             "completed",
         },
       );
-
-    // 7. CREDIT CREATOR WALLET (20% Platform Fee Split)
-    const PLATFORM_FEE = 0.2;
-    const creatorEarnings =
-      Number(
-        (
-          amountPaid *
-          (1 -
-            PLATFORM_FEE)
-        ).toFixed(
-          4,
-        ),
+    } else {
+      console.warn(
+        `[!] Unregistered wallet ${buyerWallet} purchased content. Unlocked, but no dashboard record created.`,
       );
+    }
 
-    await Wallet.findOneAndUpdate(
-      {
-        creator:
-          creator._id ||
-          creator,
-      },
-      {
-        $inc: {
-          balanceUSDT:
-            creatorEarnings,
-          totalEarnedUSDT:
-            creatorEarnings,
+    // 7. CALCULATE EARNINGS & CREDIT CREATOR WALLET
+    if (
+      creatorWallet ===
+      ethers.ZeroAddress
+    ) {
+      // FALLBACK ROUTE: Zero-Math Escrow
+      // We save the pure USDT to their Web2 Fiat Map for Friday liquidation.
+      await Wallet.findOneAndUpdate(
+        {
+          creator:
+            creator._id ||
+            creator,
         },
-      },
-      {
-        upsert: true,
-        returnDocument:
-          "after",
-      },
-    );
+        {
+          $inc: {
+            "fiatBalances.USDT":
+              creatorEarningsUSDT,
+            "fiatTotalEarned.USDT":
+              creatorEarningsUSDT,
+          },
+        },
+        {
+          upsert: true,
+        },
+      );
+      console.log(
+        `[+] Escrow: Saved ${creatorEarningsUSDT} USDT for off-chain fiat settlement.`,
+      );
+    } else {
+      // DIRECT ROUTE: On-Chain Settlement.
+      await Wallet.findOneAndUpdate(
+        {
+          creator:
+            creator._id ||
+            creator,
+        },
+        {
+          $inc: {
+            lifetimeWeb3EarnedUSDT:
+              creatorEarningsUSDT,
+          },
+        },
+        {
+          upsert: true,
+        },
+      );
+      console.log(
+        `[i] On-Chain Settlement: Creator ${creatorWallet} already received $${creatorEarningsUSDT} USDT directly.`,
+      );
+    }
 
-    // 8. DISPATCH DUAL NOTIFICATIONS (Fan + Creator)
+    // 8. DISPATCH DUAL NOTIFICATIONS
     const creatorIdStr =
       creator._id
         ? creator._id.toString()
@@ -213,11 +279,12 @@ async function processPurchaseEvent(
             creator._id ||
             creator,
           sender:
-            buyerId,
+            buyerId ||
+            null,
           type: "PAYMENT_SUCCESS",
           title:
             "PPV Unlocked!",
-          message: `${fanName} unlocked your PPV post! You earned $${creatorEarnings} USDT.`,
+          message: `${fanName} unlocked your PPV post! You earned a share of the sale.`,
           actionUrl:
             "/fan/dashboard",
           relatedContent:
@@ -249,9 +316,8 @@ async function processPurchaseEvent(
     await Notification.insertMany(
       notifications,
     );
-
     console.log(
-      `[+] SUCCESS: Full fulfillment completed via Listener for Content ${extractedMongoId} | Tx: ${txHash}`,
+      `[+] SUCCESS: Listener fulfilled Content ${extractedMongoId} | Tx: ${txHash}`,
     );
   } catch (error) {
     console.error(
@@ -280,7 +346,7 @@ async function startListener() {
     return;
   }
 
-  // PHASE 1: Gentle Catch-Up Sweep
+  // PHASE 1: Persistent Catch-Up Sweep
   try {
     const httpProvider =
       new ethers.JsonRpcProvider(
@@ -292,71 +358,99 @@ async function startListener() {
         GATEWAY_ABI,
         httpProvider,
       );
-
     const currentBlock =
       await httpProvider.getBlockNumber();
-    const lookbackBlocks = 500; // Reduced from 2000 to prevent RPC rate-limiting
-    const fromBlock =
-      Math.max(
-        0,
-        currentBlock -
-          lookbackBlocks,
+
+    let syncRecord =
+      await SyncState.findOne(
+        {
+          key: "web3_listener_last_block",
+        },
       );
-    const maxBlockRange = 9;
-
-    console.log(
-      `Sweeping blocks ${fromBlock} to ${currentBlock}...`,
-    );
-
-    for (
-      let start =
-        fromBlock;
-      start <=
-      currentBlock;
-      start +=
-        maxBlockRange +
-        1
-    ) {
-      const end =
-        Math.min(
-          start +
-            maxBlockRange,
-          currentBlock,
-        );
-      try {
-        const pastEvents =
-          await httpContract.queryFilter(
-            "ContentPurchased",
-            start,
-            end,
+    let fromBlock =
+      syncRecord
+        ? syncRecord.lastBlock +
+          1
+        : Math.max(
+            0,
+            currentBlock -
+              2000,
           );
-        for (const event of pastEvents) {
-          await processPurchaseEvent(
-            event
-              .args[0], // buyer
-            event
-              .args[1], // creator
-            event
-              .args[2], // contentId
-            event
-              .args[4], // price
-            event.transactionHash,
+
+    if (
+      fromBlock <
+      currentBlock
+    ) {
+      console.log(
+        `Sweeping blocks ${fromBlock} to ${currentBlock}...`,
+      );
+      const maxBlockRange = 9;
+
+      for (
+        let start =
+          fromBlock;
+        start <=
+        currentBlock;
+        start +=
+          maxBlockRange +
+          1
+      ) {
+        const end =
+          Math.min(
+            start +
+              maxBlockRange,
+            currentBlock,
+          );
+        try {
+          const pastEvents =
+            await httpContract.queryFilter(
+              "ContentPurchased",
+              start,
+              end,
+            );
+          for (const event of pastEvents) {
+            await processPurchaseEvent(
+              event
+                .args[0], // buyer
+              event
+                .args[1], // creator
+              event
+                .args[2], // contentId
+              event
+                .args[4], // rawPrice
+              event
+                .args[5], // rawCreatorCut
+              event.transactionHash,
+            );
+          }
+        } catch (chunkError) {
+          console.warn(
+            `[WARN] Chunk ${start}-${end} sweep skipped due to RPC limit.`,
           );
         }
-      } catch (chunkError) {
-        console.warn(
-          `[WARN] Chunk ${start}-${end} sweep skipped due to RPC limit.`,
+        await new Promise(
+          (
+            resolve,
+          ) =>
+            setTimeout(
+              resolve,
+              300,
+            ),
         );
       }
-      await new Promise(
-        (
-          resolve,
-        ) =>
-          setTimeout(
-            resolve,
-            300,
-          ),
-      ); // Throttling delay
+
+      await SyncState.findOneAndUpdate(
+        {
+          key: "web3_listener_last_block",
+        },
+        {
+          lastBlock:
+            currentBlock,
+        },
+        {
+          upsert: true,
+        },
+      );
     }
   } catch (error) {
     console.error(
@@ -397,15 +491,40 @@ async function startListener() {
         console.log(
           `\n--- Live Purchase Detected ---`,
         );
+        const txHash =
+          event
+            .log
+            .transactionHash;
+
         await processPurchaseEvent(
           buyer,
           creator,
           contentIdBytes32,
           price,
+          creatorCut,
+          txHash,
+        );
+
+        if (
           event
             .log
-            .transactionHash,
-        );
+            .blockNumber
+        ) {
+          await SyncState.findOneAndUpdate(
+            {
+              key: "web3_listener_last_block",
+            },
+            {
+              lastBlock:
+                event
+                  .log
+                  .blockNumber,
+            },
+            {
+              upsert: true,
+            },
+          );
+        }
       },
     );
 

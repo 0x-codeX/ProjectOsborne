@@ -8,6 +8,8 @@ const {
   loginUser,
   web3Login,
   getWeb3Nonce,
+  linkEmailToAccount,
+  linkWalletToAccount,
 } = require("../controllers/authController");
 const {
   startKycSession,
@@ -58,6 +60,16 @@ router.get(
   "/me",
   requireAuth,
   getMe,
+);
+router.put(
+  "/link-email",
+  requireAuth,
+  linkEmailToAccount,
+);
+router.put(
+  "/link-wallet",
+  requireAuth,
+  linkWalletToAccount,
 );
 
 

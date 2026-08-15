@@ -15,3 +15,6 @@ For CloudFlare CORS Policy
 (Note: Using * is fine for development. When you launch the actual business, we will lock AllowedOrigins down to your official production domain name).
 
 Block the attach media contents via chats for now.
+
+
+what is your architectural plan for handling fiat chargebacks on Paystack if a malicious fan uses a stolen credit card, buys a PPV, and the bank forces a reversal after the creator has already withdrawn the funds?

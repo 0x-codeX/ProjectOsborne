@@ -17,6 +17,7 @@ import {
   Image as ImageIcon,
   HelpCircle,
 } from "lucide-react";
+import { useUpload } from "../context/UploadContext";
 
 const MediaUploader =
   () => {
@@ -73,7 +74,7 @@ const MediaUploader =
     ] =
       useState(
         "",
-      );
+      ); // Reverted to priceInUSDT to match backend
     const [
       isFree,
       setIsFree,
@@ -88,6 +89,13 @@ const MediaUploader =
       useState(
         false,
       );
+    const {
+      startUpload,
+      updateProgress,
+      completeUpload,
+      failUpload,
+    } =
+      useUpload();
 
     // Fetch the Global Default PPV on component mount
     const fetchDefaultPPV =
@@ -176,14 +184,17 @@ const MediaUploader =
                   ".mp4",
                   ".mov",
                   ".webm",
-                ],
+                  ".avi",
+                  ".mkv",
+                ], // Expanded top video formats
               "image/*":
                 [
                   ".jpg",
                   ".jpeg",
                   ".png",
                   ".webp",
-                ],
+                  ".gif",
+                ], // Expanded top image formats
             },
           maxFiles: 1,
         },
@@ -209,6 +220,11 @@ const MediaUploader =
           "",
         );
 
+        // 3. TRIGGER GLOBAL BACKGROUND UPLOAD
+        startUpload(
+          selectedFile.name,
+        );
+
         try {
           const token =
             localStorage.getItem(
@@ -226,8 +242,6 @@ const MediaUploader =
 
           const formData =
             new FormData();
-          // IRONCLAD FIX: Changed 'video' to 'media' to accurately represent both file types.
-          // Ensure your backend endpoint expects 'media'.
           formData.append(
             "media",
             selectedFile,
@@ -241,7 +255,6 @@ const MediaUploader =
             description,
           );
 
-          // If marked as free, force 0. Otherwise, use the inputted price.
           const finalPrice =
             isFree
               ? 0
@@ -280,36 +293,47 @@ const MediaUploader =
                         100) /
                         progressEvent.total,
                     );
-                  setProgress(
+                  const cappedPercent =
                     Math.min(
                       percent,
                       90,
-                    ),
-                  );
+                    );
+
+                  setProgress(
+                    cappedPercent,
+                  ); // Update local UI
+                  updateProgress(
+                    cappedPercent,
+                  ); // Update global background UI
                 },
             },
           );
 
-          setProgress(
-            100,
-          );
-          setStatus(
-            "complete",
-          );
+          // 4. ON SUCCESS: Complete global, and instantly reset local so they can upload again
+          completeUpload();
+          resetUploader();
         } catch (error) {
           console.error(
             "Upload failed:",
             error,
           );
-          setErrorMessage(
+          const errorMsg =
             error
               .response
               ?.data
               ?.message ||
-              "Server rejected the upload.",
+            "Server rejected the upload.";
+
+          setErrorMessage(
+            errorMsg,
           );
           setStatus(
             "error",
+          );
+
+          // 5. ON FAIL: Trigger global error
+          failUpload(
+            errorMsg,
           );
         }
       };
@@ -354,8 +378,7 @@ const MediaUploader =
           "idle" && (
           <div
             {...getRootProps()}
-            className={`p-12 text-center transition-all cursor-pointer group border-2 border-dashed m-4 rounded-2xl
-            ${
+            className={`p-12 text-center transition-all cursor-pointer flex flex-col items-center group border-2 border-dashed m-4 rounded-2xl ${
               isDragActive
                 ? "border-[#FF5757] bg-slate-800/50"
                 : "border-slate-700 hover:border-[#FF5757]"
@@ -364,14 +387,14 @@ const MediaUploader =
             <input
               {...getInputProps()}
             />
-            <div className="bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
+            <div className="bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
               <Upload className="w-8 h-8 text-[#FF5757]" />
             </div>
-            <h2 className="text-xl font-semibold text-white mb-2">
+            <h2 className="text-xl font-semibold text-white mb-2 text-center">
               Select
               Media
             </h2>
-            <p className="text-slate-400 mb-6 max-w-md mx-auto">
+            <p className="text-slate-400 mb-6 max-w-md text-center">
               Upload
               high-quality
               Videos
@@ -384,6 +407,7 @@ const MediaUploader =
               or
               post
               as
+              free
               promo
               content.
             </p>
@@ -400,8 +424,8 @@ const MediaUploader =
           status ===
             "uploading") && (
           <div>
-            <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
-              <div className="flex items-center text-emerald-400">
+            <div className="flex flex-col items-center mb-6 border-b border-slate-800 pb-4 text-center">
+              <div className="flex items-center text-emerald-400 justify-center mb-2">
                 {isImageFile ? (
                   <ImageIcon className="w-6 h-6 mr-2" />
                 ) : (
@@ -572,18 +596,10 @@ const MediaUploader =
                 {/* PPV Price Input */}
                 <div>
                   <label
-                    className={`flex items-center text-sm font-medium mb-1 transition-colors ${
-                      isFree
-                        ? "text-slate-600"
-                        : "text-slate-300"
-                    }`}
+                    className={`flex items-center text-sm font-medium mb-1 transition-colors ${isFree ? "text-slate-600" : "text-slate-300"}`}
                   >
                     <Tag
-                      className={`w-4 h-4 mr-2 transition-colors ${
-                        isFree
-                          ? "text-slate-600"
-                          : "text-[#FF5757]"
-                      }`}
+                      className={`w-4 h-4 mr-2 transition-colors ${isFree ? "text-slate-600" : "text-[#FF5757]"}`}
                     />
                     PPV
                     Unlock
@@ -613,8 +629,7 @@ const MediaUploader =
                       status ===
                         "uploading"
                     }
-                    className={`w-full border rounded-lg px-4 py-3 text-white focus:outline-none transition-all
-                    ${
+                    className={`w-full border rounded-lg px-4 py-3 text-white focus:outline-none transition-all ${
                       isFree
                         ? "bg-slate-900 border-slate-800 opacity-50 cursor-not-allowed"
                         : "bg-slate-950 border-slate-700 focus:border-[#FF5757]"
@@ -656,18 +671,10 @@ const MediaUploader =
                       !isNsfw,
                     )
                   }
-                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
-                    isNsfw
-                      ? "bg-[#FF5757]"
-                      : "bg-slate-700"
-                  }`}
+                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${isNsfw ? "bg-[#FF5757]" : "bg-slate-700"}`}
                 >
                   <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      isNsfw
-                        ? "translate-x-6"
-                        : "translate-x-0"
-                    }`}
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${isNsfw ? "translate-x-6" : "translate-x-0"}`}
                   />
                 </button>
               </div>
@@ -729,13 +736,13 @@ const MediaUploader =
         {/* STAGE 3: ERROR OR COMPLETE */}
         {status ===
           "error" && (
-          <div className="py-6 text-center">
-            <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-white mb-2">
+          <div className="py-6 flex flex-col items-center text-center">
+            <XCircle className="w-16 h-16 text-red-500 mb-4" />
+            <h2 className="text-xl font-semibold text-white mb-2 text-center">
               Upload
               Failed
             </h2>
-            <p className="text-slate-400 mb-6">
+            <p className="text-slate-400 mb-6 text-center">
               {
                 errorMessage
               }
@@ -754,17 +761,17 @@ const MediaUploader =
 
         {status ===
           "complete" && (
-          <div className="py-8 text-center">
-            <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+          <div className="py-8 flex flex-col items-center text-center">
+            <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6">
               <CheckCircle className="w-10 h-10 text-emerald-500" />
             </div>
-            <h2 className="text-2xl font-bold text-white mb-2">
+            <h2 className="text-2xl font-bold text-white mb-2 text-center">
               Live
               on
               the
               Platform
             </h2>
-            <p className="text-slate-400 mb-8">
+            <p className="text-slate-400 mb-8 text-center">
               Content
               processed
               and

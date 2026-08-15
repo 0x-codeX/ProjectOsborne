@@ -11,7 +11,6 @@ const purchaseSchema =
         ref: "User",
         required: true,
       },
-      // In Purchase.js, update this line:
       content:
         {
           type: mongoose
@@ -21,7 +20,6 @@ const purchaseSchema =
           ref: "Content",
           required: false,
         },
-      // Expiration date for subscriptions; not needed for one-time purchases
       expiresAt:
         {
           type: Date,
@@ -41,11 +39,10 @@ const purchaseSchema =
             "pending",
             "completed",
             "failed",
-          ], // Crucial for Web3/Crypto txHashes
+          ],
           default:
             "completed",
         },
-      // Made optional for subscriptions
       creator:
         {
           type: mongoose
@@ -55,26 +52,6 @@ const purchaseSchema =
           ref: "User",
           required: true,
         },
-      txHash:
-        {
-          type: String,
-          required: true,
-          unique: true,
-        }, // UNIQUE prevents replay attacks
-      amountPaid:
-        {
-          type: Number,
-          required: true,
-        },
-      // purchaseType:
-      //   {
-      //     type: String,
-      //     enum: [
-      //       "PPV",
-      //       "SUBSCRIPTION",
-      //     ],
-      //     required: true,
-      //   },
       message:
         {
           type: mongoose
@@ -99,14 +76,19 @@ const purchaseSchema =
       txHash:
         {
           type: String,
-          sparse: true, // Replaced 'required' with 'sparse' so fiat transactions can skip this
+          sparse: true, // Crucial for Web3, optional for Fiat
           unique: true,
         },
       fiatReference:
         {
           type: String,
-          sparse: true,
+          sparse: true, // Crucial for Fiat, optional for Web3
           unique: true,
+        },
+      amountPaid:
+        {
+          type: Number,
+          required: true,
         },
       paymentMethod:
         {

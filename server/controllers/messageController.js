@@ -7,6 +7,12 @@ const {
 } = require("ethers");
 const Wallet = require("../models/Wallet");
 const {
+  convertAndRoundPrice,
+} = require("../utils/currencyConversion");
+
+
+
+const {
   S3Client,
   GetObjectCommand,
   PutObjectCommand,
@@ -829,133 +835,62 @@ exports.getInbox =
 
 // @desc    Get Messages for a specific Conversation
 // @route   GET /api/messages/:conversationId
-exports.getMessages =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const userId =
-        req
-          .user
-          ._id ||
-        req
-          .user
-          .id;
-      const {
-        conversationId,
-      } =
-        req.params;
+exports.getMessages = async (req, res) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const { conversationId } = req.params;
+    const userCountry = req.user?.country || "United States";
 
-      // 1. Fetch conversation AND populate the creator's details for the UI
-      const conversation =
-        await Conversation.findById(
-          conversationId,
-        )
-          .populate(
-            "creator",
-            "username profileImage walletAddress monetizationSettings",
-          )
-          .lean();
+    // 1. Fetch conversation AND populate the creator's details for the UI
+    const conversation = await Conversation.findById(conversationId)
+      .populate("creator", "username profileImage walletAddress monetizationSettings")
+      .lean();
 
-      if (
-        !conversation
-      ) {
-        return res
-          .status(
-            404,
-          )
-          .json(
-            {
-              message:
-                "Conversation not found.",
-            },
-          );
-      }
-
-      // Security: Check if user is in the participants array.
-      const isParticipant =
-        conversation.participants.some(
-          (
-            participant,
-          ) =>
-            participant.toString() ===
-            userId.toString(),
-        );
-
-      if (
-        !isParticipant
-      ) {
-        return res
-          .status(
-            403,
-          )
-          .json(
-            {
-              message:
-                "Unauthorized to view these messages.",
-            },
-          );
-      }
-
-      // IRONCLAD FIX: The moment they open the chat, mark all pending messages directed to them as READ.
-      await Message.updateMany(
-        {
-          conversationId:
-            conversationId,
-          receiver:
-            userId,
-          isRead: false,
-        },
-        {
-          $set: {
-            isRead: true,
-          },
-        },
-      );
-
-      // 2. Fetch the messages in chronological order
-      const messages =
-        await Message.find(
-          {
-            conversationId,
-          },
-        )
-          .sort(
-            {
-              createdAt: 1,
-            },
-          )
-          .lean();
-
-      // 3. Return BOTH the populated conversation AND the messages
-      res
-        .status(
-          200,
-        )
-        .json(
-          {
-            conversation,
-            messages,
-          },
-        );
-    } catch (error) {
-      console.error(
-        "GetMessages Error:",
-        error,
-      );
-      res
-        .status(
-          500,
-        )
-        .json(
-          {
-            message:
-              "Server error fetching messages.",
-          },
-        );
+    if (!conversation) {
+      return res.status(404).json({ message: "Conversation not found." });
     }
-  };
+
+    // Security: Check if user is in the participants array.
+    const isParticipant = conversation.participants.some(
+      (participant) => participant.toString() === userId.toString()
+    );
+
+    if (!isParticipant) {
+      return res.status(403).json({ message: "Unauthorized to view these messages." });
+    }
+
+    // IRONCLAD FIX: The moment they open the chat, mark all pending messages directed to them as READ.
+    await Message.updateMany(
+      { conversationId: conversationId, receiver: userId, isRead: false },
+      { $set: { isRead: true } }
+    );
+
+    // 2. Fetch the messages in chronological order
+    const messages = await Message.find({ conversationId })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    // 3. Dynamic Pricing for Chat Bundles
+    const creatorSettings = conversation.creator.monetizationSettings || {};
+    const baseBundlePriceNGN = creatorSettings.messageBundlePrice || 0;
+    const bundlePricing = await convertAndRoundPrice(baseBundlePriceNGN, userCountry);
+
+    // 4. Return BOTH the populated conversation, messages, AND dynamic chat info
+    res.status(200).json({
+      conversation,
+      messages,
+      chatInfo: {
+        bundleSize: creatorSettings.messageBundleSize || 5,
+        bundleDisplayPrice: bundlePricing.displayPrice,
+        bundleDisplayCurrency: bundlePricing.displayCurrency,
+        bundlePaystackNGN: bundlePricing.paystackNGNAmount,
+      }
+    });
+  } catch (error) {
+    console.error("GetMessages Error:", error);
+    res.status(500).json({ message: "Server error fetching messages." });
+  }
+};
 
 // @desc    Verify USDT payment for a locked DM and grant access
 // @route   POST /api/messages/unlock

@@ -14,12 +14,30 @@ const walletSchema =
           required: true,
           unique: true,
         },
-      balanceUSDT:
+      // Fiat held by the platform (e.g., via Paystack)
+      fiatBalances: {
+  // Cleared funds ready for withdrawal request
+  withdrawable: {
+    type: Map,
+    of: Number,
+    default: {}
+  },
+  // Pending funds awaiting Paystack bank settlement
+  floating: {
+    type: Map,
+    of: Number,
+    default: {}
+  }
+},
+      fiatTotalEarned:
         {
-          type: Number,
-          default: 0,
+          type: Map,
+          of: Number,
+          default:
+            {},
         },
-      totalEarnedUSDT:
+      // Crypto sent directly to their wallet via smart contract (Read-only analytics)
+      lifetimeWeb3EarnedUSDT:
         {
           type: Number,
           default: 0,

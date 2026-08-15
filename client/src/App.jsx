@@ -3,6 +3,7 @@ import {
   BrowserRouter as Router,
   Routes,
   Route,
+  Outlet,
 } from "react-router-dom";
 import CreatorLayout from "./components/CreatorLayout";
 import FanLayout from "./components/FanLayout";
@@ -12,6 +13,7 @@ import KycPage from "./components/KycPage";
 import CreatorDashboard from "./pages/CreatorDashboard";
 import BioDataSetup from "./components/BioDataSetup";
 import CreatorProfile from "./components/CreatorProfile";
+import CreatorSettings from "./components/CreatorSettings";
 import CreatorVault from "./pages/CreatorVault";
 import FanFeed from "./components/FanFeed";
 import FanBiodata from "./components/FanBiodata";
@@ -26,6 +28,7 @@ import CreatorMessages from "./components/CreatorMessages";
 import FanInbox from "./components/FanInbox";
 import FanChatWindow from "./components/FanChatWindow";
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import { UploadProvider } from "./context/UploadContext";
 
 // Dummy components to prevent white-screen crashes on new routes
 const Placeholder =
@@ -161,57 +164,62 @@ function App() {
           {/* =========================================
               CREATOR ZONE (Rendered inside CreatorLayout)
           ========================================= */}
+          {/* IRONCLAD FIX: Wrap Outlet inside UploadProvider so child routes actually render */}
           <Route
             element={
-              <CreatorLayout />
+              <UploadProvider>
+                <Outlet />
+              </UploadProvider>
             }
           >
             <Route
-              path="/creator/dashboard"
               element={
-                <CreatorDashboard />
+                <CreatorLayout />
               }
-            />
-            <Route
-              path="/creator/vault"
-              element={
-                <CreatorVault />
-              }
-            />
-            <Route
-              path="/creator/profile"
-              element={
-                <CreatorProfile />
-              }
-            />
-
-            {/* NEW: Explicit routes to intercept the layout links and stop the crash */}
-            <Route
-              path="/creator/feed"
-              element={
-                <CreatorFeed />
-              }
-            />
-            <Route
-              path="/creator/messages"
-              element={
-                <CreatorMessages />
-              }
-            />
-            <Route
-              path="/creator/notifications"
-              element={
-                <Placeholder title="Creator Alerts" />
-              }
-            />
-
-            {/* FUTURE: If you add settings, intercept it here too */}
-            <Route
-              path="/creator/settings"
-              element={
-                <Placeholder title="Creator Settings" />
-              }
-            />
+            >
+              <Route
+                path="/creator/dashboard"
+                element={
+                  <CreatorDashboard />
+                }
+              />
+              <Route
+                path="/creator/vault"
+                element={
+                  <CreatorVault />
+                }
+              />
+              <Route
+                path="/creator/profile"
+                element={
+                  <CreatorProfile />
+                }
+              />
+              <Route
+                path="/creator/settings"
+                element={
+                  <CreatorSettings />
+                }
+              />
+              <Route
+                path="/creator/feed"
+                element={
+                  <CreatorFeed />
+                }
+              />
+              <Route
+                path="/creator/messages"
+                element={
+                  <CreatorMessages />
+                }
+              />
+              <Route
+                path="/creator/notifications"
+                element={
+                  <Placeholder title="Creator Alerts" />
+                }
+              />
+            </Route>
           </Route>
         </Routes>
       </Router>

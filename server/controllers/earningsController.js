@@ -2,59 +2,142 @@ const Wallet = require("../models/Wallet");
 const Withdrawal = require("../models/Withdrawal");
 const Purchase = require("../models/Purchase");
 
-// GET /api/earnings/dashboard
-exports.getDashboard = async (req, res) => {
-  try {
-    const creatorId = req.user._id;
+exports.getDashboard =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const creatorId =
+        req
+          .user
+          ._id;
 
-    // 1. Fetch Wallet (Your existing O(1) fast-read logic)
-    let wallet = await Wallet.findOne({ creator: creatorId }).lean();
-    if (!wallet) {
-      wallet = { balanceUSDT: 0, totalEarnedUSDT: 0 };
+      let wallet =
+        await Wallet.findOne(
+          {
+            creator:
+              creatorId,
+          },
+        ).lean();
+      if (
+        !wallet
+      ) {
+        wallet =
+          {
+            fiatBalances:
+              {},
+            fiatTotalEarned:
+              {},
+            lifetimeWeb3EarnedUSDT: 0,
+          };
+      }
+
+      const withdrawals =
+        await Withdrawal.find(
+          {
+            creator:
+              creatorId,
+          },
+        )
+          .sort(
+            {
+              createdAt:
+                -1,
+            },
+          )
+          .limit(
+            10,
+          )
+          .lean();
+
+      const recentSales =
+        await Purchase.find(
+          {
+            creator:
+              creatorId,
+            status:
+              "completed",
+          },
+        )
+          .populate(
+            "user",
+            "username profileImage",
+          )
+          .populate(
+            "content",
+            "title",
+          )
+          .sort(
+            {
+              createdAt:
+                -1,
+            },
+          )
+          .limit(
+            10,
+          )
+          .lean();
+
+      const activeSubscribers =
+        await Purchase.countDocuments(
+          {
+            creator:
+              creatorId,
+            purchaseType:
+              "SUBSCRIPTION",
+            status:
+              "completed",
+            expiresAt:
+              {
+                $gt: new Date(),
+              },
+          },
+        );
+
+      const ppvSalesCount =
+        await Purchase.countDocuments(
+          {
+            creator:
+              creatorId,
+            purchaseType:
+              "PPV",
+            status:
+              "completed",
+          },
+        );
+
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            wallet,
+            withdrawals,
+            recentTransactions:
+              recentSales,
+            activeSubscribers,
+            ppvSalesCount,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Dashboard Error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Failed to load dashboard",
+          },
+        );
     }
-
-    // 2. Fetch Recent Withdrawals (Your existing logic)
-    const withdrawals = await Withdrawal.find({ creator: creatorId })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
-
-    // 3. Fetch Recent Sales (Your existing logic, enhanced slightly for safety)
-    const recentSales = await Purchase.find({ creator: creatorId, status: "completed" })
-      .populate("user", "username profileImage") // Grab profileImage for the UI avatars!
-      .populate("content", "title")
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
-
-    // 4. NEW: Count Active Subscribers (Only counting unexpired subs!)
-    const activeSubscribers = await Purchase.countDocuments({
-      creator: creatorId,
-      purchaseType: "SUBSCRIPTION",
-      status: "completed",
-      expiresAt: { $gt: new Date() } // Strict check: Must not be expired
-    });
-
-    // 5. NEW: Count Total PPV Unlocks
-    const ppvSalesCount = await Purchase.countDocuments({
-      creator: creatorId,
-      purchaseType: "PPV",
-      status: "completed"
-    });
-
-    // Send it all back
-    res.status(200).json({
-      wallet,
-      withdrawals,
-      recentTransactions: recentSales, // Renamed key so our UI map() works instantly
-      activeSubscribers,
-      ppvSalesCount
-    });
-  } catch (error) {
-    console.error("Dashboard Error:", error);
-    res.status(500).json({ message: "Failed to load dashboard" });
-  }
-};
+  };
 
 // POST /api/earnings/withdraw
 exports.requestWithdrawal =

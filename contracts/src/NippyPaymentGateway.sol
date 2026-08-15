@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /**
  * @title NippyPaymentGateway
  * @notice A stateless multi-currency payment router enforcing an 80/20 revenue split.
+ * @dev Supports fallback routing to Treasury if creator has no Web3 wallet address.
  */
 contract NippyPaymentGateway is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -28,7 +29,7 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public constant MAX_FEE_BPS = 3000; // 30% hard cap
 
-    // Events (Max 3 indexed parameters per EVM spec)
+    // Events
     event ContentPurchased(
         address indexed buyer,
         address indexed creator,
@@ -63,7 +64,7 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Emergency toggle to enable/disable a token without resetting its minimum amount.
+     * @notice Emergency toggle to enable/disable a token.
      */
     function setTokenStatus(address token, bool isEnabled) external onlyOwner {
         supportedTokens[token].isEnabled = isEnabled;
@@ -72,10 +73,13 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
 
     /**
      * @notice Executes purchase using a whitelisted ERC20 token (e.g., USDT, USDC).
+     * @dev If creator is address(0), 100% of funds route to Treasury for off-chain DB settlement.
      */
+    /// @param creator The creator's wallet address. Pass address(0) if the creator
+    ///                has no Web3 wallet; funds will route 100% to Treasury for
+    ///                off-chain DB settlement of the 80% creator share.
     function purchaseWithERC20(address token, address creator, bytes32 contentId, uint256 price) external nonReentrant {
         require(token != address(0), "Use purchaseWithNative for ETH/POL");
-        require(creator != address(0), "Invalid creator address");
         require(creator != msg.sender, "Creators cannot buy their own content");
         require(creator != treasury, "Creator cannot be treasury");
 
@@ -86,11 +90,18 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
         uint256 treasuryCut = (price * TREASURY_FEE_BPS) / BPS_DENOMINATOR;
         uint256 creatorCut = price - treasuryCut;
 
-        if (treasuryCut > 0) {
-            IERC20(token).safeTransferFrom(msg.sender, treasury, treasuryCut);
-        }
-        if (creatorCut > 0) {
-            IERC20(token).safeTransferFrom(msg.sender, creator, creatorCut);
+        if (creator == address(0)) {
+            // FALLBACK ROUTE: Creator has no crypto address set.
+            // Treasury collects 100% on-chain; backend credits creator's DB balance with 80%.
+            IERC20(token).safeTransferFrom(msg.sender, treasury, price);
+        } else {
+            // DIRECT ROUTE: On-chain instant split
+            if (treasuryCut > 0) {
+                IERC20(token).safeTransferFrom(msg.sender, treasury, treasuryCut);
+            }
+            if (creatorCut > 0) {
+                IERC20(token).safeTransferFrom(msg.sender, creator, creatorCut);
+            }
         }
 
         emit ContentPurchased(msg.sender, creator, contentId, token, price, creatorCut, treasuryCut);
@@ -98,9 +109,9 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
 
     /**
      * @notice Executes purchase using native network tokens (ETH, POL).
+     * @dev If creator is address(0), 100% of funds route to Treasury for off-chain DB settlement.
      */
     function purchaseWithNative(address payable creator, bytes32 contentId) external payable nonReentrant {
-        require(creator != address(0), "Invalid creator address");
         require(creator != msg.sender, "Creators cannot buy their own content");
         require(creator != treasury, "Creator cannot be treasury");
 
@@ -112,14 +123,21 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
         uint256 treasuryCut = (price * TREASURY_FEE_BPS) / BPS_DENOMINATOR;
         uint256 creatorCut = price - treasuryCut;
 
-        if (treasuryCut > 0) {
-            (bool successTreasury,) = treasury.call{value: treasuryCut}("");
-            require(successTreasury, "Treasury transfer failed");
-        }
+        if (creator == address(0)) {
+            // FALLBACK ROUTE: Send 100% native coin to Treasury
+            (bool successTreasury,) = treasury.call{value: price}("");
+            require(successTreasury, "Treasury native transfer failed");
+        } else {
+            // DIRECT ROUTE: On-chain instant split
+            if (treasuryCut > 0) {
+                (bool successTreasury,) = treasury.call{value: treasuryCut}("");
+                require(successTreasury, "Treasury transfer failed");
+            }
 
-        if (creatorCut > 0) {
-            (bool successCreator,) = creator.call{value: creatorCut}("");
-            require(successCreator, "Creator transfer failed");
+            if (creatorCut > 0) {
+                (bool successCreator,) = creator.call{value: creatorCut}("");
+                require(successCreator, "Creator transfer failed");
+            }
         }
 
         emit ContentPurchased(msg.sender, creator, contentId, address(0), price, creatorCut, treasuryCut);
@@ -137,9 +155,6 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
         TREASURY_FEE_BPS = _newFeeBps;
     }
 
-    /**
-     * @notice Rescues mistakenly sent ERC20 tokens sitting in the contract.
-     */
     function rescueERC20(address token, address to, uint256 amount) external onlyOwner {
         require(to != address(0), "Invalid destination address");
         uint256 balance = IERC20(token).balanceOf(address(this));
@@ -147,9 +162,6 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
         IERC20(token).safeTransfer(to, amount);
     }
 
-    /**
-     * @notice Rescues mistakenly sent native coins sitting in the contract.
-     */
     function rescueNative(address payable to, uint256 amount) external onlyOwner {
         require(to != address(0), "Invalid destination address");
         require(amount <= address(this).balance, "Insufficient native balance");

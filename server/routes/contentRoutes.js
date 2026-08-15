@@ -17,6 +17,7 @@ const {
   addComment,
   getBookmarks,
   getCreatorPublicProfile,
+  recordView,
 } = require("../controllers/contentController");
 const Content = require("../models/Content");
 const multer = require("multer");
@@ -112,6 +113,13 @@ router.post(
   ),
   createContentPost,
 );
+
+router.post(
+  "/:id/view",
+  requireAuth,
+  recordView,
+);
+
 
 module.exports =
   router;

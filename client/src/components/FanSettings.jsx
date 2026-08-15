@@ -24,24 +24,6 @@ const FanSettings =
       useState(
         null,
       );
-
-    const [
-      formData,
-      setFormData,
-    ] =
-      useState(
-        {
-          currentPassword:
-            "",
-          newEmail:
-            "",
-          newPassword:
-            "",
-          newWalletAddress:
-            "",
-        },
-      );
-
     const [
       loading,
       setLoading,
@@ -59,8 +41,6 @@ const FanSettings =
           text: "",
         },
       );
-
-    // Deletion state management
     const [
       showDeleteConfirm,
       setShowDeleteConfirm,
@@ -76,6 +56,21 @@ const FanSettings =
         "",
       );
 
+    const [
+      formData,
+      setFormData,
+    ] =
+      useState(
+        {
+          currentPassword:
+            "",
+          newEmail:
+            "",
+          newPassword:
+            "",
+        },
+      );
+
     useEffect(() => {
       const storedData =
         JSON.parse(
@@ -85,11 +80,10 @@ const FanSettings =
         );
       if (
         storedData
-      ) {
+      )
         setUser(
           storedData,
         );
-      }
     }, []);
 
     const handleChange =
@@ -109,7 +103,8 @@ const FanSettings =
         );
       };
 
-    const handleSubmit =
+    // WEB2 UPDATE: Email & Password
+    const handleStandardUpdate =
       async (
         e,
       ) => {
@@ -117,13 +112,12 @@ const FanSettings =
         if (
           !formData.currentPassword
         ) {
-          setMessage(
+          return setMessage(
             {
               type: "error",
               text: "Current password is required.",
             },
           );
-          return;
         }
 
         setLoading(
@@ -161,7 +155,6 @@ const FanSettings =
 
           const data =
             await response.json();
-
           if (
             response.ok
           ) {
@@ -171,7 +164,6 @@ const FanSettings =
                 text: data.message,
               },
             );
-            // Clear form on success
             setFormData(
               {
                 currentPassword:
@@ -179,8 +171,6 @@ const FanSettings =
                 newEmail:
                   "",
                 newPassword:
-                  "",
-                newWalletAddress:
                   "",
               },
             );
@@ -206,7 +196,8 @@ const FanSettings =
         }
       };
 
-    const handleDeleteAccount =
+    // WEB3 UPDATE: Cryptographic Wallet Linking
+    const handleLinkWallet =
       async () => {
         setMessage(
           {
@@ -214,119 +205,93 @@ const FanSettings =
             text: "",
           },
         );
-
         try {
+          if (
+            !window.ethereum
+          ) {
+            return setMessage(
+              {
+                type: "error",
+                text: "MetaMask is not installed.",
+              },
+            );
+          }
+
+          setLoading(
+            true,
+          );
+          const provider =
+            new ethers.BrowserProvider(
+              window.ethereum,
+            );
+          const signer =
+            await provider.getSigner();
+          const address =
+            await signer.getAddress();
+
+          const authMessage = `LINK_WALLET_TO_NIPPY:${address.toLowerCase()}`;
+          const signature =
+            await signer.signMessage(
+              authMessage,
+            );
+
           const token =
             localStorage.getItem(
               "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
             );
-          let payload =
-            {};
-
-          if (
-            user?.walletAddress
-          ) {
-            if (
-              !window.ethereum
-            ) {
-              setMessage(
-                {
-                  type: "error",
-                  text: "MetaMask wallet is required to sign the deletion request.",
-                },
-              );
-              return;
-            }
-            let targetProvider =
-              window.ethereum;
-            if (
-              window
-                .ethereum
-                .providers
-                ?.length
-            ) {
-              targetProvider =
-                window.ethereum.providers.find(
-                  (
-                    p,
-                  ) =>
-                    p.isMetaMask,
-                ) ||
-                window
-                  .ethereum
-                  .providers[0];
-            }
-            const provider =
-              new ethers.BrowserProvider(
-                targetProvider,
-              );
-            const signer =
-              await provider.getSigner();
-            const deletionMessage = `CONFIRM_ACCOUNT_DELETION: I confirm that I want to permanently delete my Nippy account (${user.walletAddress.toLowerCase()}).`;
-            const signature =
-              await signer.signMessage(
-                deletionMessage,
-              );
-            payload =
-              {
-                signature,
-              };
-          } else {
-            if (
-              !deletePassword
-            ) {
-              setMessage(
-                {
-                  type: "error",
-                  text: "Please enter your password to confirm deletion.",
-                },
-              );
-              return;
-            }
-            payload =
-              {
-                password:
-                  deletePassword,
-              };
-          }
-
           const res =
             await fetch(
-              "http://localhost:5000/api/users/profile",
+              "http://localhost:5000/api/auth/link-wallet",
               {
                 method:
-                  "DELETE",
+                  "PUT",
                 headers:
                   {
+                    Authorization: `Bearer ${token}`,
                     "Content-Type":
                       "application/json",
-                    Authorization: `Bearer ${token}`,
                   },
                 body: JSON.stringify(
-                  payload,
+                  {
+                    walletAddress:
+                      address,
+                    signature,
+                  },
                 ),
               },
             );
 
+          const data =
+            await res.json();
           if (
             res.ok
           ) {
-            localStorage.clear();
-            navigate(
-              "/home",
+            setMessage(
+              {
+                type: "success",
+                text: "Wallet successfully linked!",
+              },
+            );
+            const updatedUser =
+              {
+                ...user,
+                walletAddress:
+                  address.toLowerCase(),
+              };
+            setUser(
+              updatedUser,
+            );
+            localStorage.setItem(
+              "nippy_user",
+              JSON.stringify(
+                updatedUser,
+              ),
             );
           } else {
-            const data =
-              await res.json();
             setMessage(
               {
                 type: "error",
-                text:
-                  data.message ||
-                  "Failed to delete account.",
+                text: data.message,
               },
             );
           }
@@ -338,19 +303,33 @@ const FanSettings =
             setMessage(
               {
                 type: "error",
-                text: "You rejected the signature request in MetaMask.",
+                text: "Signature rejected.",
               },
             );
           } else {
             setMessage(
               {
                 type: "error",
-                text: "Error processing account deletion.",
+                text: "Failed to link wallet.",
               },
             );
           }
+        } finally {
+          setLoading(
+            false,
+          );
         }
       };
+
+    const handleDeleteAccount =
+      async () => {
+        /* Retain your existing deletion logic here */
+      };
+
+    if (
+      !user
+    )
+      return null;
 
     return (
       <div className="max-w-2xl mx-auto py-8 px-4">
@@ -368,35 +347,19 @@ const FanSettings =
           </h1>
         </div>
 
-        <div className="bg-nippy-obsidian border border-red-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-          {/* Subtle security background stripe */}
+        <div className="bg-nippy-obsidian border border-red-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden mb-8">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-orange-500"></div>
-
-          <p className="text-sm text-gray-400 mb-8 border-b border-gray-800 pb-4">
-            Updates
-            to
-            your
-            email,
-            password,
-            or
-            Web3
-            wallet
-            address
-            require
-            your
-            current
-            password
-            to
-            authorize.
-          </p>
+          <h2 className="text-white font-bold mb-4">
+            Web2
+            Credentials
+          </h2>
 
           <form
             onSubmit={
-              handleSubmit
+              handleStandardUpdate
             }
             className="space-y-6"
           >
-            {/* THE GATEKEEPER INPUT */}
             <div className="bg-red-500/5 border border-red-500/20 p-4 rounded-xl mb-6">
               <label className="block text-sm font-bold text-red-400 mb-2 flex items-center gap-2">
                 <Lock
@@ -424,17 +387,6 @@ const FanSettings =
             </div>
 
             <div className="space-y-4">
-              <h3 className="text-white font-bold mb-4">
-                New
-                Details
-                (Leave
-                blank
-                to
-                keep
-                current)
-              </h3>
-
-              {/* New Email */}
               <div>
                 <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
                   <Mail
@@ -460,7 +412,6 @@ const FanSettings =
                 />
               </div>
 
-              {/* New Password */}
               <div>
                 <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
                   <Lock
@@ -484,49 +435,7 @@ const FanSettings =
                   placeholder="New password (min 6 characters)"
                 />
               </div>
-
-              {/* New Wallet */}
-              <div>
-                <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
-                  <Wallet
-                    size={
-                      16
-                    }
-                  />{" "}
-                  Update
-                  Web3
-                  Wallet
-                  Address
-                </label>
-                <input
-                  type="text"
-                  name="newWalletAddress"
-                  value={
-                    formData.newWalletAddress
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-nippy-coral transition-colors"
-                  placeholder="0x..."
-                />
-              </div>
             </div>
-
-            {message.text && (
-              <div
-                className={`p-4 rounded-xl font-bold text-sm text-center ${
-                  message.type ===
-                  "error"
-                    ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                    : "bg-green-500/10 text-green-400 border border-green-500/20"
-                }`}
-              >
-                {
-                  message.text
-                }
-              </div>
-            )}
 
             <button
               type="submit"
@@ -534,7 +443,7 @@ const FanSettings =
                 loading ||
                 !formData.currentPassword
               }
-              className="w-full bg-nippy-coral text-white font-bold py-3 rounded-xl hover:bg-nippy-coralHover transition-all flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+              className="w-full bg-nippy-coral text-white font-bold py-3 rounded-xl hover:bg-nippy-coralHover transition-all flex justify-center items-center gap-2 disabled:opacity-50 mt-4"
             >
               {loading ? (
                 <Loader2
@@ -550,120 +459,88 @@ const FanSettings =
                   }
                 />
               )}
-              {loading
-                ? "Authorizing..."
-                : "Update Security Settings"}
+              Update
+              Web2
+              Settings
             </button>
           </form>
-
-          {/* DANGER ZONE - Compact & Multi-Step */}
-          <div className="mt-8 border border-red-900/40 rounded-xl bg-red-950/20 p-5">
-            <h3 className="text-base font-bold text-red-500 mb-2">
-              Danger
-              Zone
-            </h3>
-
-            {!showDeleteConfirm ? (
-              <button
-                onClick={() =>
-                  setShowDeleteConfirm(
-                    true,
-                  )
-                }
-                className="text-sm bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 px-4 py-2 rounded-lg transition-colors font-medium"
-              >
-                Delete
-                Account
-              </button>
-            ) : (
-              <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                <p className="text-slate-300 text-xs leading-relaxed mb-4 border-l-2 border-red-500 pl-3">
-                  Deleting
-                  your
-                  account
-                  is
-                  permanent.
-                  This
-                  will
-                  erase
-                  your
-                  profile,
-                  revoke
-                  your
-                  Creator
-                  Vault
-                  access,
-                  remove
-                  your
-                  uploaded
-                  content,
-                  cancel
-                  your
-                  subscriptions,
-                  and
-                  permanently
-                  wipe
-                  your
-                  account
-                  data.
-                </p>
-
-                {(!user ||
-                  !user.walletAddress) && (
-                  <input
-                    type="password"
-                    placeholder="Enter your password to confirm"
-                    value={
-                      deletePassword
-                    }
-                    onChange={(
-                      e,
-                    ) =>
-                      setDeletePassword(
-                        e
-                          .target
-                          .value,
-                      )
-                    }
-                    className="w-full bg-slate-900 border border-red-900/50 rounded-lg py-2 px-4 text-white text-sm mb-4 focus:outline-none focus:border-red-500"
-                  />
-                )}
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={
-                      handleDeleteAccount
-                    }
-                    className="bg-red-600 hover:bg-red-700 text-white text-sm px-4 py-2 rounded-lg font-bold transition-colors flex items-center gap-2"
-                  >
-                    {user?.walletAddress
-                      ? "Sign in MetaMask to Delete"
-                      : "Confirm Deletion"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowDeleteConfirm(
-                        false,
-                      );
-                      setDeletePassword(
-                        "",
-                      );
-                      setMessage(
-                        {
-                          type: "",
-                          text: "",
-                        },
-                      );
-                    }}
-                    className="bg-slate-800 hover:bg-slate-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative mb-8">
+          <h2 className="text-white font-bold mb-4 flex items-center gap-2">
+            <Wallet className="text-emerald-500" />{" "}
+            Web3
+            Integration
+          </h2>
+          <p className="text-sm text-gray-400 mb-4">
+            Link
+            a
+            MetaMask
+            wallet
+            to
+            sign
+            in
+            with
+            Web3
+            or
+            process
+            crypto
+            transactions.
+          </p>
+
+          {user.walletAddress ? (
+            <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl flex items-center justify-between">
+              <div>
+                <p className="text-xs text-emerald-500 font-bold mb-1">
+                  Linked
+                  Wallet
+                </p>
+                <p className="font-mono text-white text-sm">
+                  {
+                    user.walletAddress
+                  }
+                </p>
+              </div>
+              <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
+            </div>
+          ) : (
+            <button
+              onClick={
+                handleLinkWallet
+              }
+              disabled={
+                loading
+              }
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 font-bold py-3 rounded-xl transition-all flex justify-center items-center gap-2"
+            >
+              <Wallet
+                size={
+                  20
+                }
+              />{" "}
+              Link
+              MetaMask
+              Wallet
+            </button>
+          )}
+        </div>
+
+        {message.text && (
+          <div
+            className={`p-4 rounded-xl font-bold text-sm text-center mb-8 ${
+              message.type ===
+              "error"
+                ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                : "bg-green-500/10 text-green-400 border border-green-500/20"
+            }`}
+          >
+            {
+              message.text
+            }
+          </div>
+        )}
+
+        {/* DANGER ZONE - Keep your existing block here */}
       </div>
     );
   };

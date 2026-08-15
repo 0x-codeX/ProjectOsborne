@@ -10,6 +10,11 @@ const Conversation = require("../models/Conversation");
 const Wallet = require("../models/Wallet");
 const Notification = require("../models/Notification");
 const {
+  convertAndRoundPrice,
+} = require("../utils/currencyConversion");
+
+
+const {
   S3Client,
   GetObjectCommand,
   PutObjectCommand,
@@ -42,7 +47,6 @@ const s3 =
 // POST /api/purchases/verify
 exports.verifyPayment = async (req, res) => {
   try {
-    // 1. ADDED subscriptionTier HERE
     const {
       contentId,
       creatorId,
@@ -55,44 +59,18 @@ exports.verifyPayment = async (req, res) => {
     } = req.body;
     
     const buyerId = req.user._id;
-
+    const userCountry = req.user?.country || "United States";
     const normalizedPurchaseType = purchaseType ? purchaseType.trim().toUpperCase() : "";
 
     // 1. IDEMPOTENCY CHECK
-    const uniqueId =
-      paymentMethod ===
-      "FIAT"
-        ? reference
-        : txHash;
-    if (
-      !uniqueId
-    )
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Transaction hash or reference required.",
-          },
-        );
+    const uniqueId = paymentMethod === "FIAT" ? reference : txHash;
+    if (!uniqueId) {
+      return res.status(400).json({ message: "Transaction hash or reference required." });
+    }
 
-    const existingPurchase =
-      await Purchase.findOne(
-        {
-          $or: [
-            {
-              txHash:
-                uniqueId,
-            },
-            {
-              fiatReference:
-                uniqueId,
-            },
-          ],
-        },
-      );
+    const existingPurchase = await Purchase.findOne({
+      $or: [{ txHash: uniqueId }, { fiatReference: uniqueId }],
+    });
     if (existingPurchase) {
       return res.status(200).json({
         message: "Payment already verified and fulfilled.",
@@ -100,13 +78,10 @@ exports.verifyPayment = async (req, res) => {
       });
     }
 
-    // 2. Branch Logic: Fetch Creator & Determine Expected Price
-    let creator =
-      await User.findById(
-        creatorId,
-      );
+    // 2. Branch Logic: Fetch Creator & Determine Expected BASE Price (NGN)
+    let creator = await User.findById(creatorId);
     let content = null;
-    let expectedPrice = 0;
+    let expectedBasePriceNGN = 0;
 
     if (normalizedPurchaseType === "SUBSCRIPTION") {
       if (!creatorId) return res.status(400).json({ message: "creatorId is required." });
@@ -114,20 +89,17 @@ exports.verifyPayment = async (req, res) => {
       creator = await User.findById(creatorId);
       if (!creator) return res.status(404).json({ message: "Creator not found." });
 
-      // ENTIRE TIER CHECK MUST BE INSIDE THIS SUBSCRIPTION BLOCK
       if (subscriptionTier === "Weekly") {
-        expectedPrice = creator.monetizationSettings?.weeklySubscription || 0;
+        expectedBasePriceNGN = creator.monetizationSettings?.weeklySubscription || 0;
       } else if (subscriptionTier === "Monthly") {
-        expectedPrice = creator.monetizationSettings?.monthlySubscription || 0;
+        expectedBasePriceNGN = creator.monetizationSettings?.monthlySubscription || 0;
       } else if (subscriptionTier && subscriptionTier.includes("Bundle")) {
-        expectedPrice = creator.monetizationSettings?.multiMonthPrice || 0;
+        expectedBasePriceNGN = creator.monetizationSettings?.multiMonthPrice || 0;
       } else {
-        expectedPrice = creator.monetizationSettings?.monthlySubscription || 0;
+        expectedBasePriceNGN = creator.monetizationSettings?.monthlySubscription || 0;
       }
 
-      if (expectedPrice === 0) {
-        return res.status(400).json({ message: "Requested subscription tier is not enabled by creator." });
-      }
+      if (expectedBasePriceNGN === 0) return res.status(400).json({ message: "Requested subscription tier is not enabled." });
 
     } else if (normalizedPurchaseType === "CHAT_BUNDLE") {
       if (!creatorId) return res.status(400).json({ message: "creatorId is required." });
@@ -135,8 +107,8 @@ exports.verifyPayment = async (req, res) => {
       creator = await User.findById(creatorId);
       if (!creator) return res.status(404).json({ message: "Creator not found." });
       
-      expectedPrice = creator.monetizationSettings?.messageBundlePrice || 0;
-      if (expectedPrice === 0) return res.status(400).json({ message: "Creator has not enabled chat bundles." });
+      expectedBasePriceNGN = creator.monetizationSettings?.messageBundlePrice || 0;
+      if (expectedBasePriceNGN === 0) return res.status(400).json({ message: "Creator has not enabled chat bundles." });
 
     } else if (normalizedPurchaseType === "PPV") {
       if (!contentId) return res.status(400).json({ message: "contentId is required for PPV." });
@@ -145,9 +117,9 @@ exports.verifyPayment = async (req, res) => {
       if (!content) return res.status(404).json({ message: "Content not found." });
       
       creator = content.creator;
-      expectedPrice = content.priceInUSDT !== null 
-        ? content.priceInUSDT 
-        : creator.monetizationSettings?.defaultPPVPrice || 0;
+      expectedBasePriceNGN = content.price != null 
+        ? content.price 
+        : (content.priceInUSDT != null ? content.priceInUSDT : creator.monetizationSettings?.defaultPPVPrice || 0);
 
     } else if (normalizedPurchaseType === "DM_UNLOCK") {
       if (!messageId) return res.status(400).json({ message: "messageId is required for DM unlocks." });
@@ -156,549 +128,213 @@ exports.verifyPayment = async (req, res) => {
       if (!content) return res.status(404).json({ message: "Message not found." });
       
       creator = content.sender;
-      expectedPrice = content.priceInUSDT || 0;
+      expectedBasePriceNGN = content.price != null ? content.price : (content.priceInUSDT || 0);
     }
 
-    if (
-      !creator ||
-      !creator.walletAddress
-    ) {
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Creator payout wallet address is not configured.",
-          },
-        );
-    }
+    // 3. DYNAMIC PRICING EVALUATION
+    const expectedPricing = await convertAndRoundPrice(expectedBasePriceNGN, userCountry);
+    let actualAmount = 0;
 
-    const expectedWallet =
-      creator.walletAddress.toLowerCase();
+    // ==========================================
+    // 4. WEB2.5 BRANCHING: FIAT VS CRYPTO
+    // ==========================================
+    if (paymentMethod === "FIAT") {
+      // --- WEB2 (PAYSTACK) VERIFICATION ---
+      const paystackRes = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
+        headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` }
+      });
 
-    // 3. Connect to RPC with Retry Mechanism
-    const rpcUrl =
-      process
-        .env
-        .POLYGON_RPC_URL;
-    if (
-      !rpcUrl
-    )
-      throw new Error(
-        "Missing POLYGON_RPC_URL in .env file",
-      );
-    const provider =
-      new ethers.JsonRpcProvider(
-        rpcUrl,
-      );
+      const paymentData = paystackRes.data.data;
+      if (paymentData.status !== "success") {
+        return res.status(400).json({ message: "Fiat transaction was not successful." });
+      }
 
-    // 4. Fetch Blockchain Transaction & Receipt (Retry loop prevents RPC 400 errors)
-    let tx =
-      null;
-    let receipt =
-      null;
-    let retries = 3;
+      const paystackAmountNGN = paymentData.amount / 100;
+      
+      // 5% Slippage tolerance for fiat conversion fluctuations against EXPECTED NGN charge
+      if (paystackAmountNGN < expectedPricing.paystackNGNAmount * 0.95) {
+        return res.status(400).json({ message: "Fraud: Insufficient payment amount detected." });
+      }
 
-    for (
-      let i = 0;
-      i <
-      retries;
-      i++
-    ) {
-      try {
-        tx =
-          await provider.getTransaction(
-            txHash,
-          );
-        if (
-          tx
-        ) {
-          receipt =
-            await provider.getTransactionReceipt(
-              txHash,
-            );
-          if (
-            receipt
-          )
-            break;
+      // Normalize to display value so platform ledgers match what the user saw
+      actualAmount = expectedPricing.displayPrice;
+
+    } else {
+      // --- WEB3 (POLYGON) VERIFICATION ---
+      if (!creator || !creator.walletAddress) {
+        return res.status(400).json({ message: "Creator payout wallet address is not configured." });
+      }
+      const expectedWallet = creator.walletAddress.toLowerCase();
+      const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
+
+      let tx = null;
+      let receipt = null;
+
+      for (let i = 0; i < 3; i++) {
+        try {
+          tx = await provider.getTransaction(txHash);
+          if (tx) {
+            receipt = await provider.getTransactionReceipt(txHash);
+            if (receipt) break;
+          }
+        } catch (rpcErr) {
+          console.warn(`[WARN] RPC poll attempt ${i + 1} failed, retrying...`);
         }
-      } catch (rpcErr) {
-        console.warn(
-          `[WARN] RPC poll attempt ${i + 1} failed, retrying...`,
-        );
+        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
-      await new Promise(
-        (
-          resolve,
-        ) =>
-          setTimeout(
-            resolve,
-            1500,
-          ),
-      );
+
+      if (!tx || !receipt) return res.status(400).json({ message: "Transaction indexing delayed on RPC node." });
+      if (receipt.status !== 1) return res.status(400).json({ message: "Transaction failed or reverted on-chain." });
+
+      const GATEWAY_ADDRESS = process.env.NIPPY_GATEWAY_ADDRESS?.toLowerCase();
+      const USDT_ADDRESS = process.env.MOCK_USDT_ADDRESS?.toLowerCase();
+
+      if (tx.to.toLowerCase() !== GATEWAY_ADDRESS) return res.status(400).json({ message: "Fraud: Transaction was not sent to Gateway contract." });
+
+      const iface = new ethers.Interface(["function purchaseWithERC20(address token, address creator, bytes32 contentId, uint256 price)"]);
+      let decoded;
+      try {
+        decoded = iface.parseTransaction({ data: tx.data });
+      } catch (err) {
+        return res.status(400).json({ message: "Fraud: Invalid transaction signature." });
+      }
+
+      const actualToken = decoded.args[0].toLowerCase();
+      const actualRecipient = decoded.args[1].toLowerCase();
+      actualAmount = Number(ethers.formatUnits(decoded.args[3], 6));
+
+      if (actualToken !== USDT_ADDRESS) return res.status(400).json({ message: "Fraud: Incorrect token used." });
+      if (actualRecipient !== expectedWallet) return res.status(400).json({ message: "Fraud: Wallet mismatch." });
+      
+      // Compare actual USDT sent against the rounded display price
+      if (actualAmount < expectedPricing.displayPrice) return res.status(400).json({ message: "Fraud: Insufficient payment." });
     }
 
-    if (
-      !tx ||
-      !receipt
-    ) {
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Transaction indexing delayed on RPC node. Please refresh in a moment.",
-          },
-        );
-    }
-
-    if (
-      receipt.status !==
-      1
-    ) {
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Transaction failed or reverted on-chain.",
-          },
-        );
-    }
-
-    // 5. Verify Gateway Contract
-    const GATEWAY_ADDRESS =
-      process.env.NIPPY_GATEWAY_ADDRESS?.toLowerCase();
-    const USDT_ADDRESS =
-      process.env.MOCK_USDT_ADDRESS?.toLowerCase();
-
-    if (
-      tx.to.toLowerCase() !==
-      GATEWAY_ADDRESS
-    ) {
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Fraud: Transaction was not sent to Gateway contract.",
-          },
-        );
-    }
-
-    // 6. Decode Input Data
-    const iface =
-      new ethers.Interface(
-        [
-          "function purchaseWithERC20(address token, address creator, bytes32 contentId, uint256 price)",
-        ],
-      );
-
-    let decoded;
-    try {
-      decoded =
-        iface.parseTransaction(
-          {
-            data: tx.data,
-          },
-        );
-    } catch (err) {
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Fraud: Invalid transaction signature.",
-          },
-        );
-    }
-
-    const actualToken =
-      decoded.args[0].toLowerCase();
-    const actualRecipient =
-      decoded.args[1].toLowerCase();
-    const actualAmount =
-      ethers.formatUnits(
-        decoded
-          .args[3],
-        6,
-      );
-
-    if (
-      actualToken !==
-      USDT_ADDRESS
-    )
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Fraud: Incorrect token used.",
-          },
-        );
-    if (
-      actualRecipient !==
-      expectedWallet
-    )
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Fraud: Wallet mismatch.",
-          },
-        );
-    if (
-      Number(
-        actualAmount,
-      ) <
-      expectedPrice
-    )
-      return res
-        .status(
-          400,
-        )
-        .json(
-          {
-            message:
-              "Fraud: Insufficient payment.",
-          },
-        );
-
-    // 7. CREATE PURCHASE RECORD WITH DYNAMIC EXPIRATION
-    let expiresAt =
-      null;
-    if (
-      normalizedPurchaseType ===
-      "SUBSCRIPTION"
-    ) {
-      const now =
-        new Date();
-      if (
-        subscriptionTier ===
-        "Weekly"
-      ) {
-        expiresAt =
-          new Date(
-            now.setDate(
-              now.getDate() +
-                7,
-            ),
-          );
-      } else if (
-        subscriptionTier &&
-        subscriptionTier.includes(
-          "Bundle",
-        )
-      ) {
-        // Fallback to 3 months if not explicitly set
-        const months =
-          creator
-            .monetizationSettings
-            ?.multiMonthDuration ||
-          3;
-        expiresAt =
-          new Date(
-            now.setMonth(
-              now.getMonth() +
-                months,
-            ),
-          );
+    // 5. CREATE PURCHASE RECORD WITH DYNAMIC EXPIRATION & PRICING AUDIT
+    let expiresAt = null;
+    if (normalizedPurchaseType === "SUBSCRIPTION") {
+      const now = new Date();
+      if (subscriptionTier === "Weekly") {
+        expiresAt = new Date(now.setDate(now.getDate() + 7));
+      } else if (subscriptionTier && subscriptionTier.includes("Bundle")) {
+        const months = creator.monetizationSettings?.multiMonthDuration || 3;
+        expiresAt = new Date(now.setMonth(now.getMonth() + months));
       } else {
-        // Default to Monthly
-        expiresAt =
-          new Date(
-            now.setDate(
-              now.getDate() +
-                30,
-            ),
-          );
+        expiresAt = new Date(now.setDate(now.getDate() + 30));
       }
     }
 
-    const purchase =
-      await Purchase.create(
-        {
-          user: buyerId,
-          content:
-            normalizedPurchaseType ===
-            "PPV"
-              ? content._id
-              : null,
-          message:
-            normalizedPurchaseType ===
-            "DM_UNLOCK"
-              ? content._id
-              : null,
-          creator:
-            creator._id ||
-            creator,
-          txHash,
-          amountPaid:
-            Number(
-              actualAmount,
-            ),
-          purchaseType:
-            normalizedPurchaseType,
-          expiresAt,
-          status:
-            "completed",
-        },
-      );
+    const purchase = await Purchase.create({
+      user: buyerId,
+      content: normalizedPurchaseType === "PPV" ? content._id : null,
+      message: normalizedPurchaseType === "DM_UNLOCK" ? content._id : null,
+      creator: creator._id || creator,
+      txHash: paymentMethod === "CRYPTO" ? txHash : undefined,
+      fiatReference: paymentMethod === "FIAT" ? reference : undefined,
+      amountPaid: Number(actualAmount), // What the user actually paid
+      currency: expectedPricing.displayCurrency,
+      basePriceNGN: expectedPricing.basePriceNGN,
+      platformMarginNGN: expectedPricing.paystackNGNAmount - expectedPricing.basePriceNGN, // Your rounded profit buffer
+      purchaseType: normalizedPurchaseType,
+      expiresAt,
+      status: "completed",
+    });
 
-    // 7.5 FULFILLMENT: UNLOCK CONTENT/MESSAGE
-    const fanUser =
-      await User.findById(
-        buyerId,
-      );
-    if (
-      fanUser &&
-      fanUser.walletAddress
-    ) {
-      if (
-        normalizedPurchaseType ===
-        "PPV"
-      ) {
-        await Content.findByIdAndUpdate(
-          content._id,
-          {
-            $addToSet:
-              {
-                unlockedFor:
-                  fanUser.walletAddress.toLowerCase(),
-              },
-            $push:
-              {
-                processedTxHashes:
-                  txHash,
-              },
-          },
-        );
-      } else if (
-        normalizedPurchaseType ===
-        "DM_UNLOCK"
-      ) {
-        await Message.findByIdAndUpdate(
-          content._id,
-          {
-            $addToSet:
-              {
-                unlockedFor:
-                  fanUser.walletAddress.toLowerCase(),
-              },
-          },
-        );
+    // 6. FULFILLMENT: UNLOCK CONTENT/MESSAGE
+    const fanUser = await User.findById(buyerId);
+    if (fanUser && fanUser.walletAddress) {
+      if (normalizedPurchaseType === "PPV") {
+        await Content.findByIdAndUpdate(content._id, {
+          $addToSet: { unlockedFor: fanUser.walletAddress.toLowerCase() },
+          $push: { processedTxHashes: txHash || reference },
+        });
+      } else if (normalizedPurchaseType === "DM_UNLOCK") {
+        await Message.findByIdAndUpdate(content._id, {
+          $addToSet: { unlockedFor: fanUser.walletAddress.toLowerCase() },
+        });
       }
     }
 
-    if (
-      normalizedPurchaseType ===
-      "CHAT_BUNDLE"
-    ) {
-      const amountPaid =
-        Number(
-          actualAmount,
-        );
-      const bundlePrice =
-        creator
-          .monetizationSettings
-          .messageBundlePrice;
-      const bundleSize =
-        creator
-          .monetizationSettings
-          .messageBundleSize;
-      const bundlesPurchased =
-        Math.floor(
-          amountPaid /
-            bundlePrice,
-        );
-      const bubblesToCredit =
-        bundlesPurchased *
-        bundleSize;
+    if (normalizedPurchaseType === "CHAT_BUNDLE") {
+      const bundleSize = creator.monetizationSettings.messageBundleSize || 5;
+      // We calculate bundles based on the single bundle display price paid
+      const bundlesPurchased = Math.floor(Number(actualAmount) / expectedPricing.displayPrice);
+      const bubblesToCredit = (bundlesPurchased || 1) * bundleSize;
 
       await Conversation.findOneAndUpdate(
+        { fan: buyerId, creator: creator._id || creator },
         {
-          fan: buyerId,
-          creator:
-            creator._id ||
-            creator,
+          $inc: { bubblesLeft: bubblesToCredit, lifetimeValue: Number(actualAmount) },
+          $setOnInsert: { participants: [creator._id || creator, buyerId] },
         },
-        {
-          $inc: {
-            bubblesLeft:
-              bubblesToCredit,
-            lifetimeValue:
-              amountPaid,
-          },
-          $setOnInsert:
-            {
-              participants:
-                [
-                  creator._id ||
-                    creator,
-                  buyerId,
-                ],
-            },
-        },
-        {
-          upsert: true,
-          new: true,
-          setDefaultsOnInsert: true,
-        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
       );
     }
 
-    // 8. CREATOR WALLET SPLIT
+    // 7. CREATOR WALLET SPLIT (Pays creator on base value equivalent)
     const PLATFORM_FEE = 0.2;
-    const actualPriceNum =
-      Number(
-        actualAmount,
-      );
-    const creatorEarnings =
-      Number(
-        (
-          actualPriceNum *
-          (1 -
-            PLATFORM_FEE)
-        ).toFixed(
-          4,
-        ),
-      );
+    // By multiplying actualAmount, you are routing 80% of the rounded amount to the creator. 
+    // If you wish to restrict creator strictly to 80% of BASE price, replace 'actualAmount' with the pure USD equivalent of 'expectedBasePriceNGN'.
+    const creatorEarnings = Number((Number(actualAmount) * (1 - PLATFORM_FEE)).toFixed(4));
 
     await Wallet.findOneAndUpdate(
-      {
-        creator:
-          creator._id ||
-          creator,
-      },
-      {
-        $inc: {
-          balanceUSDT:
-            creatorEarnings,
-          totalEarnedUSDT:
-            creatorEarnings,
-        },
-      },
-      {
-        upsert: true,
-        returnDocument:
-          "after",
-      },
+      { creator: creator._id || creator },
+      { $inc: { balanceUSDT: creatorEarnings, totalEarnedUSDT: creatorEarnings } },
+      { upsert: true, returnDocument: "after" }
     );
 
-    // 9. DUAL NOTIFICATION DISPATCHER
+    // 8. DUAL NOTIFICATION DISPATCHER
     try {
-      const creatorIdStr =
-        creator._id
-          ? creator._id.toString()
-          : creator.toString();
-      const creatorName =
-        creator.username ||
-        "a creator";
-      const fanName =
-        fanUser?.username ||
-        "A fan";
+      const creatorIdStr = creator._id ? creator._id.toString() : creator.toString();
+      const creatorName = creator.username || "a creator";
+      const fanName = fanUser?.username || "A fan";
 
-      let fanNotifType =
-        "PAYMENT_SUCCESS";
-      let fanNotifTitle =
-        "Purchase Successful";
-      let fanNotifMessage = `Your payment of $${actualPriceNum} USDT was successful.`;
+      let fanNotifType = "PAYMENT_SUCCESS";
+      let fanNotifTitle = "Purchase Successful";
+      let fanNotifMessage = `Your payment of ${expectedPricing.displayCurrency} ${Number(actualAmount)} was successful.`;
       let fanActionUrl = `/creator/${creatorIdStr}`;
 
-      let creatorNotifTitle =
-        "New Sale!";
-      let creatorNotifMessage = `${fanName} purchased your content for $${actualPriceNum} USDT!`;
-      let creatorActionUrl =
-        "/fan/dashboard";
+      let creatorNotifTitle = "New Sale!";
+      let creatorNotifMessage = `${fanName} purchased your content for ${expectedPricing.displayCurrency} ${Number(actualAmount)}!`;
+      let creatorActionUrl = "/fan/dashboard";
 
-      if (
-        normalizedPurchaseType ===
-        "PPV"
-      ) {
-        fanNotifType =
-          "PPV_UNLOCK";
-        fanNotifTitle =
-          "PPV Unlocked!";
+      if (normalizedPurchaseType === "PPV") {
+        fanNotifType = "PPV_UNLOCK";
+        fanNotifTitle = "PPV Unlocked!";
         fanNotifMessage = `You unlocked an exclusive post from ${creatorName}.`;
 
-        creatorNotifTitle =
-          "PPV Sold!";
-        creatorNotifMessage = `${fanName} unlocked your PPV post! You earned $${creatorEarnings} USDT.`;
+        creatorNotifTitle = "PPV Sold!";
+        creatorNotifMessage = `${fanName} unlocked your PPV post!`;
       }
 
-      await Notification.insertMany(
-        [
-          {
-            recipient:
-              buyerId,
-            sender:
-              creator._id ||
-              creator,
-            type: fanNotifType,
-            title:
-              fanNotifTitle,
-            message:
-              fanNotifMessage,
-            actionUrl:
-              fanActionUrl,
-            relatedContent:
-              content
-                ? content._id
-                : null,
-          },
-          {
-            recipient:
-              creator._id ||
-              creator,
-            sender:
-              buyerId,
-            type: "PAYMENT_SUCCESS",
-            title:
-              creatorNotifTitle,
-            message:
-              creatorNotifMessage,
-            actionUrl:
-              creatorActionUrl,
-            relatedContent:
-              content
-                ? content._id
-                : null,
-          },
-        ],
-      );
+      await Notification.insertMany([
+        {
+          recipient: buyerId,
+          sender: creator._id || creator,
+          type: fanNotifType,
+          title: fanNotifTitle,
+          message: fanNotifMessage,
+          actionUrl: fanActionUrl,
+          relatedContent: content ? content._id : null,
+        },
+        {
+          recipient: creator._id || creator,
+          sender: buyerId,
+          type: "PAYMENT_SUCCESS",
+          title: creatorNotifTitle,
+          message: creatorNotifMessage,
+          actionUrl: creatorActionUrl,
+          relatedContent: content ? content._id : null,
+        },
+      ]);
     } catch (notifErr) {
-      console.error(
-        "NOTIFICATION DISPATCH ERROR:",
-        notifErr,
-      );
+      console.error("NOTIFICATION DISPATCH ERROR:", notifErr);
     }
 
-    return res
-      .status(
-        200,
-      )
-      .json(
-        {
-          message:
-            "Payment verified successfully.",
-          purchase,
-        },
-      );
+    return res.status(200).json({
+      message: "Payment verified successfully.",
+      purchase,
+    });
   } catch (error) {
     console.error("Verification error:", error);
     return res.status(500).json({ message: "Server error verifying payment." });
@@ -805,5 +441,66 @@ exports.getFanDashboard = async (req, res) => {
     res.status(500).json({
       message: "Failed to load dashboard data",
     });
+  }
+};
+
+// ==========================================
+// 1-MINUTE MEMORY CACHE SETUP
+// ==========================================
+let cachedUsdtRate = null;
+let rateTimestamp = 0;
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+// POST /api/purchases/crypto-quote
+exports.getCryptoQuote = async (req, res) => {
+  try {
+    const { amountUSD } = req.body;
+
+    if (!amountUSD || amountUSD <= 0) {
+      return res.status(400).json({ message: "Valid USD amount required." });
+    }
+
+    const now = Date.now();
+
+    // 1. Check Cache: If empty or older than 1 minute, fetch fresh rates
+    if (!cachedUsdtRate || now - rateTimestamp > CACHE_TTL_MS) {
+      try {
+        // EXACT FIAT PAIR: Fetching the true value of USDT against fiat USD
+        const response = await axios.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=USDTUSD");
+
+        if (response.data && response.data.result && response.data.result.list.length > 0) {
+          const lastPrice = parseFloat(response.data.result.list[0].lastPrice);
+          cachedUsdtRate = lastPrice; 
+          rateTimestamp = now;
+        } else {
+          throw new Error("Malformed Bybit response structure");
+        }
+      } catch (apiError) {
+        console.error("Bybit API failed, engaging 1:1 fallback:", apiError.message);
+        // FALLBACK: If the API fails, default to 1:1 so fans can still checkout seamlessly
+        cachedUsdtRate = 1.00;
+        rateTimestamp = now;
+      }
+    }
+
+    // 2. Calculate the required USDT 
+    // Example: If 1 USDT = $0.998 USD, a $5.00 purchase requires 5.0100 USDT
+    const requiredUSDT = amountUSD / cachedUsdtRate;
+
+    // 3. Round UP to 4 decimal places for smart contract precision & safety
+    const formattedUSDT = Math.ceil(requiredUSDT * 10000) / 10000;
+
+    // 4. Return the quote payload to the frontend modal
+    res.status(200).json({
+      quoteId: `quote_${now}`,
+      amountUSD: amountUSD,
+      requiredUSDT: formattedUSDT,
+      rateUsed: cachedUsdtRate,
+      expiresAt: now + (10 * 60 * 1000) // Valid for 10 minutes
+    });
+
+  } catch (error) {
+    console.error("Crypto Quote Error:", error);
+    res.status(500).json({ message: "Failed to generate crypto payment quote." });
   }
 };

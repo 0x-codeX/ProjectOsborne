@@ -19,10 +19,19 @@ import {
   Settings,
   LogOut,
   ShieldCheck,
+  UploadCloud,
+  CheckCircle2,
+  AlertCircle,
+  X,
 } from "lucide-react";
-
 import landingBackground from "../assets/background7.jpg";
 import nippyLogo from "../assets/NippyLogo.png";
+import { useUpload } from "../context/UploadContext";
+
+
+
+// IMPORT YOUR NEW CONTEXT HERE
+// import { useUpload } from "../context/UploadContext";
 
 const CreatorLayout =
   () => {
@@ -38,7 +47,24 @@ const CreatorLayout =
         0,
       );
 
-    // Fetch lightweight unread count for the sidebar badge
+    // UNCOMMENT THIS WHEN CONTEXT IS WRAPPED AROUND APP
+    const { uploadState, clearUpload } = useUpload();
+
+    // MOCK STATE (Remove this once Context is implemented)
+    // const uploadState =
+    //   {
+    //     isUploading: false,
+    //     progress: 0,
+    //     fileName:
+    //       "",
+    //     status:
+    //       "idle",
+    //     errorMessage:
+    //       "",
+    //   };
+    // const clearUpload =
+    //   () => {};
+
     useEffect(() => {
       const fetchUnreadCount =
         async () => {
@@ -76,7 +102,6 @@ const CreatorLayout =
         };
       fetchUnreadCount();
 
-      // Optional: Poll every 30s to keep the layout badge updated without full sockets
       const interval =
         setInterval(
           fetchUnreadCount,
@@ -207,7 +232,6 @@ const CreatorLayout =
                     "Profile" &&
                     location.pathname ===
                       "/creator/settings");
-
                 const Icon =
                   item.icon;
 
@@ -297,7 +321,6 @@ const CreatorLayout =
                           18
                         }
                       />
-                      {/* UNREAD BADGE INJECTION */}
                       {item.label ===
                         "Messages" &&
                         globalUnread >
@@ -379,9 +402,110 @@ const CreatorLayout =
           </Link>
         </header>
 
-        <main className="flex-grow pb-20 md:pb-0">
+        <main className="flex-grow pb-20 md:pb-0 relative">
           <Outlet />
         </main>
+
+        {/* --- GLOBAL UPLOAD PROGRESS TOAST --- */}
+        {uploadState.isUploading && (
+          <div className="fixed bottom-24 left-4 right-4 md:left-auto md:bottom-8 md:right-8 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl md:w-80 z-[100] p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4">
+            <div className="flex justify-between items-start">
+              <div className="flex items-center gap-3 overflow-hidden">
+                <div
+                  className={`p-2 rounded-xl shrink-0 ${uploadState.status === "error" ? "bg-red-500/10 text-red-500" : uploadState.status === "complete" ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"}`}
+                >
+                  {uploadState.status ===
+                  "error" ? (
+                    <AlertCircle
+                      size={
+                        20
+                      }
+                    />
+                  ) : uploadState.status ===
+                    "complete" ? (
+                    <CheckCircle2
+                      size={
+                        20
+                      }
+                    />
+                  ) : (
+                    <UploadCloud
+                      size={
+                        20
+                      }
+                      className="animate-pulse"
+                    />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-white truncate">
+                    {uploadState.fileName ||
+                      "Media Upload"}
+                  </p>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">
+                    {uploadState.status ===
+                    "error"
+                      ? "Failed"
+                      : uploadState.status ===
+                          "complete"
+                        ? "Processed Successfully"
+                        : "Uploading in background"}
+                  </p>
+                </div>
+              </div>
+
+              {uploadState.status !==
+                "uploading" && (
+                <button
+                  onClick={
+                    clearUpload
+                  }
+                  className="text-slate-500 hover:text-white transition-colors"
+                >
+                  <X
+                    size={
+                      16
+                    }
+                  />
+                </button>
+              )}
+            </div>
+
+            {uploadState.status ===
+              "uploading" && (
+              <div className="w-full">
+                <div className="flex justify-between mb-1.5">
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Transferring...
+                  </span>
+                  <span className="text-[10px] text-[#FF5757] font-bold font-mono">
+                    {
+                      uploadState.progress
+                    }
+                    %
+                  </span>
+                </div>
+                <div className="w-full bg-slate-950 rounded-full h-1.5 border border-slate-800">
+                  <div
+                    className="bg-[#FF5757] h-full rounded-full transition-all duration-300 ease-out"
+                    style={{
+                      width: `${uploadState.progress}%`,
+                    }}
+                  ></div>
+                </div>
+              </div>
+            )}
+
+            {uploadState.status ===
+              "error" && (
+              <p className="text-xs text-red-400 bg-red-500/10 p-2 rounded-lg border border-red-500/20">
+                {
+                  uploadState.errorMessage
+                }
+              </p>
+            )}
+          </div>
+        )}
 
         {/* --- MOBILE BOTTOM NAV --- */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 z-50 flex justify-around items-center py-2 px-2 pb-safe shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.5)]">
@@ -423,8 +547,6 @@ const CreatorLayout =
                           : ""
                       }
                     />
-
-                    {/* UNREAD BADGE INJECTION MOBILE */}
                     {item.label ===
                       "Messages" &&
                       globalUnread >

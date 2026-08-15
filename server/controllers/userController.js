@@ -432,7 +432,7 @@ exports.getMonetizationSettings = async (req, res) => {
 // PUT /api/users/settings/monetization
 exports.updateMonetizationSettings = async (req, res) => {
   try {
-    const {
+    let {
       defaultPPVPrice,
       weeklySubscription,
       monthlySubscription,
@@ -440,8 +440,7 @@ exports.updateMonetizationSettings = async (req, res) => {
       multiMonthPrice,
       messageBundleSize,
       messageBundlePrice,
-    } =
-      req.body;
+    } = req.body;
 
     // THE FIX: Safely extract ID
     const userId = req.user._id || req.user.id;
@@ -450,61 +449,43 @@ exports.updateMonetizationSettings = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized: No user ID in token." });
     }
 
-    const user =
-      await User.findByIdAndUpdate(
-        userId,
-        {
-          $set: {
-            monetizationSettings:
-              {
-                defaultPPVPrice:
-                  Number(
-                    defaultPPVPrice,
-                  ) ||
-                  0,
-                weeklySubscription:
-                  Number(
-                    weeklySubscription,
-                  ) ||
-                  0,
-                monthlySubscription:
-                  Number(
-                    monthlySubscription,
-                  ) ||
-                  0,
-                multiMonthDuration:
-                  Number(
-                    multiMonthDuration,
-                  ) ||
-                  3,
-                multiMonthPrice:
-                  Number(
-                    multiMonthPrice,
-                  ) ||
-                  0,
-                messageBundleSize:
-                  Number(
-                    messageBundleSize,
-                  ) ||
-                  5,
-                messageBundlePrice:
-                  Number(
-                    messageBundlePrice,
-                  ) ||
-                  0,
-              },
+    // IRONCLAD FIX: Establish the rounding rule
+    const roundPrice = (price) => {
+      const raw = parseFloat(price || 0);
+      return (!isNaN(raw) && raw > 0) ? Math.ceil(raw * 2) / 2 : 0;
+    };
+
+    // Apply the rule to every single pricing field before saving
+    defaultPPVPrice = roundPrice(defaultPPVPrice);
+    weeklySubscription = roundPrice(weeklySubscription);
+    monthlySubscription = roundPrice(monthlySubscription);
+    multiMonthPrice = roundPrice(multiMonthPrice);
+    messageBundlePrice = roundPrice(messageBundlePrice);
+    
+    // Ensure standard integers for duration/sizes
+    messageBundleSize = parseInt(messageBundleSize) || 5;
+    multiMonthDuration = parseInt(multiMonthDuration) || 3;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        $set: {
+          monetizationSettings: {
+            defaultPPVPrice,
+            weeklySubscription,
+            monthlySubscription,
+            multiMonthDuration,
+            multiMonthPrice,
+            messageBundleSize,
+            messageBundlePrice,
           },
         },
-        {
-          returnDocument:
-            "after", // THE FIX: Silences Mongoose deprecation warnings
-          runValidators: true,
-          // Removed upsert: true because $set on an existing user document works perfectly without it,
-          // and upserting a completely missing user document based just on an ID is dangerous here.
-        },
-      ).select(
-        "monetizationSettings",
-      );
+      },
+      {
+        returnDocument: "after", // THE FIX: Silences Mongoose deprecation warnings
+        runValidators: true,
+      }
+    ).select("monetizationSettings");
 
     if (!user) {
       return res.status(404).json({ message: "User not found." });
@@ -585,11 +566,11 @@ exports.updateSettings = async (req, res) => {
 };
 
 // PUT /api/users/profile
-// Used for everyday, non-sensitive profile edits
+// Used for everyday profile edits, including optional password change
 exports.updateProfile = async (req, res) => {
   try {
-    const { username, profileImage } = req.body;
-    
+    const { username, profileImage, newPassword } = req.body;
+
     // Check if username is taken by someone else
     if (username) {
       const existingUser = await User.findOne({ username, _id: { $ne: req.user._id } });
@@ -598,14 +579,21 @@ exports.updateProfile = async (req, res) => {
       }
     }
 
+    // Build the update payload
+    const updates = {
+      ...(username && { username }),
+      ...(profileImage && { profileImage }),
+    };
+
+    // Hash and include new password if provided
+    if (newPassword) {
+      const salt = await bcrypt.genSalt(10);
+      updates.passwordHash = await bcrypt.hash(newPassword, salt);
+    }
+
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
-      { 
-        $set: { 
-          ...(username && { username }),
-          ...(profileImage && { profileImage })
-        } 
-      },
+      { $set: updates },
       { new: true }
     ).select("-password");
 

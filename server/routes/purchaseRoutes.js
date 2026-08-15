@@ -7,6 +7,7 @@ const {
 const {
   verifyPayment,
   getFanDashboard,
+  getCryptoQuote,
 } = require("../controllers/purchaseController");
 
 // POST /api/purchases/verify
@@ -15,6 +16,11 @@ router.post(
   "/verify",
   requireAuth,
   verifyPayment,
+);
+router.post(
+  "/crypto-quote",
+  requireAuth,
+  getCryptoQuote,
 );
 
 // GET /api/purchases/dashboard

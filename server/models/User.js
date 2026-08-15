@@ -22,6 +22,7 @@ const userSchema =
         {
           type: String,
           sparse: true,
+          unique: true,
         },
       role: {
         type: String,
@@ -32,6 +33,7 @@ const userSchema =
         ],
         default:
           "fan",
+        index: true,
       },
 
       // --- BIO DATA (ONBOARDING) ---
@@ -110,9 +112,10 @@ const userSchema =
       walletAddress:
         {
           type: String,
-          default:
-            null,
-          sparse: true,
+          unique: true,
+          sparse: true, // Will safely ignore undefined values
+          lowercase: true,
+          trim: true,
         },
       usdtBalance:
         {
@@ -125,41 +128,22 @@ const userSchema =
         },
 
       // --- 18 U.S.C. § 2257 COMPLIANCE FIELDS ---
-      kycStatus:
-        {
-          type: String,
-          enum: [
-            "unverified",
-            "pending",
-            "verified",
-            "failed",
-          ],
-          default:
-            "unverified",
-        },
-      kycRecord:
-        {
-          legalName:
-            {
-              type: String,
-            },
-          dateOfBirth:
-            {
-              type: Date,
-            },
-          providerSessionId:
-            {
-              type: String,
-            },
-          verifiedAt:
-            {
-              type: Date,
-            },
-          documentType:
-            {
-              type: String,
-            },
-        },
+      kycStatus: {
+        type: String,
+        enum: ["unverified", "pending", "verified", "failed"],
+        default: "unverified",
+        index: true,
+      },
+      kycRecord: {
+        legalName: { type: String }, // Full concatenated name
+        firstName: { type: String }, // NEW: Strict breakdown
+        middleName: { type: String },// NEW: Strict breakdown
+        lastName: { type: String },  // NEW: Strict breakdown
+        dateOfBirth: { type: Date },
+        providerSessionId: { type: String },
+        verifiedAt: { type: Date },
+        documentType: { type: String },
+      },
 
       // --- CREATOR SPECIFIC FIELDS ---
       creatorProfile:
@@ -263,6 +247,7 @@ const userSchema =
               .Types
               .ObjectId,
             ref: "User",
+            index: true,
           },
         ],
       following:
@@ -273,8 +258,56 @@ const userSchema =
               .Types
               .ObjectId,
             ref: "User",
+            index: true,
           },
         ],
+      payoutMethod:
+        {
+          type: String,
+          enum: [
+            "crypto",
+            "bank",
+            "paypal",
+          ],
+          default:
+            "crypto",
+        },
+      accountName:
+        {
+          type: String, // NEW: The exact name on the bank account
+          default:
+            "",
+        },
+      bankName:
+        {
+          type: String,
+          default:
+            "",
+        },
+      bankCode:
+        {
+          type: String, // NEW: CRITICAL FOR PAYSTACK (e.g., "058")
+          default:
+            "",
+        },
+      accountNumber:
+        {
+          type: String,
+          default:
+            "",
+        },
+      fiatCurrency:
+        {
+          type: String,
+          default:
+            "NGN",
+        },
+      paypalEmail:
+        {
+          type: String,
+          default:
+            "",
+        },
     },
     {
       timestamps: true,

@@ -2,7 +2,8 @@ import React, {
   useState,
   useEffect,
 } from "react";
-// import { usePaystackPayment } from "react-paystack";
+import axios from "axios";
+import { usePaystackPayment } from "react-paystack";
 import {
   useParams,
   useNavigate,
@@ -92,6 +93,22 @@ const CreatorPublicProfile =
         null,
       );
 
+    // DYNAMIC CRYPTO QUOTE STATES
+    const [
+      cryptoQuote,
+      setCryptoQuote,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      fetchingQuote,
+      setFetchingQuote,
+    ] =
+      useState(
+        false,
+      );
+
     const {
       transferUSDT,
     } =
@@ -141,7 +158,6 @@ const CreatorPublicProfile =
         }
       };
 
-    // --- NEW: FOLLOW TOGGLE ---
     const handleFollowToggle =
       async () => {
         const previousState =
@@ -193,6 +209,100 @@ const CreatorPublicProfile =
         }
       };
 
+    const initializePayment =
+      usePaystackPayment(
+        {
+          publicKey:
+            import.meta
+              .env
+              .VITE_PAYSTACK_PUBLIC_KEY,
+        },
+      );
+
+    const closeCheckoutModal =
+      () => {
+        setCheckoutData(
+          null,
+        );
+        setPaymentMethod(
+          null,
+        );
+        setCryptoQuote(
+          null,
+        );
+      };
+
+    const handleSelectCrypto =
+      async () => {
+        setPaymentMethod(
+          "CRYPTO",
+        );
+        setFetchingQuote(
+          true,
+        );
+        setCryptoQuote(
+          null,
+        );
+
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          const baseAmountUSD =
+            checkoutData.amount ||
+            0;
+
+          const res =
+            await fetch(
+              "http://localhost:5000/api/purchases/crypto-quote",
+              {
+                method:
+                  "POST",
+                headers:
+                  {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type":
+                      "application/json",
+                  },
+                body: JSON.stringify(
+                  {
+                    amountUSD:
+                      baseAmountUSD,
+                  },
+                ),
+              },
+            );
+
+          if (
+            !res.ok
+          )
+            throw new Error(
+              "Failed to fetch quote",
+            );
+          const data =
+            await res.json();
+          setCryptoQuote(
+            data,
+          );
+        } catch (error) {
+          console.error(
+            "Quote error:",
+            error,
+          );
+          alert(
+            "Failed to get live crypto rates. Please try again.",
+          );
+          setPaymentMethod(
+            null,
+          );
+        } finally {
+          setFetchingQuote(
+            false,
+          );
+        }
+      };
+
     const executePayment =
       async () => {
         if (
@@ -200,16 +310,125 @@ const CreatorPublicProfile =
           !paymentMethod
         )
           return;
+
         if (
           paymentMethod ===
           "CARD"
         ) {
-          alert(
-            "Paystack integration pending. Please use Web3 Crypto for now.",
+          // --- WEB2 (PAYSTACK) EXECUTION ---
+          const exchangeRate = 1500; // Define or fetch your live NGN rate
+          const amountInKobo =
+            Math.round(
+              checkoutData.amount *
+                exchangeRate *
+                100,
+            );
+
+          initializePayment(
+            {
+              config:
+                {
+                  reference:
+                    new Date()
+                      .getTime()
+                      .toString(),
+                  email:
+                    "fan@nippy.com", // Replace with your currentUser?.email if available in state
+                  amount:
+                    amountInKobo,
+                },
+              onSuccess:
+                async (
+                  reference,
+                ) => {
+                  setProcessingId(
+                    checkoutData.post
+                      ? checkoutData
+                          .post
+                          ._id
+                      : checkoutData.type,
+                  );
+                  try {
+                    const token =
+                      localStorage.getItem(
+                        "nippy_token",
+                      );
+                    const verifyResponse =
+                      await fetch(
+                        "http://localhost:5000/api/purchases/verify",
+                        {
+                          method:
+                            "POST",
+                          headers:
+                            {
+                              "Content-Type":
+                                "application/json",
+                              Authorization: `Bearer ${token}`,
+                            },
+                          body: JSON.stringify(
+                            {
+                              reference:
+                                reference.reference, // Paystack ref
+                              paymentMethod:
+                                "FIAT", // Triggers the Web2 Backend logic
+                              creatorId:
+                                id,
+                              contentId:
+                                checkoutData.post
+                                  ? checkoutData
+                                      .post
+                                      ._id
+                                  : null,
+                              purchaseType:
+                                checkoutData.type,
+                              subscriptionTier:
+                                checkoutData.tier ||
+                                null,
+                            },
+                          ),
+                        },
+                      );
+
+                    const verifyData =
+                      await verifyResponse.json();
+                    if (
+                      !verifyResponse.ok
+                    ) {
+                      throw new Error(
+                        verifyData.message ||
+                          "Payment went through, but verification failed.",
+                      );
+                    }
+
+                    await fetchProfile();
+                    closeCheckoutModal();
+                  } catch (error) {
+                    console.error(
+                      "Verification Error:",
+                      error,
+                    );
+                    alert(
+                      "Verification failed: " +
+                        error.message,
+                    );
+                  } finally {
+                    setProcessingId(
+                      null,
+                    );
+                  }
+                },
+              onClose:
+                () => {
+                  alert(
+                    "Payment window closed by user.",
+                  );
+                },
+            },
           );
           return;
         }
 
+        // --- WEB3 (CRYPTO) EXECUTION ---
         try {
           setProcessingId(
             checkoutData.post
@@ -229,12 +448,21 @@ const CreatorPublicProfile =
             );
           }
 
+          if (
+            !cryptoQuote ||
+            !cryptoQuote.requiredUSDT
+          ) {
+            throw new Error(
+              "Missing crypto quote. Please re-select the payment method.",
+            );
+          }
+
           const txHash =
             await transferUSDT(
               profileData
                 .creator
                 .walletAddress,
-              checkoutData.amount,
+              cryptoQuote.requiredUSDT, // DYNAMIC AMOUNT
               checkoutData.post
                 ? checkoutData
                     .post
@@ -268,7 +496,9 @@ const CreatorPublicProfile =
                 body: JSON.stringify(
                   {
                     txHash:
-                      txHash,
+                      txHash, // Blockchain hash
+                    paymentMethod:
+                      "CRYPTO", // Explicitly mark as Crypto
                     creatorId:
                       id,
                     contentId:
@@ -300,9 +530,7 @@ const CreatorPublicProfile =
           }
 
           await fetchProfile();
-          setCheckoutData(
-            null,
-          );
+          closeCheckoutModal();
         } catch (error) {
           console.error(
             "Transaction Error Trace:",
@@ -397,7 +625,6 @@ const CreatorPublicProfile =
       <div className="max-w-4xl mx-auto pb-12 relative">
         <div className="h-48 bg-gradient-to-r from-gray-900 to-black border-b border-gray-800 relative">
           <div className="absolute -bottom-12 left-4 sm:left-8 flex items-end gap-4">
-            {/* TikTok Style Avatar with Follow Button */}
             <div className="relative">
               <div className="w-24 h-24 bg-gray-800 rounded-full border-4 border-black flex items-center justify-center overflow-hidden">
                 {creator.profileImage ? (
@@ -474,9 +701,7 @@ const CreatorPublicProfile =
             </div>
           </div>
 
-          {/* Sleek, compact action row on the right */}
           <div className="absolute -bottom-5 right-4 sm:right-8 flex items-center gap-2">
-            {/* DM / CHAT BUTTON - COLOR LOGIC UPDATED HERE */}
             {settings.messageBundlePrice >
               0 &&
               (hasActiveChat ? (
@@ -486,7 +711,6 @@ const CreatorPublicProfile =
                       "/messages",
                     )
                   }
-                  // Changed from outline to solid blue when active
                   className="bg-blue-600 text-white border border-blue-500 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-500/20"
                 >
                   <MessageSquare
@@ -509,7 +733,6 @@ const CreatorPublicProfile =
                       true,
                     );
                   }}
-                  // Remains outline when they need to buy
                   className="bg-slate-900 text-gray-400 border border-gray-600 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-slate-800 hover:text-white transition-all flex items-center gap-2 shadow-lg"
                 >
                   <MessageSquare
@@ -524,7 +747,6 @@ const CreatorPublicProfile =
                 </button>
               ))}
 
-            {/* SUBSCRIBE BUTTON */}
             {isSubscribed ? (
               <button className="bg-gray-800 text-emerald-400 px-4 py-2 rounded-full font-bold flex items-center gap-1.5 border border-gray-700 cursor-default text-sm">
                 <Unlock
@@ -574,8 +796,18 @@ const CreatorPublicProfile =
                   key={
                     post._id
                   }
-                  className="bg-nippy-obsidian border border-gray-800 rounded-xl overflow-hidden flex flex-col"
+                  className="relative group rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex flex-col"
                 >
+                  {post.isPaywalled && (
+                    <div className="absolute top-2 right-2 bg-slate-950/80 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white border border-slate-700 z-20">
+                      {
+                        post.displayCurrency
+                      }{" "}
+                      {post.displayPrice?.toFixed(
+                        2,
+                      )}
+                    </div>
+                  )}
                   <div className="bg-black aspect-square relative flex items-center justify-center border-b border-gray-800/50 overflow-hidden">
                     {post.isLocked ? (
                       <>
@@ -666,7 +898,6 @@ const CreatorPublicProfile =
           )}
         </div>
 
-        {/* Subscription Modal */}
         {showSubModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -761,7 +992,6 @@ const CreatorPublicProfile =
           </div>
         )}
 
-        {/* Chat Bundle Config Modal */}
         {showBundleConfig && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -786,7 +1016,6 @@ const CreatorPublicProfile =
                   />
                 </button>
               </div>
-
               <div className="p-6 flex flex-col items-center">
                 <MessageSquare
                   size={
@@ -819,7 +1048,6 @@ const CreatorPublicProfile =
                   </span>
                   .
                 </p>
-
                 <div className="flex items-center gap-6 mb-8 bg-slate-950 p-2 rounded-2xl border border-slate-800">
                   <button
                     onClick={() =>
@@ -875,7 +1103,6 @@ const CreatorPublicProfile =
                     />
                   </button>
                 </div>
-
                 <div className="w-full bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex justify-between items-center mb-6">
                   <div>
                     <p className="text-xs text-emerald-500 font-bold uppercase">
@@ -903,7 +1130,6 @@ const CreatorPublicProfile =
                     </p>
                   </div>
                 </div>
-
                 <button
                   onClick={() => {
                     setShowBundleConfig(
@@ -946,10 +1172,8 @@ const CreatorPublicProfile =
                   Method
                 </h3>
                 <button
-                  onClick={() =>
-                    setCheckoutData(
-                      null,
-                    )
+                  onClick={
+                    closeCheckoutModal
                   }
                   className="text-gray-400 hover:text-white transition-colors"
                   disabled={
@@ -984,18 +1208,21 @@ const CreatorPublicProfile =
                     {
                       checkoutData.amount
                     }{" "}
-                    USDT
+                    USD
                   </span>
                 </p>
 
                 <div className="grid grid-cols-2 gap-3 mt-4">
                   <button
-                    onClick={() =>
-                      setPaymentMethod(
-                        "CRYPTO",
-                      )
+                    onClick={
+                      handleSelectCrypto
                     }
-                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${paymentMethod === "CRYPTO" ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" : "border-slate-700 text-gray-400 hover:border-slate-500"}`}
+                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
+                      paymentMethod ===
+                      "CRYPTO"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
+                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                    }`}
                   >
                     <Wallet
                       size={
@@ -1017,7 +1244,12 @@ const CreatorPublicProfile =
                         "CARD",
                       )
                     }
-                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${paymentMethod === "CARD" ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" : "border-slate-700 text-gray-400 hover:border-slate-500"}`}
+                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
+                      paymentMethod ===
+                      "CARD"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
+                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                    }`}
                   >
                     <CreditCard
                       size={
@@ -1036,12 +1268,62 @@ const CreatorPublicProfile =
                   </button>
                 </div>
 
+                {/* DYNAMIC CRYPTO QUOTE DISPLAY */}
+                {paymentMethod ===
+                  "CRYPTO" &&
+                  fetchingQuote && (
+                    <div className="mt-2 p-3 text-center text-sm text-emerald-500 animate-pulse">
+                      Fetching
+                      live
+                      USDT
+                      rates...
+                    </div>
+                  )}
+                {paymentMethod ===
+                  "CRYPTO" &&
+                  cryptoQuote && (
+                    <div className="mt-2 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
+                      <p className="text-sm text-gray-400 mb-1">
+                        Total:{" "}
+                        <span className="text-white">
+                          $
+                          {cryptoQuote.amountUSD.toFixed(
+                            2,
+                          )}{" "}
+                          USD
+                        </span>
+                      </p>
+                      <p className="text-xl font-bold text-emerald-400">
+                        Due:{" "}
+                        {
+                          cryptoQuote.requiredUSDT
+                        }{" "}
+                        USDT
+                      </p>
+                      <p className="text-xs text-emerald-500/70 mt-2 flex items-center justify-center gap-1">
+                        <Lock
+                          size={
+                            12
+                          }
+                        />{" "}
+                        Rate
+                        locked
+                        for
+                        10:00
+                      </p>
+                    </div>
+                  )}
+
                 <button
                   onClick={
                     executePayment
                   }
                   disabled={
                     !paymentMethod ||
+                    fetchingQuote ||
+                    (paymentMethod ===
+                      "CRYPTO" &&
+                      !cryptoQuote) ||
                     processingId !==
                       null
                   }

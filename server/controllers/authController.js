@@ -350,3 +350,93 @@ exports.getMe = async (req, res) => {
     res.status(500).json({ message: "Server error retrieving user data" });
   }
 };
+
+// @desc    Link Email & Password to an existing Web3 account
+// @route   PUT /api/auth/link-email
+// @access  Private (Requires JWT token)
+exports.linkEmailToAccount = async (req, res) => {
+  try {
+    const userId = req.user.id || req.user._id; 
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required." });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    // 1. Ensure this email isn't already attached to another account
+    const emailExists = await User.findOne({ email: cleanEmail });
+    if (emailExists) {
+      return res.status(409).json({ message: "This email is already in use by another account." });
+    }
+
+    // 2. Fetch the current logged-in user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    // 3. Hash the new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // 4. Update the existing user document
+    user.email = cleanEmail;
+    user.passwordHash = hashedPassword;
+    
+    await user.save();
+
+    res.status(200).json({ 
+      message: "Email and password successfully linked to your account.",
+      user: {
+        _id: user._id,
+        email: user.email,
+        walletAddress: user.walletAddress,
+        role: user.role
+      }
+    });
+
+  } catch (error) {
+    console.error("Link Email Error:", error);
+    res.status(500).json({ message: "Server error linking email.", error: error.message });
+  }
+};
+
+// PUT /api/auth/link-wallet
+exports.linkWalletToAccount = async (req, res) => {
+  try {
+    const userId = req.user.id || req.user._id;
+    const { walletAddress, signature } = req.body;
+
+    if (!walletAddress || !signature) {
+      return res.status(400).json({ message: "Wallet address and signature required." });
+    }
+
+    const cleanAddress = walletAddress.toLowerCase();
+
+    // 1. Check if this wallet is already hijacked/used by another account
+    const walletExists = await User.findOne({ walletAddress: cleanAddress });
+    if (walletExists && walletExists._id.toString() !== userId.toString()) {
+      return res.status(409).json({ message: "This wallet is already linked to another account." });
+    }
+
+    // 2. Cryptographic Proof of Ownership
+    const expectedMessage = `LINK_WALLET_TO_NIPPY:${cleanAddress}`;
+    const recoveredAddress = ethers.verifyMessage(expectedMessage, signature);
+
+    if (recoveredAddress.toLowerCase() !== cleanAddress) {
+      return res.status(401).json({ message: "Cryptographic signature verification failed." });
+    }
+
+    // 3. Bind the wallet
+    const user = await User.findById(userId);
+    user.walletAddress = cleanAddress;
+    await user.save();
+
+    res.status(200).json({ message: "Wallet successfully linked to your account.", user });
+  } catch (error) {
+    console.error("Link Wallet Error:", error);
+    res.status(500).json({ message: "Server error linking wallet." });
+  }
+};

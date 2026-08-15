@@ -19,10 +19,13 @@ import {
   Wallet,
   CreditCard,
   X,
+  Plus,
+  Minus,
 } from "lucide-react";
 import axios from "axios";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import { io } from "socket.io-client";
+import { usePaystackPayment } from "react-paystack";
 
 const FanChatWindow =
   () => {
@@ -63,7 +66,7 @@ const FanChatWindow =
         null,
       );
 
-    // NEW: Bubble and Bundle Management
+    // Bubble and Bundle Management
     const [
       bubblesLeft,
       setBubblesLeft,
@@ -79,24 +82,38 @@ const FanChatWindow =
         false,
       );
     const [
-      isPurchasingBundle,
-      setIsPurchasingBundle,
-    ] =
-      useState(
-        false,
-      );
-    const [
       bundlePrice,
       setBundlePrice,
     ] =
       useState(
         5,
-      ); // Fallback price
-
-    // --- NEW: PPV CHAT MODAL STATES ---
+      );
     const [
-      paymentModalMsg,
-      setPaymentModalMsg,
+      bundleSize,
+      setBundleSize,
+    ] =
+      useState(
+        10,
+      );
+
+    // Modal & Configuration States
+    const [
+      showBundleConfig,
+      setShowBundleConfig,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      bundleQuantity,
+      setBundleQuantity,
+    ] =
+      useState(
+        1,
+      );
+    const [
+      checkoutData,
+      setCheckoutData,
     ] =
       useState(
         null,
@@ -107,7 +124,7 @@ const FanChatWindow =
     ] =
       useState(
         null,
-      ); // 'CRYPTO' | 'CARD'
+      );
     const [
       processingId,
       setProcessingId,
@@ -115,12 +132,21 @@ const FanChatWindow =
       useState(
         null,
       );
+
+    // DYNAMIC CRYPTO QUOTE STATES
     const [
-      unlockingMsgId,
-      setUnlockingMsgId,
+      cryptoQuote,
+      setCryptoQuote,
     ] =
       useState(
         null,
+      );
+    const [
+      fetchingQuote,
+      setFetchingQuote,
+    ] =
+      useState(
+        false,
       );
 
     const currentUser =
@@ -131,16 +157,23 @@ const FanChatWindow =
           "{}",
       );
 
+    const initializePayment =
+      usePaystackPayment(
+        {
+          publicKey:
+            import.meta
+              .env
+              .VITE_PAYSTACK_PUBLIC_KEY,
+        },
+      );
+
     useEffect(() => {
       fetchMessages();
-
-      // 1. Connect to your backend socket
       const socket =
         io(
           "http://localhost:5000",
-        ); // Ensure this is your backend port
+        );
 
-      // 2. Tell the server which conversation room to join
       if (
         conversationId
       ) {
@@ -150,7 +183,6 @@ const FanChatWindow =
         );
       }
 
-      // 3. Listen for incoming messages
       socket.on(
         "receive_message",
         (
@@ -160,7 +192,6 @@ const FanChatWindow =
             (
               prev,
             ) => {
-              // Ironclad Check: Prevent duplicate messages from rendering
               if (
                 prev.some(
                   (
@@ -181,7 +212,6 @@ const FanChatWindow =
         },
       );
 
-      // 4. Clean up the pipeline when they leave the page
       return () => {
         socket.disconnect();
       };
@@ -196,7 +226,6 @@ const FanChatWindow =
             localStorage.getItem(
               "nippy_token",
             );
-          // Assuming GET /api/messages/:id returns { conversation, messages }
           const res =
             await axios.get(
               `/api/messages/${conversationId}`,
@@ -214,6 +243,7 @@ const FanChatWindow =
               .messages ||
               res.data,
           );
+
           if (
             res
               .data
@@ -240,16 +270,27 @@ const FanChatWindow =
                 ?.messageBundlePrice ||
                 5,
             );
+            setBundleSize(
+              res
+                .data
+                .conversation
+                .creator
+                ?.monetizationSettings
+                ?.messageBundleSize ||
+                10,
+            );
+
             if (
               res
                 .data
                 .conversation
                 .bubblesLeft <=
               0
-            )
+            ) {
               setRequiresBundle(
                 true,
               );
+            }
           }
           scrollToBottom();
         } catch (error) {
@@ -290,11 +331,6 @@ const FanChatWindow =
             localStorage.getItem(
               "nippy_token",
             );
-
-          // IRONCLAD RECEIVER ID LOGIC
-          // 1. Try to get it from chatInfo (if backend populated it correctly)
-          // 2. Fallback to extracting it from chatInfo if it's just a raw string ID
-          // 3. Fallback to previous messages if they exist
           let receiverId =
             chatInfo?._id ||
             (typeof chatInfo ===
@@ -383,71 +419,85 @@ const FanChatWindow =
         }
       };
 
-    const handleBuyBundle =
+    const closeCheckoutModal =
+      () => {
+        setCheckoutData(
+          null,
+        );
+        setPaymentMethod(
+          null,
+        );
+        setCryptoQuote(
+          null,
+        );
+      };
+
+    const handleSelectCrypto =
       async () => {
-        setIsPurchasingBundle(
+        setPaymentMethod(
+          "CRYPTO",
+        );
+        setFetchingQuote(
           true,
         );
+        setCryptoQuote(
+          null,
+        );
+
         try {
-          if (
-            !chatInfo?.walletAddress
-          )
-            throw new Error(
-              "Creator wallet not found.",
-            );
-
-          // 1. Web3 Payment
-          const txHash =
-            await transferUSDT(
-              chatInfo.walletAddress,
-              bundlePrice,
-            );
-
-          // 2. Verify with backend
           const token =
             localStorage.getItem(
               "nippy_token",
             );
+          const baseAmountUSD =
+            checkoutData.amount ||
+            0;
+
           const res =
-            await axios.post(
-              "/api/messages/buy-bundle",
+            await fetch(
+              "http://localhost:5000/api/purchases/crypto-quote",
               {
-                creatorId:
-                  chatInfo._id,
-                txHash,
-                amountPaid:
-                  bundlePrice,
-              },
-              {
+                method:
+                  "POST",
                 headers:
                   {
                     Authorization: `Bearer ${token}`,
+                    "Content-Type":
+                      "application/json",
                   },
+                body: JSON.stringify(
+                  {
+                    amountUSD:
+                      baseAmountUSD,
+                  },
+                ),
               },
             );
 
-          setBubblesLeft(
-            res
-              .data
-              .bubblesLeft,
-          );
-          setRequiresBundle(
-            false,
-          );
-          alert(
-            "Bundle purchased successfully! You can chat again.",
+          if (
+            !res.ok
+          )
+            throw new Error(
+              "Failed to fetch quote",
+            );
+          const data =
+            await res.json();
+          setCryptoQuote(
+            data,
           );
         } catch (error) {
           console.error(
-            "Bundle purchase failed:",
+            "Quote error:",
             error,
           );
           alert(
-            error.message ||
-              "Transaction failed.",
+            "Failed to get live crypto rates. Please try again.",
+          );
+          setPaymentMethod(
+            null,
           );
         } finally {
-          setIsPurchasingBundle(
+          setFetchingQuote(
             false,
           );
         }
@@ -456,42 +506,165 @@ const FanChatWindow =
     const executePayment =
       async () => {
         if (
-          !paymentModalMsg ||
+          !checkoutData ||
           !paymentMethod
         )
           return;
+
+        const isBundle =
+          checkoutData.type ===
+          "CHAT_BUNDLE";
+        const currentProcessingId =
+          isBundle
+            ? "BUNDLE_CHECKOUT"
+            : checkoutData
+                .message
+                ._id;
+        const creatorId =
+          chatInfo._id ||
+          chatInfo;
 
         if (
           paymentMethod ===
           "CARD"
         ) {
-          alert(
-            "Paystack integration pending. Please use Web3 Crypto for now.",
+          const exchangeRate = 1500;
+          const amountInKobo =
+            Math.round(
+              checkoutData.amount *
+                exchangeRate *
+                100,
+            );
+
+          initializePayment(
+            {
+              config:
+                {
+                  reference:
+                    new Date()
+                      .getTime()
+                      .toString(),
+                  email:
+                    currentUser?.email ||
+                    "fan@nippy.com",
+                  amount:
+                    amountInKobo,
+                },
+              onSuccess:
+                async (
+                  reference,
+                ) => {
+                  setProcessingId(
+                    currentProcessingId,
+                  );
+                  try {
+                    const token =
+                      localStorage.getItem(
+                        "nippy_token",
+                      );
+                    await axios.post(
+                      "/api/purchases/verify",
+                      {
+                        reference:
+                          reference.reference,
+                        paymentMethod:
+                          "FIAT",
+                        creatorId:
+                          creatorId,
+                        messageId:
+                          isBundle
+                            ? null
+                            : checkoutData
+                                .message
+                                ._id,
+                        purchaseType:
+                          checkoutData.type,
+                      },
+                      {
+                        headers:
+                          {
+                            Authorization: `Bearer ${token}`,
+                          },
+                      },
+                    );
+
+                    if (
+                      isBundle
+                    ) {
+                      setBubblesLeft(
+                        (
+                          prev,
+                        ) =>
+                          prev +
+                          checkoutData.bubbles,
+                      );
+                      setRequiresBundle(
+                        false,
+                      );
+                    } else {
+                      await fetchMessages();
+                    }
+                    closeCheckoutModal();
+                  } catch (err) {
+                    alert(
+                      err
+                        .response
+                        ?.data
+                        ?.message ||
+                        "Verification failed on backend.",
+                    );
+                  } finally {
+                    setProcessingId(
+                      null,
+                    );
+                  }
+                },
+              onClose:
+                () =>
+                  alert(
+                    "Payment window closed.",
+                  ),
+            },
           );
           return;
         }
 
         try {
           setProcessingId(
-            paymentModalMsg._id,
+            currentProcessingId,
           );
           if (
             !chatInfo?.walletAddress
-          ) {
+          )
             throw new Error(
-              "This creator has not set up their Web3 wallet address yet!",
+              "Creator wallet missing.",
             );
-          }
+          if (
+            !cryptoQuote ||
+            !cryptoQuote.requiredUSDT
+          )
+            throw new Error(
+              "Missing crypto quote. Please select payment method again.",
+            );
 
-          // 1. Web3 Payment Execution on Polygon Amoy
           const txHash =
             await transferUSDT(
               chatInfo.walletAddress,
-              paymentModalMsg.priceInUSDT,
-              paymentModalMsg._id,
+              cryptoQuote.requiredUSDT, // DYNAMIC AMOUNT
+              isBundle
+                ? null
+                : checkoutData
+                    .message
+                    ._id,
             );
 
-          // 2. THE IRONCLAD FIX: Send the transaction hash to the backend to be cryptographically verified
+          if (
+            !txHash
+          )
+            throw new Error(
+              "Transaction completed but no hash returned.",
+            );
+
           const token =
             localStorage.getItem(
               "nippy_token",
@@ -499,13 +672,19 @@ const FanChatWindow =
           await axios.post(
             "/api/purchases/verify",
             {
-              messageId:
-                paymentModalMsg._id,
-              creatorId:
-                chatInfo._id,
               txHash,
+              paymentMethod:
+                "CRYPTO",
+              creatorId:
+                creatorId,
+              messageId:
+                isBundle
+                  ? null
+                  : checkoutData
+                      .message
+                      ._id,
               purchaseType:
-                "DM_UNLOCK",
+                checkoutData.type,
             },
             {
               headers:
@@ -515,14 +694,26 @@ const FanChatWindow =
             },
           );
 
-          // 3. Fetch updated messages only AFTER backend confirms the database is updated
-          await fetchMessages();
-          setPaymentModalMsg(
-            null,
-          );
+          if (
+            isBundle
+          ) {
+            setBubblesLeft(
+              (
+                prev,
+              ) =>
+                prev +
+                checkoutData.bubbles,
+            );
+            setRequiresBundle(
+              false,
+            );
+          } else {
+            await fetchMessages();
+          }
+          closeCheckoutModal();
         } catch (error) {
           console.error(
-            "Unlock Error Trace:",
+            "Payment Error:",
             error,
           );
           alert(
@@ -560,18 +751,38 @@ const FanChatWindow =
                   }
                 />
               </button>
+
               {chatInfo && (
-                <div className="flex items-center gap-3 cursor-pointer">
+                <div
+                  onClick={() => {
+                    const creatorId =
+                      chatInfo._id ||
+                      (typeof chatInfo ===
+                      "string"
+                        ? chatInfo
+                        : null);
+                    if (
+                      creatorId
+                    ) {
+                      navigate(
+                        `/creator/${creatorId}`,
+                      );
+                    }
+                  }}
+                  className="flex items-center gap-3 cursor-pointer group hover:opacity-90 transition-opacity"
+                >
                   <img
                     src={
                       chatInfo.profilePicture ||
                       `https://ui-avatars.com/api/?name=${chatInfo.username}`
                     }
-                    alt="Creator"
-                    className="w-10 h-10 rounded-full object-cover border border-gray-700"
+                    alt={
+                      chatInfo.username
+                    }
+                    className="w-10 h-10 rounded-full object-cover border border-gray-700 group-hover:border-emerald-500 transition-colors"
                   />
                   <div className="flex flex-col">
-                    <h2 className="text-sm font-bold text-slate-200 flex items-center gap-1">
+                    <h2 className="text-sm font-bold text-slate-200 flex items-center gap-1 group-hover:text-emerald-400 transition-colors">
                       {
                         chatInfo.username
                       }{" "}
@@ -612,8 +823,6 @@ const FanChatWindow =
                 const isMe =
                   msg.sender ===
                   myId;
-
-                // Bulletproof check: Look at fileType, OR if the fileKey contains our voice-note path
                 const isVoiceNote =
                   msg.fileType?.includes(
                     "audio",
@@ -623,7 +832,6 @@ const FanChatWindow =
                       "voice-notes",
                     ));
 
-                // Check if the fan's wallet is in the message's unlockedFor array, OR if the backend flagged it as unlocked
                 const fanWallet =
                   currentUser.walletAddress?.toLowerCase();
                 const isUnlockedByMe =
@@ -635,8 +843,6 @@ const FanChatWindow =
                       fanWallet,
                   ) ||
                   msg.hasAccess;
-
-                // Only lock it if it has a price, it isn't yours, it isn't a voice note, AND you haven't bought it
                 const isLockedPPV =
                   msg.priceInUSDT >
                     0 &&
@@ -658,7 +864,7 @@ const FanChatWindow =
                           : "bg-[#262626] text-slate-200 rounded-2xl rounded-tl-sm border border-gray-800"
                       }`}
                     >
-                      {/* --- FREE VOICE NOTE RENDERING --- */}
+                      {/* FREE VOICE NOTE */}
                       {isVoiceNote && (
                         <div className="flex flex-col gap-1 mt-1 mb-2">
                           <span className="text-[10px] font-bold uppercase tracking-wider opacity-70 flex items-center gap-1">
@@ -676,8 +882,6 @@ const FanChatWindow =
                               ? "Your Voice Note"
                               : "Creator Voice Note"}
                           </span>
-
-                          {/* IRONCLAD CHECK: Only render audio if URL actually exists */}
                           {msg.fileUrl ? (
                             <audio
                               src={
@@ -690,15 +894,13 @@ const FanChatWindow =
                             <div className="text-[10px] text-red-300 italic p-2 bg-black/20 rounded border border-red-500/30">
                               Audio
                               link
-                              missing
-                              from
-                              database.
+                              missing.
                             </div>
                           )}
                         </div>
                       )}
 
-                      {/* --- LOCKED PPV RENDERING --- */}
+                      {/* LOCKED PPV */}
                       {isLockedPPV ? (
                         <div className="mt-2 w-64 p-4 bg-black rounded-xl border border-yellow-500/30 flex flex-col items-center">
                           <Lock
@@ -711,11 +913,16 @@ const FanChatWindow =
                             PPV
                             Content
                           </span>
-                          {/* --- IRONCLAD: Added onClick to open modal --- */}
                           <button
                             onClick={() => {
-                              setPaymentModalMsg(
-                                msg,
+                              setCheckoutData(
+                                {
+                                  type: "DM_UNLOCK",
+                                  message:
+                                    msg,
+                                  amount:
+                                    msg.priceInUSDT,
+                                },
                               );
                               setPaymentMethod(
                                 null,
@@ -732,12 +939,11 @@ const FanChatWindow =
                           </button>
                         </div>
                       ) : (
-                        /* --- FREE MEDIA & TEXT RENDERING --- */
+                        /* FREE MEDIA & TEXT */
                         <div className="flex flex-col gap-2">
                           {msg.fileKey &&
                             !isVoiceNote && (
                               <>
-                                {/* 1. Explicit check for Video - LOCKED DOWN */}
                                 {(msg.fileType?.includes(
                                   "video",
                                 ) ||
@@ -759,8 +965,6 @@ const FanChatWindow =
                                     className="w-full md:w-[250px] rounded-lg bg-black"
                                   />
                                 )}
-
-                                {/* 2. Explicit check for Image - LOCKED DOWN */}
                                 {(msg.fileType?.includes(
                                   "image",
                                 ) ||
@@ -781,8 +985,6 @@ const FanChatWindow =
                                     className="w-full md:w-[250px] rounded-lg select-none"
                                   />
                                 )}
-
-                                {/* 3. Fallback for other file types (PDFs, Docs, etc.) */}
                                 {!msg.fileType?.includes(
                                   "video",
                                 ) &&
@@ -806,8 +1008,6 @@ const FanChatWindow =
                                   )}
                               </>
                             )}
-
-                          {/* Ironclad text rendering */}
                           {msg.text &&
                             msg.text.trim()
                               .length >
@@ -823,11 +1023,7 @@ const FanChatWindow =
 
                       {/* TIMESTAMPS */}
                       <div
-                        className={`text-[10px] mt-1.5 flex items-center gap-1 ${
-                          isMe
-                            ? "text-white/70 justify-end"
-                            : "text-gray-500"
-                        }`}
+                        className={`text-[10px] mt-1.5 flex items-center gap-1 ${isMe ? "text-white/70 justify-end" : "text-gray-500"}`}
                       >
                         {new Date(
                           msg.createdAt,
@@ -852,46 +1048,48 @@ const FanChatWindow =
             />
           </div>
 
-          {/* BUNDLE BUYER OR CHAT INPUT */}
+          {/* INPUT / BUNDLE PROMPT */}
           <div className="bg-nippy-obsidian/95 border-t border-gray-800 p-3 pb-safe z-10">
-            {requiresBundle ? (
-              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-center">
-                <AlertCircle
-                  size={
-                    24
-                  }
-                  className="text-emerald-500 mx-auto mb-2"
-                />
-                <p className="text-sm text-slate-300 mb-3">
-                  You
-                  are
-                  out
-                  of
-                  Message
-                  Bubbles!
-                </p>
+            {requiresBundle ||
+            bubblesLeft <=
+              0 ? (
+              <div className="p-4 bg-slate-900 border border-emerald-500/30 rounded-2xl flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-bold text-white">
+                    Chat
+                    Bubbles
+                    Exhausted
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Get{" "}
+                    {chatInfo?.bundleSize ||
+                      bundleSize ||
+                      5}{" "}
+                    messages
+                    for{" "}
+                    {chatInfo?.bundleDisplayCurrency ||
+                      "USDT"}{" "}
+                    {(
+                      chatInfo?.bundleDisplayPrice ||
+                      bundlePrice
+                    )?.toFixed(
+                      2,
+                    )}
+                  </p>
+                </div>
                 <button
-                  onClick={
-                    handleBuyBundle
-                  }
-                  disabled={
-                    isPurchasingBundle
-                  }
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                  onClick={() => {
+                    setBundleQuantity(
+                      1,
+                    );
+                    setShowBundleConfig(
+                      true,
+                    );
+                  }}
+                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold rounded-xl text-xs transition-colors"
                 >
-                  {isPurchasingBundle ? (
-                    <>
-                      <Loader2
-                        size={
-                          18
-                        }
-                        className="animate-spin"
-                      />{" "}
-                      Processing...
-                    </>
-                  ) : (
-                    `Buy Message Bundle (${bundlePrice} USDT)`
-                  )}
+                  Buy
+                  Bundle
                 </button>
               </div>
             ) : (
@@ -923,12 +1121,7 @@ const FanChatWindow =
                     className="w-full bg-[#262626] border border-gray-700 text-white rounded-full py-3 pl-4 pr-10 focus:outline-none focus:border-emerald-500 transition-colors text-sm"
                   />
                   <span
-                    className={`absolute right-4 top-3 text-xs ${
-                      inputText.length >=
-                      200
-                        ? "text-red-400"
-                        : "text-gray-500"
-                    }`}
+                    className={`absolute right-4 top-3 text-xs ${inputText.length >= 200 ? "text-red-400" : "text-gray-500"}`}
                   >
                     {
                       inputText.length
@@ -954,8 +1147,182 @@ const FanChatWindow =
             )}
           </div>
 
-          {/* --- THE CHECKOUT MODAL FOR CHAT MEDIA --- */}
-          {paymentModalMsg && (
+          {/* CHAT BUNDLE CONFIG MODAL */}
+          {showBundleConfig && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+              <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+                <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                  <h3 className="text-xl font-bold text-white">
+                    Buy
+                    Chat
+                    Bundle
+                  </h3>
+                  <button
+                    onClick={() =>
+                      setShowBundleConfig(
+                        false,
+                      )
+                    }
+                    className="text-gray-400 hover:text-white transition-colors"
+                  >
+                    <X
+                      size={
+                        24
+                      }
+                    />
+                  </button>
+                </div>
+
+                <div className="p-6 flex flex-col items-center">
+                  <MessageSquare
+                    size={
+                      48
+                    }
+                    className="text-emerald-500 mb-4 opacity-80"
+                  />
+                  <p className="text-sm text-slate-300 text-center mb-6">
+                    <span className="font-bold text-white">
+                      {
+                        chatInfo?.username
+                      }
+                    </span>{" "}
+                    is
+                    offering{" "}
+                    <span className="font-bold text-emerald-400">
+                      {
+                        bundleSize
+                      }{" "}
+                      messages
+                    </span>{" "}
+                    per
+                    bundle
+                    for{" "}
+                    <span className="font-bold text-emerald-400">
+                      $
+                      {
+                        bundlePrice
+                      }
+                    </span>
+                    .
+                  </p>
+
+                  <div className="flex items-center gap-6 mb-8 bg-slate-950 p-2 rounded-2xl border border-slate-800">
+                    <button
+                      onClick={() =>
+                        setBundleQuantity(
+                          (
+                            prev,
+                          ) =>
+                            Math.max(
+                              1,
+                              prev -
+                                1,
+                            ),
+                        )
+                      }
+                      disabled={
+                        bundleQuantity <=
+                        1
+                      }
+                      className="p-3 bg-slate-800 rounded-xl text-white hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      <Minus
+                        size={
+                          20
+                        }
+                      />
+                    </button>
+                    <div className="flex flex-col items-center min-w-[60px]">
+                      <span className="text-3xl font-black text-white">
+                        {
+                          bundleQuantity
+                        }
+                      </span>
+                      <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
+                        Bundles
+                      </span>
+                    </div>
+                    <button
+                      onClick={() =>
+                        setBundleQuantity(
+                          (
+                            prev,
+                          ) =>
+                            prev +
+                            1,
+                        )
+                      }
+                      className="p-3 bg-slate-800 rounded-xl text-white hover:bg-slate-700"
+                    >
+                      <Plus
+                        size={
+                          20
+                        }
+                      />
+                    </button>
+                  </div>
+
+                  <div className="w-full bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex justify-between items-center mb-6">
+                    <div>
+                      <p className="text-xs text-emerald-500 font-bold uppercase">
+                        Total
+                        Messages
+                      </p>
+                      <p className="text-2xl font-black text-emerald-400">
+                        {bundleQuantity *
+                          bundleSize}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-emerald-500 font-bold uppercase">
+                        Total
+                        Cost
+                      </p>
+                      <p className="text-2xl font-black text-emerald-400">
+                        $
+                        {(
+                          bundleQuantity *
+                          bundlePrice
+                        ).toFixed(
+                          2,
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setShowBundleConfig(
+                        false,
+                      );
+                      setCheckoutData(
+                        {
+                          type: "CHAT_BUNDLE",
+                          amount:
+                            bundleQuantity *
+                            bundlePrice,
+                          bubbles:
+                            bundleQuantity *
+                            bundleSize,
+                        },
+                      );
+                      setPaymentMethod(
+                        null,
+                      );
+                    }}
+                    className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-lg transition-colors"
+                  >
+                    Continue
+                    to
+                    Payment
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* UNIFIED CHECKOUT MODAL (Handles both DM Unlock and Bundles) */}
+          {checkoutData && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
                 <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
@@ -965,16 +1332,14 @@ const FanChatWindow =
                     Method
                   </h3>
                   <button
-                    onClick={() =>
-                      setPaymentModalMsg(
-                        null,
-                      )
+                    onClick={
+                      closeCheckoutModal
+                    }
+                    disabled={
+                      processingId !==
+                      null
                     }
                     className="text-gray-400 hover:text-white transition-colors"
-                    disabled={
-                      processingId ===
-                      paymentModalMsg._id
-                    }
                   >
                     <X
                       size={
@@ -986,36 +1351,33 @@ const FanChatWindow =
 
                 <div className="p-6 space-y-4">
                   <p className="text-sm text-gray-400 text-center">
-                    You
-                    are
-                    unlocking
-                    media
-                    from{" "}
+                    {checkoutData.type ===
+                    "CHAT_BUNDLE"
+                      ? `You are buying ${checkoutData.bubbles} messages from `
+                      : `You are unlocking a message from `}
                     <span className="text-white font-bold">
                       {
                         chatInfo?.username
                       }
                     </span>{" "}
                     for{" "}
-                    <span className="text-yellow-500 font-bold">
+                    <span className="text-emerald-500 font-bold">
                       {
-                        paymentModalMsg.priceInUSDT
+                        checkoutData.amount
                       }{" "}
-                      USDT
+                      USD
                     </span>
                   </p>
 
                   <div className="grid grid-cols-2 gap-3 mt-4">
                     <button
-                      onClick={() =>
-                        setPaymentMethod(
-                          "CRYPTO",
-                        )
+                      onClick={
+                        handleSelectCrypto
                       }
                       className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
                         paymentMethod ===
                         "CRYPTO"
-                          ? "border-yellow-500 bg-yellow-500/10 text-yellow-500"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
                           : "border-slate-700 text-gray-400 hover:border-slate-500"
                       }`}
                     >
@@ -1042,7 +1404,7 @@ const FanChatWindow =
                       className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
                         paymentMethod ===
                         "CARD"
-                          ? "border-yellow-500 bg-yellow-500/10 text-yellow-500"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
                           : "border-slate-700 text-gray-400 hover:border-slate-500"
                       }`}
                     >
@@ -1063,20 +1425,69 @@ const FanChatWindow =
                     </button>
                   </div>
 
-                  {/* THE FINAL EXECUTION BUTTON - YELLOW THEME */}
+                  {/* DYNAMIC CRYPTO QUOTE DISPLAY */}
+                  {paymentMethod ===
+                    "CRYPTO" &&
+                    fetchingQuote && (
+                      <div className="mt-2 p-3 text-center text-sm text-emerald-500 animate-pulse">
+                        Fetching
+                        live
+                        USDT
+                        rates...
+                      </div>
+                    )}
+                  {paymentMethod ===
+                    "CRYPTO" &&
+                    cryptoQuote && (
+                      <div className="mt-2 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
+                        <p className="text-sm text-gray-400 mb-1">
+                          Total:{" "}
+                          <span className="text-white">
+                            $
+                            {cryptoQuote.amountUSD.toFixed(
+                              2,
+                            )}{" "}
+                            USD
+                          </span>
+                        </p>
+                        <p className="text-xl font-bold text-emerald-400">
+                          Due:{" "}
+                          {
+                            cryptoQuote.requiredUSDT
+                          }{" "}
+                          USDT
+                        </p>
+                        <p className="text-xs text-emerald-500/70 mt-2 flex items-center justify-center gap-1">
+                          <Lock
+                            size={
+                              12
+                            }
+                          />{" "}
+                          Rate
+                          locked
+                          for
+                          10:00
+                        </p>
+                      </div>
+                    )}
+
                   <button
                     onClick={
                       executePayment
                     }
                     disabled={
                       !paymentMethod ||
-                      processingId ===
-                        paymentModalMsg._id
+                      fetchingQuote ||
+                      (paymentMethod ===
+                        "CRYPTO" &&
+                        !cryptoQuote) ||
+                      processingId !==
+                        null
                     }
-                    className="w-full mt-4 bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:hover:bg-yellow-500 shadow-lg shadow-yellow-500/20"
+                    className="w-full mt-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-lg shadow-emerald-500/20"
                   >
-                    {processingId ===
-                    paymentModalMsg._id ? (
+                    {processingId !==
+                    null ? (
                       <span className="animate-pulse">
                         Processing...
                       </span>

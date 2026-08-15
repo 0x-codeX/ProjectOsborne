@@ -3,6 +3,8 @@ import React, {
   useEffect,
   useRef,
 } from "react";
+import { Link } from "react-router-dom";
+import { usePaystackPayment } from "react-paystack";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import {
   Heart,
@@ -18,7 +20,6 @@ import {
   UserPlus,
   UserCheck,
 } from "lucide-react";
-import { Link } from "react-router-dom";
 
 const FanFeed =
   () => {
@@ -48,6 +49,26 @@ const FanFeed =
     } =
       useWeb3Transfer();
 
+    // Current User for Fiat Checkout
+    const currentUser =
+      JSON.parse(
+        localStorage.getItem(
+          "nippy_user",
+        ) ||
+          "{}",
+      );
+
+    // Paystack Initialization
+    const initializePayment =
+      usePaystackPayment(
+        {
+          publicKey:
+            import.meta
+              .env
+              .VITE_PAYSTACK_PUBLIC_KEY,
+        },
+      );
+
     // Staging Area for new posts
     const [
       pendingPosts,
@@ -59,7 +80,7 @@ const FanFeed =
     const feedRef =
       useRef(
         [],
-      ); // Tracks current feed for the background poller
+      );
 
     // Interaction States
     const [
@@ -99,8 +120,21 @@ const FanFeed =
       useState(
         null,
       );
+    const [
+      cryptoQuote,
+      setCryptoQuote,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      fetchingQuote,
+      setFetchingQuote,
+    ] =
+      useState(
+        false,
+      );
 
-    // Keep the ref strictly synced with the visual feed
     useEffect(() => {
       feedRef.current =
         feed;
@@ -108,12 +142,109 @@ const FanFeed =
       feed,
     ]);
 
+    // ==========================================
+    // 1. VIEW TRACKING LOGIC (INTERSECTION OBSERVER)
+    // ==========================================
+    const viewedPosts =
+      useRef(
+        new Set(),
+      );
+
+    const recordView =
+      async (
+        postId,
+      ) => {
+        if (
+          viewedPosts.current.has(
+            postId,
+          )
+        )
+          return;
+        viewedPosts.current.add(
+          postId,
+        );
+
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          await fetch(
+            `http://localhost:5000/api/content/${postId}/view`,
+            {
+              method:
+                "POST",
+              headers:
+                {
+                  Authorization: `Bearer ${token}`,
+                },
+            },
+          );
+        } catch (error) {
+          console.error(
+            "Failed to record view",
+          );
+        }
+      };
+
+    useEffect(() => {
+      const observer =
+        new IntersectionObserver(
+          (
+            entries,
+          ) => {
+            entries.forEach(
+              (
+                entry,
+              ) => {
+                if (
+                  entry.isIntersecting
+                ) {
+                  const postId =
+                    entry.target.getAttribute(
+                      "data-post-id",
+                    );
+                  if (
+                    postId
+                  ) {
+                    recordView(
+                      postId,
+                    );
+                    observer.unobserve(
+                      entry.target,
+                    );
+                  }
+                }
+              },
+            );
+          },
+          {
+            threshold: 0.6,
+          },
+        );
+
+      const elements =
+        document.querySelectorAll(
+          ".feed-post-card",
+        );
+      elements.forEach(
+        (
+          el,
+        ) =>
+          observer.observe(
+            el,
+          ),
+      );
+
+      return () =>
+        observer.disconnect();
+    }, [
+      feed,
+    ]);
+
     // Silent Polling Architecture
     useEffect(() => {
-      // 1. Initial heavy load (shows the loading skeleton)
       fetchFeed();
-
-      // 2. Silent background polling every 15 seconds
       const pollInterval =
         setInterval(
           () => {
@@ -128,7 +259,6 @@ const FanFeed =
         );
     }, []);
 
-    // Initial load: Only runs once when component mounts
     const fetchFeed =
       async () => {
         setLoading(
@@ -177,7 +307,6 @@ const FanFeed =
         }
       };
 
-    // Background Poll: Fetches data but DOES NOT shift the UI
     const pollForNewPosts =
       async () => {
         try {
@@ -206,16 +335,15 @@ const FanFeed =
             return;
           const freshData =
             await response.json();
-
           const currentFeed =
             feedRef.current;
+
           if (
             currentFeed.length ===
             0
           )
-            return; // Nothing to compare against
+            return;
 
-          // Create a Set of existing IDs for ultra-fast O(1) lookups
           const existingIds =
             new Set(
               currentFeed.map(
@@ -225,8 +353,6 @@ const FanFeed =
                   post._id,
               ),
             );
-
-          // Find posts that exist in the database but NOT in our current feed
           const newPosts =
             freshData.filter(
               (
@@ -241,7 +367,6 @@ const FanFeed =
             newPosts.length >
             0
           ) {
-            // Push them to the Staging Area (pendingPosts), NOT the main feed
             setPendingPosts(
               (
                 prev,
@@ -272,7 +397,6 @@ const FanFeed =
             );
           }
         } catch (error) {
-          // Silently fail in the background so the user isn't bothered by network blips
           console.error(
             "Silent poll failed",
             error,
@@ -280,7 +404,6 @@ const FanFeed =
         }
       };
 
-    // When the user clicks the "New Posts" pill
     const injectPendingPosts =
       () => {
         setFeed(
@@ -303,12 +426,10 @@ const FanFeed =
         );
       };
 
-    // --- FOLLOW TOGGLE ---
     const handleFollowToggle =
       async (
         creatorId,
       ) => {
-        // Optimistic UI Update: Find all posts by this creator and toggle follow state
         setFeed(
           (
             prevFeed,
@@ -567,6 +688,91 @@ const FanFeed =
         }
       };
 
+    const closeModal =
+      () => {
+        setPaymentModalPost(
+          null,
+        );
+        setPaymentMethod(
+          null,
+        );
+        setCryptoQuote(
+          null,
+        );
+      };
+
+    const handleSelectCrypto =
+      async () => {
+        setPaymentMethod(
+          "CRYPTO",
+        );
+        setFetchingQuote(
+          true,
+        );
+        setCryptoQuote(
+          null,
+        );
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          const baseAmountUSD =
+            paymentModalPost.displayPrice ||
+            paymentModalPost.actualPrice ||
+            0;
+
+          const res =
+            await fetch(
+              "http://localhost:5000/api/purchases/crypto-quote",
+              {
+                method:
+                  "POST",
+                headers:
+                  {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type":
+                      "application/json",
+                  },
+                body: JSON.stringify(
+                  {
+                    amountUSD:
+                      baseAmountUSD,
+                  },
+                ),
+              },
+            );
+
+          if (
+            !res.ok
+          )
+            throw new Error(
+              "Failed to fetch quote",
+            );
+          const data =
+            await res.json();
+          setCryptoQuote(
+            data,
+          );
+        } catch (error) {
+          console.error(
+            "Quote error:",
+            error,
+          );
+          alert(
+            "Failed to get live crypto rates. Please try again.",
+          );
+          setPaymentMethod(
+            null,
+          );
+        } finally {
+          setFetchingQuote(
+            false,
+          );
+        }
+      };
+
+    // UNIFIED PAYMENT ROUTER
     const executePayment =
       async () => {
         if (
@@ -574,21 +780,125 @@ const FanFeed =
           !paymentMethod
         )
           return;
+        const creatorId =
+          paymentModalPost
+            .creator
+            ?._id;
+        const baseAmountUSD =
+          paymentModalPost.displayPrice ||
+          paymentModalPost.actualPrice;
 
         if (
           paymentMethod ===
           "CARD"
         ) {
-          alert(
-            "Paystack integration pending. Please use Web3 Crypto for now.",
+          const exchangeRate = 1500; // Can be fetched from settings later
+          const amountInKobo =
+            Math.round(
+              baseAmountUSD *
+                exchangeRate *
+                100,
+            );
+
+          initializePayment(
+            {
+              config:
+                {
+                  reference:
+                    new Date()
+                      .getTime()
+                      .toString(),
+                  email:
+                    currentUser?.email ||
+                    "fan@nippy.com",
+                  amount:
+                    amountInKobo,
+                },
+              onSuccess:
+                async (
+                  reference,
+                ) => {
+                  setProcessingId(
+                    paymentModalPost._id,
+                  );
+                  try {
+                    const token =
+                      localStorage.getItem(
+                        "nippy_token",
+                      );
+                    const res =
+                      await fetch(
+                        "http://localhost:5000/api/purchases/verify",
+                        {
+                          method:
+                            "POST",
+                          headers:
+                            {
+                              Authorization: `Bearer ${token}`,
+                              "Content-Type":
+                                "application/json",
+                            },
+                          body: JSON.stringify(
+                            {
+                              reference:
+                                reference.reference,
+                              paymentMethod:
+                                "FIAT",
+                              creatorId:
+                                creatorId,
+                              contentId:
+                                paymentModalPost._id,
+                              purchaseType:
+                                "PPV",
+                            },
+                          ),
+                        },
+                      );
+
+                    if (
+                      !res.ok
+                    ) {
+                      const errData =
+                        await res.json();
+                      throw new Error(
+                        errData.message ||
+                          "Verification failed on backend.",
+                      );
+                    }
+
+                    await fetchFeed();
+                    closeModal();
+                  } catch (error) {
+                    console.error(
+                      "Fiat Error:",
+                      error,
+                    );
+                    alert(
+                      error.message ||
+                        "Fiat verification failed.",
+                    );
+                  } finally {
+                    setProcessingId(
+                      null,
+                    );
+                  }
+                },
+              onClose:
+                () =>
+                  alert(
+                    "Payment window closed.",
+                  ),
+            },
           );
           return;
         }
 
+        // WEB3 CRYPTO EXECUTION (Using the dynamic quote)
         try {
           setProcessingId(
             paymentModalPost._id,
           );
+
           if (
             !paymentModalPost
               .creator
@@ -599,27 +909,76 @@ const FanFeed =
             );
           }
 
-          await transferUSDT(
-            paymentModalPost
-              .creator
-              .walletAddress,
-            paymentModalPost.actualPrice,
-            paymentModalPost._id,
-          );
+          if (
+            !cryptoQuote ||
+            !cryptoQuote.requiredUSDT
+          ) {
+            throw new Error(
+              "Missing crypto quote. Please re-select the payment method.",
+            );
+          }
 
-          await new Promise(
-            (
-              resolve,
-            ) =>
-              setTimeout(
-                resolve,
-                3000,
-              ),
-          );
+          const txHash =
+            await transferUSDT(
+              paymentModalPost
+                .creator
+                .walletAddress,
+              cryptoQuote.requiredUSDT,
+              paymentModalPost._id,
+            );
+
+          if (
+            !txHash
+          )
+            throw new Error(
+              "Transaction completed but no hash returned.",
+            );
+
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          const res =
+            await fetch(
+              "http://localhost:5000/api/purchases/verify",
+              {
+                method:
+                  "POST",
+                headers:
+                  {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type":
+                      "application/json",
+                  },
+                body: JSON.stringify(
+                  {
+                    txHash,
+                    paymentMethod:
+                      "CRYPTO",
+                    creatorId:
+                      creatorId,
+                    contentId:
+                      paymentModalPost._id,
+                    purchaseType:
+                      "PPV",
+                  },
+                ),
+              },
+            );
+
+          if (
+            !res.ok
+          ) {
+            const errData =
+              await res.json();
+            throw new Error(
+              errData.message ||
+                "Backend verification failed.",
+            );
+          }
+
           await fetchFeed();
-          setPaymentModalPost(
-            null,
-          );
+          closeModal();
         } catch (error) {
           console.error(
             "Unlock Error Trace:",
@@ -649,7 +1008,6 @@ const FanFeed =
 
     return (
       <div className="max-w-2xl mx-auto py-8 px-4 relative">
-        {/* THE PILL: Only shows if there are pending posts */}
         {pendingPosts.length >
           0 && (
           <div className="sticky top-4 z-50 flex justify-center mb-6 animate-in slide-in-from-top-2 duration-300">
@@ -689,7 +1047,10 @@ const FanFeed =
                 key={
                   post._id
                 }
-                className="mb-10 bg-nippy-obsidian/80 backdrop-blur-md border border-gray-800/60 rounded-2xl overflow-hidden shadow-xl"
+                data-post-id={
+                  post._id
+                }
+                className="feed-post-card mb-10 bg-nippy-obsidian/80 backdrop-blur-md border border-gray-800/60 rounded-2xl overflow-hidden shadow-xl"
               >
                 <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
                   <Link
@@ -721,9 +1082,8 @@ const FanFeed =
                     </div>
                   </Link>
 
-                  {/* Right-aligned Follow & PPV Badges */}
                   <div className="flex items-center gap-3">
-                    {post.actualPrice >
+                    {post.displayPrice >
                       0 && (
                       <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
                         <BadgeDollarSign
@@ -735,7 +1095,6 @@ const FanFeed =
                       </div>
                     )}
 
-                    {/* Follow Button */}
                     <button
                       onClick={() =>
                         handleFollowToggle(
@@ -858,7 +1217,7 @@ const FanFeed =
                         the
                         full
                         resolution
-                        video.
+                        media.
                       </p>
 
                       <div className="flex flex-col gap-3 w-full max-w-xs">
@@ -879,11 +1238,13 @@ const FanFeed =
                             }
                           />
                           Unlock
-                          for{" "}
-                          {
-                            post.actualPrice
-                          }{" "}
-                          USDT
+                          for
+                          $
+                          {post.displayPrice?.toFixed(
+                            2,
+                          ) ||
+                            post.actualPrice}{" "}
+                          USD
                         </button>
 
                         <Link
@@ -910,6 +1271,29 @@ const FanFeed =
                       post.description
                     }
                   </p>
+
+                  {post.isPaywalled &&
+                    !post.isUnlocked && (
+                      <button
+                        onClick={() => {
+                          setPaymentModalPost(
+                            post,
+                          );
+                          setPaymentMethod(
+                            null,
+                          );
+                        }}
+                        className="px-4 py-2 mb-4 bg-[#FF5757] text-white rounded-lg font-bold text-sm hover:bg-rose-600 transition-colors"
+                      >
+                        Unlock
+                        for
+                        USD{" "}
+                        {post.displayPrice?.toFixed(
+                          2,
+                        ) ||
+                          post.actualPrice}
+                      </button>
+                    )}
 
                   <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
                     <div className="flex items-center gap-6">
@@ -1094,6 +1478,7 @@ const FanFeed =
           )
         )}
 
+        {/* REUSABLE CHECKOUT MODAL */}
         {paymentModalPost && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -1104,10 +1489,8 @@ const FanFeed =
                   Method
                 </h3>
                 <button
-                  onClick={() =>
-                    setPaymentModalPost(
-                      null,
-                    )
+                  onClick={
+                    closeModal
                   }
                   className="text-gray-400 hover:text-white transition-colors"
                   disabled={
@@ -1139,19 +1522,17 @@ const FanFeed =
                   </span>{" "}
                   for{" "}
                   <span className="text-emerald-500 font-bold">
-                    {
-                      paymentModalPost.actualPrice
-                    }{" "}
-                    USDT
+                    $
+                    {paymentModalPost.displayPrice ||
+                      paymentModalPost.actualPrice}{" "}
+                    USD
                   </span>
                 </p>
 
                 <div className="grid grid-cols-2 gap-3 mt-4">
                   <button
-                    onClick={() =>
-                      setPaymentMethod(
-                        "CRYPTO",
-                      )
+                    onClick={
+                      handleSelectCrypto
                     }
                     className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
                       paymentMethod ===
@@ -1204,12 +1585,62 @@ const FanFeed =
                   </button>
                 </div>
 
+                {/* DYNAMIC CRYPTO QUOTE DISPLAY */}
+                {paymentMethod ===
+                  "CRYPTO" &&
+                  fetchingQuote && (
+                    <div className="mt-2 p-3 text-center text-sm text-emerald-500 animate-pulse">
+                      Fetching
+                      live
+                      USDT
+                      rates...
+                    </div>
+                  )}
+                {paymentMethod ===
+                  "CRYPTO" &&
+                  cryptoQuote && (
+                    <div className="mt-2 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
+                      <p className="text-sm text-gray-400 mb-1">
+                        Total:{" "}
+                        <span className="text-white">
+                          $
+                          {cryptoQuote.amountUSD.toFixed(
+                            2,
+                          )}{" "}
+                          USD
+                        </span>
+                      </p>
+                      <p className="text-xl font-bold text-emerald-400">
+                        Due:{" "}
+                        {
+                          cryptoQuote.requiredUSDT
+                        }{" "}
+                        USDT
+                      </p>
+                      <p className="text-xs text-emerald-500/70 mt-2 flex items-center justify-center gap-1">
+                        <Lock
+                          size={
+                            12
+                          }
+                        />{" "}
+                        Rate
+                        locked
+                        for
+                        10:00
+                      </p>
+                    </div>
+                  )}
+
                 <button
                   onClick={
                     executePayment
                   }
                   disabled={
                     !paymentMethod ||
+                    fetchingQuote ||
+                    (paymentMethod ===
+                      "CRYPTO" &&
+                      !cryptoQuote) ||
                     processingId ===
                       paymentModalPost._id
                   }

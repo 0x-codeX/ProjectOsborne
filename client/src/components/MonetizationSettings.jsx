@@ -10,7 +10,24 @@ import {
   AlertCircle,
   Edit3,
   MessageSquare,
+  Globe,
 } from "lucide-react";
+
+const COUNTRY_TO_CURRENCY =
+  {
+    Nigeria:
+      "NGN",
+    "United States":
+      "USD",
+    "United Kingdom":
+      "GBP",
+    Kenya:
+      "KES",
+    Ghana:
+      "GHS",
+    default:
+      "USD",
+  };
 
 const MonetizationSettings =
   () => {
@@ -20,6 +37,8 @@ const MonetizationSettings =
     ] =
       useState(
         {
+          baseCurrency:
+            "USD",
           defaultPPVPrice: 0,
           weeklySubscription: 0,
           monthlySubscription: 0,
@@ -51,6 +70,13 @@ const MonetizationSettings =
       useState(
         false,
       );
+    const [
+      userCountry,
+      setUserCountry,
+    ] =
+      useState(
+        "",
+      );
 
     useEffect(() => {
       const fetchSettings =
@@ -63,6 +89,14 @@ const MonetizationSettings =
               localStorage.getItem(
                 "token",
               );
+            const storedUser =
+              JSON.parse(
+                localStorage.getItem(
+                  "nippy_user",
+                ) ||
+                  "{}",
+              );
+
             if (
               !token
             ) {
@@ -74,6 +108,18 @@ const MonetizationSettings =
               );
               return;
             }
+
+            const country =
+              storedUser.country ||
+              "United States";
+            setUserCountry(
+              country,
+            );
+            const autoCurrency =
+              COUNTRY_TO_CURRENCY[
+                country
+              ] ||
+              COUNTRY_TO_CURRENCY.default;
 
             const res =
               await axios.get(
@@ -91,6 +137,11 @@ const MonetizationSettings =
             ) {
               setSettings(
                 {
+                  baseCurrency:
+                    res
+                      .data
+                      .baseCurrency ||
+                    autoCurrency,
                   defaultPPVPrice:
                     res
                       .data
@@ -115,9 +166,6 @@ const MonetizationSettings =
                     res
                       .data
                       .multiMonthPrice ||
-                    res
-                      .data
-                      .threeMonthBundle ||
                     0,
                   messageBundleSize:
                     res
@@ -133,14 +181,24 @@ const MonetizationSettings =
               );
 
               const hasSetupTiers =
-                Object.values(
+                Object.keys(
                   res.data,
                 ).some(
                   (
-                    val,
+                    key,
                   ) =>
-                    val >
-                    0,
+                    key.includes(
+                      "Price",
+                    ) ||
+                    key.includes(
+                      "Subscription",
+                    )
+                      ? res
+                          .data[
+                          key
+                        ] >
+                        0
+                      : false,
                 );
               setIsEditing(
                 !hasSetupTiers,
@@ -181,12 +239,15 @@ const MonetizationSettings =
           ) => ({
             ...prev,
             [name]:
-              value ===
-              ""
-                ? ""
-                : Number(
-                    value,
-                  ),
+              name ===
+              "baseCurrency"
+                ? value
+                : value ===
+                    ""
+                  ? ""
+                  : Number(
+                      value,
+                    ),
           }),
         );
       };
@@ -203,7 +264,6 @@ const MonetizationSettings =
           "",
         );
 
-        // NEW VALIDATION: Must be 5 or higher, and perfectly divisible by 5
         if (
           settings.messageBundleSize <
             5 ||
@@ -220,6 +280,53 @@ const MonetizationSettings =
           return;
         }
 
+        // IRONCLAD FIX: Force rounding up to 0.50 increment on every price field before sending
+        const roundPrice =
+          (
+            price,
+          ) => {
+            const raw =
+              parseFloat(
+                price,
+              );
+            return !isNaN(
+              raw,
+            ) &&
+              raw >
+                0
+              ? Math.ceil(
+                  raw *
+                    2,
+                ) /
+                  2
+              : 0;
+          };
+
+        const sanitizedPayload =
+          {
+            ...settings,
+            defaultPPVPrice:
+              roundPrice(
+                settings.defaultPPVPrice,
+              ),
+            weeklySubscription:
+              roundPrice(
+                settings.weeklySubscription,
+              ),
+            monthlySubscription:
+              roundPrice(
+                settings.monthlySubscription,
+              ),
+            multiMonthPrice:
+              roundPrice(
+                settings.multiMonthPrice,
+              ),
+            messageBundlePrice:
+              roundPrice(
+                settings.messageBundlePrice,
+              ),
+          };
+
         try {
           const token =
             localStorage.getItem(
@@ -230,7 +337,7 @@ const MonetizationSettings =
             );
           await axios.put(
             "/api/users/settings/monetization",
-            settings,
+            sanitizedPayload,
             {
               headers:
                 {
@@ -239,6 +346,9 @@ const MonetizationSettings =
             },
           );
 
+          setSettings(
+            sanitizedPayload,
+          );
           setStatus(
             "idle",
           );
@@ -272,27 +382,31 @@ const MonetizationSettings =
 
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-xl">
-        <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
-          <div className="flex items-center">
-            <div className="bg-slate-800 p-2 rounded-lg mr-4">
-              <Settings className="w-6 h-6 text-[#FF5757]" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white">
-                Global
-                Pricing
-                Tiers
-              </h2>
-              <p className="text-sm text-slate-400">
-                Account-level
-                subscription,
-                PPV,
-                and
-                Chat
-                defaults.
-              </p>
-            </div>
+        {/* CENTERED HEADER */}
+        <div className="flex flex-col items-center justify-center mb-8 border-b border-slate-800 pb-6 relative">
+          <div className="bg-slate-800 p-3 rounded-xl mb-3 shadow-lg">
+            <Settings className="w-8 h-8 text-[#FF5757]" />
           </div>
+          <h2 className="text-2xl font-bold text-white mb-2 text-center">
+            Global
+            Pricing
+            Tiers
+          </h2>
+          <p className="text-sm text-slate-400 text-center max-w-md">
+            Set
+            your
+            base
+            prices.
+            Fans
+            will
+            automatically
+            see
+            conversions
+            in
+            their
+            local
+            fiat.
+          </p>
 
           {!isEditing && (
             <button
@@ -301,7 +415,7 @@ const MonetizationSettings =
                   true,
                 )
               }
-              className="flex items-center text-sm bg-slate-800 hover:bg-slate-700 text-white py-2 px-4 rounded-lg transition-colors"
+              className="mt-4 flex items-center text-sm bg-slate-800 hover:bg-slate-700 text-white py-2 px-4 rounded-lg transition-colors shadow-md"
             >
               <Edit3 className="w-4 h-4 mr-2" />{" "}
               Edit
@@ -312,7 +426,7 @@ const MonetizationSettings =
 
         {status ===
           "error" && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center text-red-400">
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-center text-center text-red-400">
             <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0" />
             {
               message
@@ -320,64 +434,63 @@ const MonetizationSettings =
           </div>
         )}
 
-        {/* READ-ONLY SUMMARY VIEW */}
         {!isEditing ? (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
-              <p className="text-sm text-slate-400 mb-1">
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center flex flex-col justify-center">
+              <p className="text-sm text-slate-400 mb-1 text-center">
                 Default
                 PPV
               </p>
-              <p className="text-xl font-bold text-white">
+              <p className="text-xl font-bold text-white text-center">
                 {settings.defaultPPVPrice >
                 0
-                  ? `${settings.defaultPPVPrice} USDT`
+                  ? `${settings.defaultPPVPrice.toFixed(2)} ${settings.baseCurrency}`
                   : "Free"}
               </p>
             </div>
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
-              <p className="text-sm text-slate-400 mb-1">
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center flex flex-col justify-center">
+              <p className="text-sm text-slate-400 mb-1 text-center">
                 Weekly
                 Sub
               </p>
-              <p className="text-xl font-bold text-white">
+              <p className="text-xl font-bold text-white text-center">
                 {settings.weeklySubscription >
                 0
-                  ? `${settings.weeklySubscription} USDT`
+                  ? `${settings.weeklySubscription.toFixed(2)} ${settings.baseCurrency}`
                   : "Disabled"}
               </p>
             </div>
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
-              <p className="text-sm text-slate-400 mb-1">
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center flex flex-col justify-center">
+              <p className="text-sm text-slate-400 mb-1 text-center">
                 Monthly
                 Sub
               </p>
-              <p className="text-xl font-bold text-white">
+              <p className="text-xl font-bold text-white text-center">
                 {settings.monthlySubscription >
                 0
-                  ? `${settings.monthlySubscription} USDT`
+                  ? `${settings.monthlySubscription.toFixed(2)} ${settings.baseCurrency}`
                   : "Disabled"}
               </p>
             </div>
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
-              <p className="text-sm text-slate-400 mb-1">
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center flex flex-col justify-center">
+              <p className="text-sm text-slate-400 mb-1 text-center">
                 {
                   settings.multiMonthDuration
                 }
                 -Month
                 Sub
               </p>
-              <p className="text-xl font-bold text-white">
+              <p className="text-xl font-bold text-white text-center">
                 {settings.multiMonthPrice >
                 0
-                  ? `${settings.multiMonthPrice} USDT`
+                  ? `${settings.multiMonthPrice.toFixed(2)} ${settings.baseCurrency}`
                   : "Disabled"}
               </p>
             </div>
 
-            <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 text-center relative overflow-hidden">
+            <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 text-center relative overflow-hidden flex flex-col justify-center">
               <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/10 rounded-bl-full blur-xl pointer-events-none"></div>
-              <p className="text-sm text-emerald-400 mb-1 flex items-center justify-center gap-1">
+              <p className="text-sm text-emerald-400 mb-1 flex items-center justify-center gap-1 text-center">
                 <MessageSquare
                   size={
                     14
@@ -386,13 +499,13 @@ const MonetizationSettings =
                 Chat
                 Bundle
               </p>
-              <p className="text-xl font-bold text-white">
+              <p className="text-xl font-bold text-white text-center">
                 {settings.messageBundlePrice >
                 0
-                  ? `${settings.messageBundlePrice} USDT`
+                  ? `${settings.messageBundlePrice.toFixed(2)} ${settings.baseCurrency}`
                   : "Disabled"}
               </p>
-              <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider font-bold">
+              <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider font-bold text-center">
                 Per{" "}
                 {
                   settings.messageBundleSize
@@ -402,80 +515,181 @@ const MonetizationSettings =
             </div>
           </div>
         ) : (
-          /* EDIT MODE FORM */
           <form
             onSubmit={
               handleSave
             }
             className="space-y-8"
           >
+            <div className="bg-blue-500/10 border border-blue-500/20 p-6 rounded-xl flex flex-col items-center text-center gap-4">
+              <Globe className="w-8 h-8 text-blue-400 flex-shrink-0" />
+              <div className="w-full flex flex-col items-center">
+                <label className="block text-lg font-bold text-blue-400 mb-2 text-center">
+                  Your
+                  Base
+                  Currency
+                </label>
+                <p className="text-xs text-blue-300/70 mb-4 max-w-sm text-center">
+                  Based
+                  on
+                  your
+                  profile
+                  country
+                  (
+                  {
+                    userCountry
+                  }
+                  ),
+                  we
+                  recommend{" "}
+                  {COUNTRY_TO_CURRENCY[
+                    userCountry
+                  ] ||
+                    "USD"}
+                  .
+                  Set
+                  your
+                  prices
+                  in
+                  this
+                  currency.
+                  Fans
+                  will
+                  see
+                  these
+                  prices
+                  converted
+                  to
+                  their
+                  local
+                  currency
+                  automatically.
+                </p>
+                <select
+                  name="baseCurrency"
+                  value={
+                    settings.baseCurrency
+                  }
+                  onChange={
+                    handleChange
+                  }
+                  className="bg-slate-950 border border-blue-500/30 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 w-full max-w-xs font-bold text-center"
+                >
+                  <option value="NGN">
+                    NGN
+                    (Nigerian
+                    Naira)
+                  </option>
+                  <option value="USD">
+                    USD
+                    (US
+                    Dollar)
+                  </option>
+                  <option value="GBP">
+                    GBP
+                    (British
+                    Pound)
+                  </option>
+                  <option value="KES">
+                    KES
+                    (Kenyan
+                    Shilling)
+                  </option>
+                  <option value="GHS">
+                    GHS
+                    (Ghanaian
+                    Cedi)
+                  </option>
+                </select>
+              </div>
+            </div>
+
             <div>
-              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-800 pb-2">
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-800 pb-2 text-center">
                 Content
                 Access
+                Prices
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-300 mb-2 text-center">
                     Default
                     PPV
-                    (USDT)
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="defaultPPVPrice"
-                    value={
-                      settings.defaultPPVPrice
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
-                  />
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm">
+                      {
+                        settings.baseCurrency
+                      }
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="defaultPPVPrice"
+                      value={
+                        settings.defaultPPVPrice
+                      }
+                      onChange={
+                        handleChange
+                      }
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                    />
+                  </div>
                 </div>
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-300 mb-2 text-center">
                     Weekly
                     Sub
-                    (USDT)
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="weeklySubscription"
-                    value={
-                      settings.weeklySubscription
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
-                  />
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm">
+                      {
+                        settings.baseCurrency
+                      }
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="weeklySubscription"
+                      value={
+                        settings.weeklySubscription
+                      }
+                      onChange={
+                        handleChange
+                      }
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                    />
+                  </div>
                 </div>
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-300 mb-2 text-center">
                     Monthly
                     Sub
-                    (USDT)
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="monthlySubscription"
-                    value={
-                      settings.monthlySubscription
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
-                  />
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm">
+                      {
+                        settings.baseCurrency
+                      }
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="monthlySubscription"
+                      value={
+                        settings.monthlySubscription
+                      }
+                      onChange={
+                        handleChange
+                      }
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                    />
+                  </div>
                 </div>
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative">
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative flex flex-col justify-center items-center">
                   <select
                     name="multiMonthDuration"
                     value={
@@ -484,7 +698,7 @@ const MonetizationSettings =
                     onChange={
                       handleChange
                     }
-                    className="block w-full bg-transparent text-sm font-medium text-slate-300 mb-2 focus:outline-none cursor-pointer border-b border-dashed border-slate-700 pb-1"
+                    className="block w-full bg-transparent text-sm font-medium text-slate-300 mb-2 focus:outline-none cursor-pointer border-b border-dashed border-slate-700 pb-1 text-center"
                   >
                     <option
                       value={
@@ -494,7 +708,6 @@ const MonetizationSettings =
                     >
                       2-Month
                       Sub
-                      (USDT)
                     </option>
                     <option
                       value={
@@ -504,42 +717,46 @@ const MonetizationSettings =
                     >
                       3-Month
                       Sub
-                      (USDT)
                     </option>
                   </select>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="multiMonthPrice"
-                    value={
-                      settings.multiMonthPrice
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
-                  />
+                  <div className="relative w-full">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm">
+                      {
+                        settings.baseCurrency
+                      }
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="multiMonthPrice"
+                      value={
+                        settings.multiMonthPrice
+                      }
+                      onChange={
+                        handleChange
+                      }
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Direct Messaging Tiers */}
             <div>
-              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-800 pb-2">
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-800 pb-2 text-center">
                 Direct
                 Messaging
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30">
-                  <label className="block text-sm font-medium text-emerald-400 mb-2">
+                <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 flex flex-col items-center">
+                  <label className="block text-sm font-medium text-emerald-400 mb-2 text-center">
                     Bundle
                     Size
                     (Multiples
                     of
                     5)
                   </label>
-                  {/* Notice the step="5" below! */}
                   <input
                     type="number"
                     step="5"
@@ -551,9 +768,9 @@ const MonetizationSettings =
                     onChange={
                       handleChange
                     }
-                    className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-lg"
+                    className="w-full max-w-[200px] bg-slate-900 border border-emerald-500/50 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-lg text-center"
                   />
-                  <p className="text-[10px] text-slate-500 mt-2">
+                  <p className="text-[10px] text-slate-500 mt-2 text-center">
                     Base
                     number
                     of
@@ -569,27 +786,33 @@ const MonetizationSettings =
                   </p>
                 </div>
 
-                <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30">
-                  <label className="block text-sm font-medium text-emerald-400 mb-2">
+                <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 flex flex-col items-center">
+                  <label className="block text-sm font-medium text-emerald-400 mb-2 text-center">
                     Price
                     Per
                     Bundle
-                    (USDT)
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    name="messageBundlePrice"
-                    value={
-                      settings.messageBundlePrice
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-lg"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-2">
+                  <div className="relative w-full max-w-[200px]">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-lg">
+                      {
+                        settings.baseCurrency
+                      }
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="messageBundlePrice"
+                      value={
+                        settings.messageBundlePrice
+                      }
+                      onChange={
+                        handleChange
+                      }
+                      className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-lg"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-2 text-center">
                     Cost
                     to
                     unlock{" "}
@@ -601,14 +824,14 @@ const MonetizationSettings =
               </div>
             </div>
 
-            <div className="flex gap-4 pt-4">
+            <div className="flex justify-center gap-4 pt-4">
               <button
                 type="submit"
                 disabled={
                   status ===
                   "saving"
                 }
-                className="flex-1 md:flex-none px-8 py-3 bg-[#FF5757] hover:bg-rose-600 text-white font-bold rounded-lg transition-colors flex items-center justify-center disabled:opacity-70"
+                className="px-10 py-3 bg-[#FF5757] hover:bg-rose-600 text-white font-bold rounded-lg transition-colors flex items-center justify-center disabled:opacity-70 shadow-lg"
               >
                 {status ===
                 "saving" ? (
@@ -632,7 +855,7 @@ const MonetizationSettings =
                     false,
                   )
                 }
-                className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors"
+                className="px-10 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors"
               >
                 Cancel
               </button>

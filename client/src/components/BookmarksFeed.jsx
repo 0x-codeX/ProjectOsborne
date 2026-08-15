@@ -85,6 +85,20 @@ const BookmarksFeed =
       useState(
         null,
       );
+    const [
+      cryptoQuote,
+      setCryptoQuote,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      fetchingQuote,
+      setFetchingQuote,
+    ] =
+      useState(
+        false,
+      );
 
     useEffect(() => {
       fetchBookmarks();
@@ -129,7 +143,6 @@ const BookmarksFeed =
         }
       };
 
-    // --- FOLLOW TOGGLE ---
     const handleFollowToggle =
       async (
         creatorId,
@@ -376,7 +389,90 @@ const BookmarksFeed =
         }
       };
 
-    // --- FINAL EXECUTION HANDLER ---
+    const closeModal =
+      () => {
+        setPaymentModalPost(
+          null,
+        );
+        setPaymentMethod(
+          null,
+        );
+        setCryptoQuote(
+          null,
+        );
+      };
+
+    const handleSelectCrypto =
+      async () => {
+        setPaymentMethod(
+          "CRYPTO",
+        );
+        setFetchingQuote(
+          true,
+        );
+        setCryptoQuote(
+          null,
+        );
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          const baseAmountUSD =
+            paymentModalPost.displayPrice ||
+            paymentModalPost.actualPrice ||
+            0;
+
+          const res =
+            await fetch(
+              "http://localhost:5000/api/purchases/crypto-quote",
+              {
+                method:
+                  "POST",
+                headers:
+                  {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type":
+                      "application/json",
+                  },
+                body: JSON.stringify(
+                  {
+                    amountUSD:
+                      baseAmountUSD,
+                  },
+                ),
+              },
+            );
+
+          if (
+            !res.ok
+          )
+            throw new Error(
+              "Failed to fetch quote",
+            );
+          const data =
+            await res.json();
+          setCryptoQuote(
+            data,
+          );
+        } catch (error) {
+          console.error(
+            "Quote error:",
+            error,
+          );
+          alert(
+            "Failed to get live crypto rates. Please try again.",
+          );
+          setPaymentMethod(
+            null,
+          );
+        } finally {
+          setFetchingQuote(
+            false,
+          );
+        }
+      };
+
     const executePayment =
       async () => {
         if (
@@ -390,7 +486,7 @@ const BookmarksFeed =
           "CARD"
         ) {
           alert(
-            "Paystack integration pending. Please use Web3 Crypto for now.",
+            "Paystack integration is handled similarly to FanFeed. Please use Web3 Crypto for now.",
           );
           return;
         }
@@ -399,15 +495,27 @@ const BookmarksFeed =
           setProcessingId(
             paymentModalPost._id,
           );
+
+          if (
+            !cryptoQuote ||
+            !cryptoQuote.requiredUSDT
+          ) {
+            throw new Error(
+              "Missing crypto quote. Please re-select the payment method.",
+            );
+          }
+
           const txHash =
             await transferUSDT(
               paymentModalPost
                 .creator
                 .walletAddress,
-              paymentModalPost.actualPrice,
+              cryptoQuote.requiredUSDT, // Using Dynamic quoted amount
               paymentModalPost._id,
             );
 
+          // Verify payment call would happen here normally via /api/purchases/verify
+          // Adding brief timeout to mimic backend sync for bookmarks demo
           await new Promise(
             (
               resolve,
@@ -417,10 +525,9 @@ const BookmarksFeed =
                 3000,
               ),
           );
+
           await fetchBookmarks();
-          setPaymentModalPost(
-            null,
-          );
+          closeModal();
         } catch (error) {
           console.error(
             "Unlock failed:",
@@ -532,9 +639,8 @@ const BookmarksFeed =
                     </div>
                   </Link>
 
-                  {/* IRONCLAD UPDATE: Decoupled Follow & PPV Badges */}
                   <div className="flex items-center gap-3">
-                    {post.actualPrice >
+                    {post.displayPrice >
                       0 && (
                       <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
                         <BadgeDollarSign
@@ -545,8 +651,6 @@ const BookmarksFeed =
                         PPV
                       </div>
                     )}
-
-                    {/* Follow Button */}
                     <button
                       onClick={() =>
                         handleFollowToggle(
@@ -590,7 +694,6 @@ const BookmarksFeed =
 
                 <div className="relative bg-black w-full min-h-[300px] max-h-[600px] flex items-center justify-center overflow-hidden">
                   {post.isLocked ? (
-                    /* LOCKED TEASER */
                     <video
                       src={
                         post.teaserUrl
@@ -607,7 +710,6 @@ const BookmarksFeed =
                       className="w-full h-auto max-h-[600px] object-cover blur-3xl scale-[1.2] opacity-70 pointer-events-none select-none"
                     />
                   ) : (
-                    /* UNLOCKED FULL CONTENT (Defaults to Video, strictly catches Images) */
                     <>
                       {post.mediaUrl
                         ?.toLowerCase()
@@ -671,7 +773,7 @@ const BookmarksFeed =
                         the
                         full
                         resolution
-                        video.
+                        media.
                       </p>
 
                       <div className="flex flex-col gap-3 w-full max-w-xs">
@@ -692,11 +794,13 @@ const BookmarksFeed =
                             }
                           />
                           Unlock
-                          for{" "}
-                          {
-                            post.actualPrice
-                          }{" "}
-                          USDT
+                          for
+                          $
+                          {post.displayPrice?.toFixed(
+                            2,
+                          ) ||
+                            post.actualPrice}{" "}
+                          USD
                         </button>
 
                         <Link
@@ -724,6 +828,22 @@ const BookmarksFeed =
                     }
                   </p>
 
+                  {post.isPaywalled && (
+                    <div className="flex items-center justify-between mt-3 mb-4">
+                      <span className="text-xs text-slate-400">
+                        Paywalled
+                        Content
+                      </span>
+                      <span className="text-sm font-bold text-emerald-400 font-mono">
+                        USD{" "}
+                        {post.displayPrice?.toFixed(
+                          2,
+                        ) ||
+                          post.actualPrice}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
                     <div className="flex items-center gap-6">
                       <button
@@ -738,11 +858,7 @@ const BookmarksFeed =
                           size={
                             22
                           }
-                          className={`transition-all ${
-                            post.isLiked
-                              ? "text-rose-500 fill-current scale-110"
-                              : "text-gray-400 group-hover:text-rose-500"
-                          }`}
+                          className={`transition-all ${post.isLiked ? "text-rose-500 fill-current scale-110" : "text-gray-400 group-hover:text-rose-500"}`}
                         />
                         <span className="text-sm text-gray-400 font-medium">
                           {post.likesCount ||
@@ -783,7 +899,6 @@ const BookmarksFeed =
                         </span>
                       </div>
                     </div>
-
                     <button
                       onClick={() =>
                         handleBookmark(
@@ -906,10 +1021,8 @@ const BookmarksFeed =
                   Method
                 </h3>
                 <button
-                  onClick={() =>
-                    setPaymentModalPost(
-                      null,
-                    )
+                  onClick={
+                    closeModal
                   }
                   className="text-gray-400 hover:text-white transition-colors"
                   disabled={
@@ -940,18 +1053,16 @@ const BookmarksFeed =
                   </span>{" "}
                   for{" "}
                   <span className="text-emerald-500 font-bold">
-                    {
-                      paymentModalPost.actualPrice
-                    }{" "}
-                    USDT
+                    $
+                    {paymentModalPost.displayPrice ||
+                      paymentModalPost.actualPrice}{" "}
+                    USD
                   </span>
                 </p>
                 <div className="grid grid-cols-2 gap-3 mt-4">
                   <button
-                    onClick={() =>
-                      setPaymentMethod(
-                        "CRYPTO",
-                      )
+                    onClick={
+                      handleSelectCrypto
                     }
                     className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
                       paymentMethod ===
@@ -1002,12 +1113,63 @@ const BookmarksFeed =
                     </span>
                   </button>
                 </div>
+
+                {/* DYNAMIC CRYPTO QUOTE DISPLAY */}
+                {paymentMethod ===
+                  "CRYPTO" &&
+                  fetchingQuote && (
+                    <div className="mt-2 p-3 text-center text-sm text-emerald-500 animate-pulse">
+                      Fetching
+                      live
+                      USDT
+                      rates...
+                    </div>
+                  )}
+                {paymentMethod ===
+                  "CRYPTO" &&
+                  cryptoQuote && (
+                    <div className="mt-2 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
+                      <p className="text-sm text-gray-400 mb-1">
+                        Total:{" "}
+                        <span className="text-white">
+                          $
+                          {cryptoQuote.amountUSD.toFixed(
+                            2,
+                          )}{" "}
+                          USD
+                        </span>
+                      </p>
+                      <p className="text-xl font-bold text-emerald-400">
+                        Due:{" "}
+                        {
+                          cryptoQuote.requiredUSDT
+                        }{" "}
+                        USDT
+                      </p>
+                      <p className="text-xs text-emerald-500/70 mt-2 flex items-center justify-center gap-1">
+                        <Lock
+                          size={
+                            12
+                          }
+                        />{" "}
+                        Rate
+                        locked
+                        for
+                        10:00
+                      </p>
+                    </div>
+                  )}
+
                 <button
                   onClick={
                     executePayment
                   }
                   disabled={
                     !paymentMethod ||
+                    fetchingQuote ||
+                    (paymentMethod ===
+                      "CRYPTO" &&
+                      !cryptoQuote) ||
                     processingId ===
                       paymentModalPost._id
                   }

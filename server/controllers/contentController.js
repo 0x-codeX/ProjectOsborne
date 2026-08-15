@@ -18,6 +18,9 @@ const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
 const Conversation = require("../models/Conversation");
 const sharp = require("sharp");
+const {
+  convertAndRoundPrice,
+} = require("../utils/currencyConversion");
 
 // Initialize R2 Client
 const s3 =
@@ -41,140 +44,340 @@ const s3 =
   );
 
 // POST /api/content
-exports.createContentPost = async (req, res) => {
-  try {
-    const { title, description, priceInUSDT, isNsfw } = req.body;
-    const file = req.file; // From multer middleware
-
-    // 1. Validate inputs
-    if (!title || priceInUSDT === undefined || !file) {
-      return res.status(400).json({
-        message: "Missing required paywall fields or media file.",
-      });
-    }
-
-    const originalPath = file.path;
-    const uniqueId = Date.now().toString();
-    const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "_");
-
-    const originalFileKey = `raw_${uniqueId}_${cleanFileName}`;
-    
-    // Check if the uploaded file is an image or video
-    const isImage = file.mimetype.startsWith("image/");
-    const teaserExt = isImage ? ".jpg" : ".mp4";
-    const teaserFileKey = `teaser_${uniqueId}${teaserExt}`;
-    const teaserPath = path.join(__dirname, `../uploads/${teaserFileKey}`);
-
-    const isContentNsfw = isNsfw === "true" || isNsfw === true;
-
-    // 2. THE FORGE: Generate the lightweight, public Teaser
-    if (isImage) {
-      // IMAGE LOGIC: Server-side Pixel Destruction (Anti-Theft)
-      await sharp(originalPath)
-        .resize({ width: 400 }) // Crush the resolution to save bandwidth
-        .blur(isContentNsfw ? 40 : 15) // Heavy blur for NSFW, light blur for standard PPV
-        .jpeg({ quality: 40 }) // Nuke the quality to prevent reverse-engineering
-        .toFile(teaserPath);
-    } else {
-      // VIDEO LOGIC: FFmpeg 15-second teaser
-      await new Promise((resolve, reject) => {
-        ffmpeg(originalPath)
-          .setDuration(15)
-          .noAudio()
-          .fps(15)
-          .size("?x240")
-          .videoCodec("libx264")
-          .addOptions(["-crf 35", "-preset ultrafast"])
-          .output(teaserPath)
-          .on("end", resolve)
-          .on("error", reject)
-          .run();
-      });
-    }
-
-    // 3. Upload original, high-res file to the PRIVATE Bucket
-    const rawFileStream = fs.createReadStream(originalPath);
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: originalFileKey,
-        Body: rawFileStream,
-        ContentType: file.mimetype,
-      })
-    );
-
-    // 4. Upload the teaser to the PUBLIC Bucket
-    const teaserFileStream = fs.createReadStream(teaserPath);
-    const teaserContentType = isImage ? "image/jpeg" : "video/mp4";
-    
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: teaserFileKey,
-        Body: teaserFileStream,
-        ContentType: teaserContentType,
-      })
-    );
-
-    // 5. Mint the post in MongoDB
-    const creatorId = req.user._id || req.user.id;
-    const newContent = await Content.create({
-      creator: creatorId,
-      title,
-      description,
-      priceInUSDT: Number(priceInUSDT),
-      fileKey: originalFileKey,
-      teaserKey: teaserFileKey,
-      fileType: file.mimetype,
-      isNsfw: isContentNsfw,
-    });
-
-    // 6. Cleanup: Delete temporary files from your backend server disk
-    if (fs.existsSync(originalPath)) fs.unlinkSync(originalPath);
-    if (fs.existsSync(teaserPath)) fs.unlinkSync(teaserPath);
-
-    // ==========================================
-    // 7. THE MAILMAN: Bulk Notify All Followers
-    // ==========================================
+exports.createContentPost =
+  async (
+    req,
+    res,
+  ) => {
     try {
-      const followers = await User.find({ following: creatorId }).select("_id");
+      const {
+        title,
+        description,
+        priceInUSDT,
+        isNsfw,
+      } =
+        req.body;
+      const file =
+        req.file;
 
-      if (followers.length > 0) {
-        const isFreePost = Number(priceInUSDT) === 0;
-        const contentTypeStr = isImage ? "photo" : "video";
-        
-        const notifications = followers.map((fan) => ({
-          recipient: fan._id,
-          type: "NEW_CONTENT",
-          title: isFreePost ? `New Free ${contentTypeStr}!` : "New Exclusive Content",
-          message: `${req.user.username || "A creator you follow"} just dropped a new ${contentTypeStr}: "${title}". Go check it out!`,
-          actionUrl: `/creator/${creatorId}`,
-          sender: creatorId,
-          relatedContent: newContent._id,
-        }));
-
-        await Notification.insertMany(notifications);
+      if (
+        !title ||
+        priceInUSDT ===
+          undefined ||
+        !file
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Missing required paywall fields or media file.",
+            },
+          );
       }
-    } catch (notifError) {
-      console.error("Non-fatal: Failed to send notifications:", notifError);
-    }
-    // ==========================================
 
-    res.status(201).json({
-      message: "Content successfully paywalled.",
-      content: newContent,
-    });
-  } catch (error) {
-    console.error("Content Creation Error:", error);
-    // Cleanup on failure to prevent disk space leaks
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+      const originalPath =
+        file.path;
+      const uniqueId =
+        Date.now().toString();
+      const cleanFileName =
+        file.originalname.replace(
+          /[^a-zA-Z0-9.]/g,
+          "_",
+        );
+      const originalFileKey = `raw_${uniqueId}_${cleanFileName}`;
+
+      const isImage =
+        file.mimetype.startsWith(
+          "image/",
+        );
+      const teaserExt =
+        isImage
+          ? ".jpg"
+          : ".mp4";
+      const teaserFileKey = `teaser_${uniqueId}${teaserExt}`;
+      const teaserPath =
+        path.join(
+          __dirname,
+          `../uploads/${teaserFileKey}`,
+        );
+
+      const isContentNsfw =
+        isNsfw ===
+          "true" ||
+        isNsfw ===
+          true;
+
+      if (
+        isImage
+      ) {
+        await sharp(
+          originalPath,
+        )
+          .resize(
+            {
+              width: 400,
+            },
+          )
+          .blur(
+            isContentNsfw
+              ? 40
+              : 15,
+          )
+          .jpeg(
+            {
+              quality: 40,
+            },
+          )
+          .toFile(
+            teaserPath,
+          );
+      } else {
+        await new Promise(
+          (
+            resolve,
+            reject,
+          ) => {
+            ffmpeg(
+              originalPath,
+            )
+              .setDuration(
+                15,
+              )
+              .noAudio()
+              .fps(
+                15,
+              )
+              .size(
+                "?x240",
+              )
+              .videoCodec(
+                "libx264",
+              )
+              .addOptions(
+                [
+                  "-crf 35",
+                  "-preset ultrafast",
+                ],
+              )
+              .output(
+                teaserPath,
+              )
+              .on(
+                "end",
+                resolve,
+              )
+              .on(
+                "error",
+                reject,
+              )
+              .run();
+          },
+        );
+      }
+
+      const rawFileStream =
+        fs.createReadStream(
+          originalPath,
+        );
+      await s3.send(
+        new PutObjectCommand(
+          {
+            Bucket:
+              process
+                .env
+                .S3_BUCKET_NAME,
+            Key: originalFileKey,
+            Body: rawFileStream,
+            ContentType:
+              file.mimetype,
+          },
+        ),
+      );
+
+      const teaserFileStream =
+        fs.createReadStream(
+          teaserPath,
+        );
+      const teaserContentType =
+        isImage
+          ? "image/jpeg"
+          : "video/mp4";
+
+      await s3.send(
+        new PutObjectCommand(
+          {
+            Bucket:
+              process
+                .env
+                .S3_BUCKET_NAME,
+            Key: teaserFileKey,
+            Body: teaserFileStream,
+            ContentType:
+              teaserContentType,
+          },
+        ),
+      );
+
+      const creatorId =
+        req
+          .user
+          ._id ||
+        req
+          .user
+          .id;
+
+      // FIX: Save exactly what the Creator typed (no rounding here).
+      // This ensures their Vault displays their raw expected payout.
+      const rawPrice =
+        parseFloat(
+          priceInUSDT ||
+            0,
+        );
+      const savedPrice =
+        !isNaN(
+          rawPrice,
+        ) &&
+        rawPrice >
+          0
+          ? rawPrice
+          : 0;
+
+      const newContent =
+        await Content.create(
+          {
+            creator:
+              creatorId,
+            title,
+            description,
+            priceInUSDT:
+              savedPrice,
+            fileKey:
+              originalFileKey,
+            teaserKey:
+              teaserFileKey,
+            fileType:
+              file.mimetype,
+            isNsfw:
+              isContentNsfw,
+          },
+        );
+
+      if (
+        fs.existsSync(
+          originalPath,
+        )
+      )
+        fs.unlinkSync(
+          originalPath,
+        );
+      if (
+        fs.existsSync(
+          teaserPath,
+        )
+      )
+        fs.unlinkSync(
+          teaserPath,
+        );
+
+      try {
+        const followers =
+          await User.find(
+            {
+              following:
+                creatorId,
+            },
+          ).select(
+            "_id",
+          );
+        if (
+          followers.length >
+          0
+        ) {
+          const isFreePost =
+            savedPrice ===
+            0;
+          const contentTypeStr =
+            isImage
+              ? "photo"
+              : "video";
+
+          const notifications =
+            followers.map(
+              (
+                fan,
+              ) => ({
+                recipient:
+                  fan._id,
+                type: "NEW_CONTENT",
+                title:
+                  isFreePost
+                    ? `New Free ${contentTypeStr}!`
+                    : "New Exclusive Content",
+                message: `${req.user.username || "A creator you follow"} just dropped a new ${contentTypeStr}: "${title}". Go check it out!`,
+                actionUrl: `/creator/${creatorId}`,
+                sender:
+                  creatorId,
+                relatedContent:
+                  newContent._id,
+              }),
+            );
+
+          await Notification.insertMany(
+            notifications,
+          );
+        }
+      } catch (notifError) {
+        console.error(
+          "Failed to send notifications:",
+          notifError,
+        );
+      }
+
+      res
+        .status(
+          201,
+        )
+        .json(
+          {
+            message:
+              "Content successfully paywalled.",
+            content:
+              newContent,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Content Creation Error:",
+        error,
+      );
+      if (
+        req.file &&
+        fs.existsSync(
+          req
+            .file
+            .path,
+        )
+      )
+        fs.unlinkSync(
+          req
+            .file
+            .path,
+        );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Failed to create content post.",
+          },
+        );
     }
-    res.status(500).json({
-      message: "Failed to create content post.",
-    });
-  }
-};
+  };
 
 // GET /api/content/feed
 exports.getFeed =
@@ -193,8 +396,12 @@ exports.getFeed =
           .walletAddress
           ? req.user.walletAddress.toLowerCase()
           : null;
+      const userCountry =
+        req
+          .user
+          ?.country ||
+        "United States";
 
-      // 1. Fetch Feed (using .lean() for massive performance gains)
       const posts =
         await Content.find()
           .populate(
@@ -213,7 +420,6 @@ exports.getFeed =
           )
           .lean();
 
-      // 2. Fetch User's Valid Purchases & Bookmarks
       const userPurchases =
         await Purchase.find(
           {
@@ -224,8 +430,6 @@ exports.getFeed =
             "content creator purchaseType createdAt",
           )
           .lean();
-
-      // --- IRONCLAD FIX: WE ARE NOW FETCHING THE 'following' ARRAY TOO ---
       const viewer =
         await User.findById(
           viewerId,
@@ -235,12 +439,10 @@ exports.getFeed =
           )
           .lean();
 
-      // 3. Map out access rights & interactions for O(1) lightning-fast lookups
       const unlockedContentMap =
         new Map();
       const subscribedCreatorMap =
         new Map();
-
       const bookmarkedSet =
         new Set(
           viewer?.bookmarks?.map(
@@ -251,8 +453,6 @@ exports.getFeed =
           ) ||
             [],
         );
-
-      // --- IRONCLAD FIX: CREATE O(1) LOOKUP FOR WHO THE VIEWER IS FOLLOWING ---
       const followingSet =
         new Set(
           viewer?.following?.map(
@@ -272,33 +472,30 @@ exports.getFeed =
             p.purchaseType ===
               "PPV" &&
             p.content
-          ) {
+          )
             unlockedContentMap.set(
               p.content.toString(),
               new Date(
                 p.createdAt,
               ).getTime(),
             );
-          }
           if (
             p.purchaseType ===
               "SUBSCRIPTION" &&
             p.creator
-          ) {
+          )
             subscribedCreatorMap.set(
               p.creator.toString(),
               new Date(
                 p.createdAt,
               ).getTime(),
             );
-          }
         },
       );
 
       const secureFeed =
         [];
 
-      // 4. Evaluate access and interactions for every single post
       for (const post of posts) {
         const globalPPV =
           post
@@ -306,20 +503,39 @@ exports.getFeed =
             ?.monetizationSettings
             ?.defaultPPVPrice ||
           0;
-        const actualPrice =
-          post.priceInUSDT !==
+        const rawBasePrice =
+          post.price !=
           null
-            ? post.priceInUSDT
-            : globalPPV;
+            ? post.price
+            : post.priceInUSDT !=
+                null
+              ? post.priceInUSDT
+              : globalPPV;
+
+        // PLATFORM MARKUP FIX: The fan feed dynamically intercepts the creator's raw price
+        // and rounds it up to the nearest 0.50 increment specifically for the fan's view.
+        const fanDisplayPrice =
+          rawBasePrice >
+          0
+            ? Math.ceil(
+                rawBasePrice *
+                  2,
+              ) /
+              2
+            : 0;
+        const pricing =
+          await convertAndRoundPrice(
+            fanDisplayPrice,
+            userCountry,
+          );
 
         const isCreator =
           post.creator?._id.toString() ===
           viewerId.toString();
         const isFree =
-          actualPrice ===
+          rawBasePrice ===
           0;
 
-        // Web2 (Fiat) Access Check
         const ppvDate =
           unlockedContentMap.get(
             post._id.toString(),
@@ -333,7 +549,6 @@ exports.getFeed =
         const hasActiveSub =
           !!subDate;
 
-        // Web3 (Crypto) Access Check
         let hasPurchasedCrypto = false;
         if (
           viewerWallet &&
@@ -353,7 +568,6 @@ exports.getFeed =
             );
         }
 
-        // Master Access Boolean
         const hasAccess =
           isCreator ||
           isFree ||
@@ -361,7 +575,6 @@ exports.getFeed =
           hasPurchasedCrypto ||
           hasActiveSub;
 
-        // --- THE SUNSET GATEKEEPER ---
         if (
           post.status ===
           "sunset"
@@ -372,7 +585,6 @@ exports.getFeed =
             new Date(
               post.sunsetAt,
             ).getTime();
-
           if (
             hasPurchasedFiatPPV &&
             ppvDate <
@@ -389,7 +601,6 @@ exports.getFeed =
             hasPurchasedCrypto
           )
             isGrandfathered = true;
-
           if (
             !isGrandfathered
           )
@@ -431,66 +642,57 @@ exports.getFeed =
               );
             post.isLocked = false;
           } catch (err) {
-            console.error(
-              "Failed to sign URL for post:",
-              post._id,
-              err,
-            );
             post.mediaUrl =
               null;
             post.isLocked = true;
           }
         }
 
-        // --- SOCIAL INTERACTION INJECTION ---
         const likesArray =
           post.likes ||
           [];
-        const isLiked =
-          likesArray.some(
-            (
-              id,
-            ) =>
-              id.toString() ===
-              viewerId.toString(),
-          );
-        const isBookmarked =
-          bookmarkedSet.has(
-            post._id.toString(),
-          );
-        const likesCount =
-          likesArray.length;
-        const commentsCount =
-          post.comments
-            ? post
-                .comments
-                .length
-            : 0;
-
-        // --- IRONCLAD FIX: CHECK IF THIS CREATOR IS IN THE FOLLOWING SET ---
-        const isFollowed =
-          followingSet.has(
-            post.creator?._id.toString(),
-          );
-
         secureFeed.push(
           {
             ...post,
-            // --- IRONCLAD FIX: INJECT isFollowed INTO THE CREATOR OBJECT ---
             creator:
               {
                 ...post.creator,
-                isFollowed,
+                isFollowed:
+                  followingSet.has(
+                    post.creator?._id.toString(),
+                  ),
               },
-            actualPrice,
-            isLiked,
-            isBookmarked,
-            likesCount,
-            commentsCount,
+            actualPrice:
+              fanDisplayPrice, // Force the fan frontend to use the rounded price
+            displayPrice:
+              pricing.displayPrice,
+            displayCurrency:
+              pricing.displayCurrency,
+            paystackNGNAmount:
+              pricing.paystackNGNAmount,
+            isLiked:
+              likesArray.some(
+                (
+                  id,
+                ) =>
+                  id.toString() ===
+                  viewerId.toString(),
+              ),
+            isBookmarked:
+              bookmarkedSet.has(
+                post._id.toString(),
+              ),
+            likesCount:
+              likesArray.length,
+            commentsCount:
+              post.comments
+                ? post
+                    .comments
+                    .length
+                : 0,
           },
         );
       }
-
       res
         .status(
           200,
@@ -499,10 +701,6 @@ exports.getFeed =
           secureFeed,
         );
     } catch (error) {
-      console.error(
-        "Feed error:",
-        error,
-      );
       res
         .status(
           500,
@@ -516,27 +714,18 @@ exports.getFeed =
     }
   };
 
-// GET /api/content/vault - Fetch only logged-in creator's uploads
+// GET /api/content/vault
 exports.getCreatorVault =
   async (
     req,
     res,
   ) => {
     try {
-      console.log(
-        "--- VAULT FETCH INITIATED ---",
-      );
-      console.log(
-        "1. Who is asking? Creator ID:",
-        req
-          .user
-          ._id,
-      );
-
       const creatorId =
         req
           .user
           ._id;
+      // Vault returns the raw documents, maintaining the creator's exact typed price
       const vaultItems =
         await Content.find(
           {
@@ -555,11 +744,6 @@ exports.getCreatorVault =
             },
           )
           .lean();
-
-      console.log(
-        `2. Database returned ${vaultItems.length} items for this creator.`,
-      );
-
       res
         .status(
           200,
@@ -568,10 +752,6 @@ exports.getCreatorVault =
           vaultItems,
         );
     } catch (error) {
-      console.error(
-        "Vault fetch error:",
-        error,
-      );
       res
         .status(
           500,
@@ -585,7 +765,7 @@ exports.getCreatorVault =
     }
   };
 
-// PUT /api/content/:id - Edit title, description, price, or status
+// PUT /api/content/:id
 exports.updateContentPost =
   async (
     req,
@@ -609,10 +789,9 @@ exports.updateContentPost =
         await Content.findById(
           id,
         );
-
       if (
         !post
-      ) {
+      )
         return res
           .status(
             404,
@@ -623,13 +802,10 @@ exports.updateContentPost =
                 "Content post not found.",
             },
           );
-      }
-
-      // Ownership Enforcement
       if (
         post.creator.toString() !==
         req.user._id.toString()
-      ) {
+      )
         return res
           .status(
             403,
@@ -637,10 +813,9 @@ exports.updateContentPost =
           .json(
             {
               message:
-                "Unauthorized to edit this post.",
+                "Unauthorized.",
             },
           );
-      }
 
       if (
         title !==
@@ -654,12 +829,26 @@ exports.updateContentPost =
       )
         post.description =
           description;
+
+      // FIX: Save exactly what the creator types when they edit from the Vault.
       if (
         priceInUSDT !==
         undefined
-      )
+      ) {
+        const parsed =
+          parseFloat(
+            priceInUSDT,
+          );
         post.priceInUSDT =
-          priceInUSDT;
+          !isNaN(
+            parsed,
+          ) &&
+          parsed >
+            0
+            ? parsed
+            : 0;
+      }
+
       if (
         isNsfw !==
         undefined
@@ -675,7 +864,6 @@ exports.updateContentPost =
 
       const updatedPost =
         await post.save();
-
       res
         .status(
           200,
@@ -689,10 +877,6 @@ exports.updateContentPost =
           },
         );
     } catch (error) {
-      console.error(
-        "Update error:",
-        error,
-      );
       res
         .status(
           500,
@@ -706,7 +890,7 @@ exports.updateContentPost =
     }
   };
 
-// DELETE /api/content/:id - Smart delete (Hard Delete vs Sunset)
+// DELETE /api/content/:id
 exports.deleteContentPost =
   async (
     req,
@@ -726,10 +910,9 @@ exports.deleteContentPost =
         await Content.findById(
           id,
         );
-
       if (
         !post
-      ) {
+      )
         return res
           .status(
             404,
@@ -740,12 +923,10 @@ exports.deleteContentPost =
                 "Content post not found.",
             },
           );
-      }
-
       if (
         post.creator.toString() !==
         creatorId.toString()
-      ) {
+      )
         return res
           .status(
             403,
@@ -753,13 +934,10 @@ exports.deleteContentPost =
           .json(
             {
               message:
-                "Unauthorized to delete this post.",
+                "Unauthorized.",
             },
           );
-      }
 
-      // --- THE SMART ROUTER ---
-      // Check if ANY user has bought this specific video, OR if ANY user is actively subscribed to this creator
       const hasActiveBuyers =
         await Purchase.exists(
           {
@@ -787,18 +965,15 @@ exports.deleteContentPost =
       if (
         !hasActiveBuyers
       ) {
-        // PATH A: Zero buyers. Vaporize it instantly to save server costs.
         if (
           post.fileKey
-        ) {
+        )
           await deleteFromCloudflare(
             post.fileKey,
           );
-        }
         await Content.findByIdAndDelete(
           id,
         );
-
         return res
           .status(
             200,
@@ -806,14 +981,13 @@ exports.deleteContentPost =
           .json(
             {
               message:
-                "Post permanently deleted (No active subscribers found).",
+                "Post permanently deleted.",
               deletedId:
                 id,
             },
           );
       }
 
-      // PATH B: Active buyers exist. Route to the 30-day Escrow (Sunset).
       post.status =
         "sunset";
       post.sunsetAt =
@@ -827,16 +1001,12 @@ exports.deleteContentPost =
         .json(
           {
             message:
-              "Post removed from public feed. Grandfathered subscribers retain access for 30 days.",
+              "Post removed from public feed. Grandfathered.",
             deletedId:
               id,
           },
         );
     } catch (error) {
-      console.error(
-        "Delete error:",
-        error,
-      );
       res
         .status(
           500,
@@ -845,6 +1015,57 @@ exports.deleteContentPost =
           {
             message:
               "Failed to delete content post.",
+          },
+        );
+    }
+  };
+
+// POST /api/content/:id/view
+exports.recordView =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const contentId =
+        req
+          .params
+          .id;
+
+      // $inc is lightning fast and prevents race conditions
+      await Content.findByIdAndUpdate(
+        contentId,
+        {
+          $inc: {
+            viewsCount: 1,
+          },
+        },
+      );
+
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            message:
+              "View recorded",
+          },
+        );
+    } catch (error) {
+      console.error(
+        "View tracking error:",
+        error,
+      );
+      // We send a 200 even on fail so the frontend doesn't panic. Analytics shouldn't break the app.
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            message:
+              "View ignored due to error",
           },
         );
     }
@@ -1177,15 +1398,18 @@ exports.getBookmarks =
         req
           .user
           ._id;
-
-      // 1. Fetch the user's bookmarked IDs AND following list
+      const userCountry =
+        req
+          .user
+          ?.country ||
+        "United States";
       const viewer =
         await User.findById(
           viewerId,
         )
           .select(
             "bookmarks following",
-          ) // <--- IRONCLAD FIX
+          )
           .lean();
 
       if (
@@ -1195,7 +1419,7 @@ exports.getBookmarks =
           .bookmarks
           .length ===
           0
-      ) {
+      )
         return res
           .status(
             200,
@@ -1203,9 +1427,7 @@ exports.getBookmarks =
           .json(
             [],
           );
-      }
 
-      // 2. Fetch the actual content
       const bookmarkedPosts =
         await Content.find(
           {
@@ -1230,7 +1452,6 @@ exports.getBookmarks =
           )
           .lean();
 
-      // 3. Fetch User's Valid Purchases & Set up Lookups
       const userPurchases =
         await Purchase.find(
           {
@@ -1241,13 +1462,10 @@ exports.getBookmarks =
             "content creator purchaseType createdAt",
           )
           .lean();
-
       const unlockedContentMap =
         new Map();
       const subscribedCreatorMap =
         new Map();
-
-      // --- IRONCLAD FIX: O(1) LOOKUP FOR FOLLOWING ---
       const followingSet =
         new Set(
           viewer.following?.map(
@@ -1267,33 +1485,30 @@ exports.getBookmarks =
             p.purchaseType ===
               "PPV" &&
             p.content
-          ) {
+          )
             unlockedContentMap.set(
               p.content.toString(),
               new Date(
                 p.createdAt,
               ).getTime(),
             );
-          }
           if (
             p.purchaseType ===
               "SUBSCRIPTION" &&
             p.creator
-          ) {
+          )
             subscribedCreatorMap.set(
               p.creator.toString(),
               new Date(
                 p.createdAt,
               ).getTime(),
             );
-          }
         },
       );
 
       const secureBookmarks =
         [];
 
-      // 4. THE BOUNCER: Evaluate access for the bookmarked posts
       for (const post of bookmarkedPosts) {
         const globalPPV =
           post
@@ -1301,17 +1516,36 @@ exports.getBookmarks =
             ?.monetizationSettings
             ?.defaultPPVPrice ||
           0;
-        const actualPrice =
-          post.priceInUSDT !==
+        const rawBasePrice =
+          post.price !=
           null
-            ? post.priceInUSDT
-            : globalPPV;
+            ? post.price
+            : post.priceInUSDT !=
+                null
+              ? post.priceInUSDT
+              : globalPPV;
+
+        // DYNAMIC ROUNDING
+        const fanDisplayPrice =
+          rawBasePrice >
+          0
+            ? Math.ceil(
+                rawBasePrice *
+                  2,
+              ) /
+              2
+            : 0;
+        const pricing =
+          await convertAndRoundPrice(
+            fanDisplayPrice,
+            userCountry,
+          );
 
         const isCreator =
           post.creator?._id.toString() ===
           viewerId.toString();
         const isFree =
-          actualPrice ===
+          rawBasePrice ===
           0;
 
         const ppvDate =
@@ -1322,7 +1556,6 @@ exports.getBookmarks =
           subscribedCreatorMap.get(
             post.creator?._id.toString(),
           );
-
         const hasPurchasedPPV =
           !!ppvDate;
         const hasActiveSub =
@@ -1334,7 +1567,6 @@ exports.getBookmarks =
           hasPurchasedPPV ||
           hasActiveSub;
 
-        // Sunset Escrow Gatekeeper
         if (
           post.status ===
           "sunset"
@@ -1342,9 +1574,9 @@ exports.getBookmarks =
           let isGrandfathered = false;
           if (
             isCreator
-          ) {
+          )
             isGrandfathered = true;
-          } else {
+          else {
             const sunsetTime =
               new Date(
                 post.sunsetAt,
@@ -1402,11 +1634,6 @@ exports.getBookmarks =
               );
             post.isLocked = false;
           } catch (err) {
-            console.error(
-              "Failed to sign URL:",
-              post._id,
-              err,
-            );
             post.mediaUrl =
               null;
             post.isLocked = true;
@@ -1416,22 +1643,25 @@ exports.getBookmarks =
         const likesArray =
           post.likes ||
           [];
-
-        // --- IRONCLAD FIX: CHECK IF FOLLOWED ---
-        const isFollowed =
-          followingSet.has(
-            post.creator?._id.toString(),
-          );
-
         secureBookmarks.push(
           {
             ...post,
             creator:
               {
                 ...post.creator,
-                isFollowed, // <--- INJECTING INTO PAYLOAD
+                isFollowed:
+                  followingSet.has(
+                    post.creator?._id.toString(),
+                  ),
               },
-            actualPrice,
+            actualPrice:
+              fanDisplayPrice, // DYNAMIC ROUNDING
+            displayPrice:
+              pricing.displayPrice,
+            displayCurrency:
+              pricing.displayCurrency,
+            paystackNGNAmount:
+              pricing.paystackNGNAmount,
             isLiked:
               likesArray.some(
                 (
@@ -1452,7 +1682,6 @@ exports.getBookmarks =
           },
         );
       }
-
       res
         .status(
           200,
@@ -1461,10 +1690,6 @@ exports.getBookmarks =
           secureBookmarks,
         );
     } catch (error) {
-      console.error(
-        "Bookmarks error:",
-        error,
-      );
       res
         .status(
           500,
@@ -1499,8 +1724,12 @@ exports.getCreatorPublicProfile =
           .walletAddress
           ? req.user.walletAddress.toLowerCase()
           : null;
+      const userCountry =
+        req
+          .user
+          ?.country ||
+        "United States";
 
-      // 1. Fetch Creator
       const creator =
         await User.findById(
           creatorId,
@@ -1509,7 +1738,6 @@ exports.getCreatorPublicProfile =
             "username profileImage monetizationSettings walletAddress",
           )
           .lean();
-
       if (
         !creator
       )
@@ -1524,7 +1752,6 @@ exports.getCreatorPublicProfile =
             },
           );
 
-      // 2. Fetch Creator's content
       const creatorContent =
         await Content.find(
           {
@@ -1551,7 +1778,6 @@ exports.getCreatorPublicProfile =
           )
           .lean();
 
-      // 3. Fetch Viewer's purchases AND following list
       const viewer =
         await User.findById(
           viewerId,
@@ -1568,7 +1794,6 @@ exports.getCreatorPublicProfile =
               creatorId,
           },
         ).lean();
-
       const isFollowed =
         viewer?.following
           ?.map(
@@ -1585,7 +1810,6 @@ exports.getCreatorPublicProfile =
       let hasActiveSub = false;
       const unlockedPPV =
         new Set();
-
       viewerPurchases.forEach(
         (
           p,
@@ -1618,7 +1842,6 @@ exports.getCreatorPublicProfile =
             "bubblesLeft",
           )
           .lean();
-
       const chatBubblesLeft =
         chatRecord
           ? chatRecord.bubblesLeft
@@ -1627,7 +1850,6 @@ exports.getCreatorPublicProfile =
         chatBubblesLeft >
         0;
 
-      // 4. THE IRONCLAD BOUNCER (Optimized)
       const secureContent =
         await Promise.all(
           creatorContent.map(
@@ -1639,24 +1861,42 @@ exports.getCreatorPublicProfile =
                   .monetizationSettings
                   ?.defaultPPVPrice ||
                 0;
-              const actualPrice =
-                post.priceInUSDT !==
+              const rawBasePrice =
+                post.price !=
                 null
-                  ? post.priceInUSDT
-                  : globalPPV;
+                  ? post.price
+                  : post.priceInUSDT !=
+                      null
+                    ? post.priceInUSDT
+                    : globalPPV;
+
+              // DYNAMIC ROUNDING
+              const fanDisplayPrice =
+                rawBasePrice >
+                0
+                  ? Math.ceil(
+                      rawBasePrice *
+                        2,
+                    ) /
+                    2
+                  : 0;
+              const pricing =
+                await convertAndRoundPrice(
+                  fanDisplayPrice,
+                  userCountry,
+                );
 
               const isCreator =
                 creatorId ===
                 viewerId.toString();
               const isFree =
-                actualPrice ===
+                rawBasePrice ===
                 0;
 
               const hasPurchasedFiatPPV =
                 unlockedPPV.has(
                   post._id.toString(),
                 );
-
               let hasPurchasedCrypto = false;
               if (
                 viewerWallet &&
@@ -1682,7 +1922,6 @@ exports.getCreatorPublicProfile =
                 hasPurchasedFiatPPV ||
                 hasPurchasedCrypto ||
                 hasActiveSub;
-
               post.teaserUrl =
                 post.teaserKey
                   ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
@@ -1717,11 +1956,6 @@ exports.getCreatorPublicProfile =
                     );
                   post.isLocked = false;
                 } catch (err) {
-                  console.error(
-                    "Failed to sign URL for profile post:",
-                    post._id,
-                    err,
-                  );
                   post.mediaUrl =
                     null;
                   post.isLocked = true;
@@ -1731,10 +1965,16 @@ exports.getCreatorPublicProfile =
               const likesArray =
                 post.likes ||
                 [];
-
               return {
                 ...post,
-                actualPrice,
+                actualPrice:
+                  fanDisplayPrice, // DYNAMIC ROUNDING
+                displayPrice:
+                  pricing.displayPrice,
+                displayCurrency:
+                  pricing.displayCurrency,
+                paystackNGNAmount:
+                  pricing.paystackNGNAmount,
                 isLiked:
                   likesArray.some(
                     (
@@ -1773,10 +2013,6 @@ exports.getCreatorPublicProfile =
           },
         );
     } catch (error) {
-      console.error(
-        "Public profile error:",
-        error,
-      );
       res
         .status(
           500,
@@ -1790,118 +2026,168 @@ exports.getCreatorPublicProfile =
     }
   };
 
+async function formatContentPricesForUser(
+  contentItems,
+  userCountry,
+) {
+  return await Promise.all(
+    contentItems.map(
+      async (
+        item,
+      ) => {
+        const contentObj =
+          item.toObject
+            ? item.toObject()
+            : {
+                ...item,
+              };
 
-exports.uploadVideo =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const creatorId =
-        req
-          .user
-          ._id;
+        if (
+          contentObj.price &&
+          contentObj.price >
+            0
+        ) {
+          // DYNAMIC ROUNDING
+          const fanDisplayPrice =
+            Math.ceil(
+              contentObj.price *
+                2,
+            ) /
+            2;
+          const pricing =
+            await convertAndRoundPrice(
+              fanDisplayPrice,
+              userCountry,
+            );
+          contentObj.displayPrice =
+            pricing.displayPrice;
+          contentObj.displayCurrency =
+            pricing.displayCurrency;
+          contentObj.paystackNGNAmount =
+            pricing.paystackNGNAmount;
+        } else {
+          contentObj.displayPrice = 0;
+          contentObj.displayCurrency =
+            "NGN";
+          contentObj.paystackNGNAmount = 0;
+        }
+        return contentObj;
+      },
+    ),
+  );
+}
 
-      // 1. Handle your standard video saving logic here...
-      const newVideo =
-        await Content.create(
-          {
-            creator:
-              creatorId,
-            title:
-              req
-                .body
-                .title,
-            videoUrl:
-              req
-                .body
-                .videoUrl,
-            isFree:
-              req
-                .body
-                .isFree ||
-              true, // Free or PPV
-            // ... other fields
-          },
-        );
+// exports.uploadVideo =
+//   async (
+//     req,
+//     res,
+//   ) => {
+//     try {
+//       const creatorId =
+//         req
+//           .user
+//           ._id;
 
-      // 2. THE MAILMAN: Fetch all fans who follow/subscribe to this creator
-      // (Adjust the query based on your actual Follow/Subscription model schema)
-      const followers =
-        await Follower.find(
-          {
-            creator:
-              creatorId,
-          },
-        ).select(
-          "fan",
-        );
+//       // 1. Handle your standard video saving logic here...
+//       const newVideo =
+//         await Content.create(
+//           {
+//             creator:
+//               creatorId,
+//             title:
+//               req
+//                 .body
+//                 .title,
+//             videoUrl:
+//               req
+//                 .body
+//                 .videoUrl,
+//             isFree:
+//               req
+//                 .body
+//                 .isFree ||
+//               true, // Free or PPV
+//             // ... other fields
+//           },
+//         );
 
-      // 3. Build the notification payloads in memory
-      if (
-        followers.length >
-        0
-      ) {
-        const notifications =
-          followers.map(
-            (
-              follow,
-            ) => ({
-              recipient:
-                follow.fan,
-              type: "NEW_CONTENT",
-              title:
-                req
-                  .body
-                  .isFree
-                  ? "New Free Video!"
-                  : "New Exclusive Content",
-              message: `${req.user.username} just dropped a new video: "${req.body.title}". Go watch it now!`,
-              actionUrl: `/feed/video/${newVideo._id}`, // Make sure this matches your frontend route
-              sender:
-                creatorId,
-              relatedContent:
-                newVideo._id,
-            }),
-          );
+//       // 2. THE MAILMAN: Fetch all fans who follow/subscribe to this creator
+//       // (Adjust the query based on your actual Follow/Subscription model schema)
+//       const followers =
+//         await Follower.find(
+//           {
+//             creator:
+//               creatorId,
+//           },
+//         ).select(
+//           "fan",
+//         );
 
-        // 4. Bulk insert into the database (Lightning Fast)
-        await Notification.insertMany(
-          notifications,
-        );
+//       // 3. Build the notification payloads in memory
+//       if (
+//         followers.length >
+//         0
+//       ) {
+//         const notifications =
+//           followers.map(
+//             (
+//               follow,
+//             ) => ({
+//               recipient:
+//                 follow.fan,
+//               type: "NEW_CONTENT",
+//               title:
+//                 req
+//                   .body
+//                   .isFree
+//                   ? "New Free Video!"
+//                   : "New Exclusive Content",
+//               message: `${req.user.username} just dropped a new video: "${req.body.title}". Go watch it now!`,
+//               actionUrl: `/feed/video/${newVideo._id}`, // Make sure this matches your frontend route
+//               sender:
+//                 creatorId,
+//               relatedContent:
+//                 newVideo._id,
+//             }),
+//           );
 
-        // Optional but recommended: If you set up Socket.io globally, you can emit an event here
-        // so online fans get the red dot instantly without waiting for the 30-second poll!
-        // req.io.to(`creator_${creatorId}_followers`).emit('new_notification');
-      }
+//         // 4. Bulk insert into the database (Lightning Fast)
+//         await Notification.insertMany(
+//           notifications,
+//         );
 
-      // 5. Finally, return success to the creator
-      res
-        .status(
-          201,
-        )
-        .json(
-          {
-            success: true,
-            message:
-              "Video uploaded and fans notified!",
-            data: newVideo,
-          },
-        );
-    } catch (error) {
-      console.error(
-        "Upload Error:",
-        error,
-      );
-      res
-        .status(
-          500,
-        )
-        .json(
-          {
-            message:
-              "Upload failed.",
-          },
-        );
-    }
-  };
+//         // Optional but recommended: If you set up Socket.io globally, you can emit an event here
+//         // so online fans get the red dot instantly without waiting for the 30-second poll!
+//         // req.io.to(`creator_${creatorId}_followers`).emit('new_notification');
+//       }
+
+//       // 5. Finally, return success to the creator
+//       res
+//         .status(
+//           201,
+//         )
+//         .json(
+//           {
+//             success: true,
+//             message:
+//               "Video uploaded and fans notified!",
+//             data: newVideo,
+//           },
+//         );
+//     } catch (error) {
+//       console.error(
+//         "Upload Error:",
+//         error,
+//       );
+//       res
+//         .status(
+//           500,
+//         )
+//         .json(
+//           {
+//             message:
+//               "Upload failed.",
+//           },
+//         );
+//     }
+//   };
