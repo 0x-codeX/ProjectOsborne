@@ -29,7 +29,9 @@ const userSchema =
         enum: [
           "fan",
           "creator",
-          "admin",
+          "GOD_ADMIN",
+          "SUPER_ADMIN",
+          "MODERATE_ADMIN",
         ],
         default:
           "fan",
@@ -128,22 +130,54 @@ const userSchema =
         },
 
       // --- 18 U.S.C. § 2257 COMPLIANCE FIELDS ---
-      kycStatus: {
-        type: String,
-        enum: ["unverified", "pending", "verified", "failed"],
-        default: "unverified",
-        index: true,
-      },
-      kycRecord: {
-        legalName: { type: String }, // Full concatenated name
-        firstName: { type: String }, // NEW: Strict breakdown
-        middleName: { type: String },// NEW: Strict breakdown
-        lastName: { type: String },  // NEW: Strict breakdown
-        dateOfBirth: { type: Date },
-        providerSessionId: { type: String },
-        verifiedAt: { type: Date },
-        documentType: { type: String },
-      },
+      kycStatus:
+        {
+          type: String,
+          enum: [
+            "unverified",
+            "pending",
+            "verified",
+            "failed",
+          ],
+          default:
+            "unverified",
+          index: true,
+        },
+      kycRecord:
+        {
+          legalName:
+            {
+              type: String,
+            }, // Full concatenated name
+          firstName:
+            {
+              type: String,
+            }, // NEW: Strict breakdown
+          middleName:
+            {
+              type: String,
+            }, // NEW: Strict breakdown
+          lastName:
+            {
+              type: String,
+            }, // NEW: Strict breakdown
+          dateOfBirth:
+            {
+              type: Date,
+            },
+          providerSessionId:
+            {
+              type: String,
+            },
+          verifiedAt:
+            {
+              type: Date,
+            },
+          documentType:
+            {
+              type: String,
+            },
+        },
 
       // --- CREATOR SPECIFIC FIELDS ---
       creatorProfile:

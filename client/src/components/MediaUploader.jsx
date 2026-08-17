@@ -17,7 +17,7 @@ import {
   Image as ImageIcon,
   HelpCircle,
 } from "lucide-react";
-import { useUpload } from "../context/UploadContext";
+import { useUpload } from "./UploadContext";
 
 const MediaUploader =
   () => {

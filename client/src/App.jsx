@@ -28,7 +28,7 @@ import CreatorMessages from "./components/CreatorMessages";
 import FanInbox from "./components/FanInbox";
 import FanChatWindow from "./components/FanChatWindow";
 import { GoogleOAuthProvider } from "@react-oauth/google";
-import { UploadProvider } from "./context/UploadContext";
+import { UploadProvider } from "./components/UploadContext";
 
 // Dummy components to prevent white-screen crashes on new routes
 const Placeholder =

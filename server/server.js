@@ -18,6 +18,7 @@ const authRoutes = require("./routes/authRoutes");
 const mediaRoutes = require("./routes/mediaRoutes");
 const userRoutes = require("./routes/userRoutes");
 const earningsRoutes = require("./routes/earningsRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 
 // Cron Jobs
 const startReaper = require("./cron/reaper");
@@ -41,7 +42,10 @@ const io =
     {
       cors: {
         origin:
-          "http://localhost:5173", // Change this if your React port is different
+          [
+            "http://localhost:5173",
+            "http://localhost:5174",
+          ], // Change this if your React port is different
         methods:
           [
             "GET",
@@ -58,7 +62,11 @@ app.use(
 app.use(
   cors({
     origin:
-      "http://localhost:5173",
+      [
+        "http://localhost:5173",
+        "http://localhost:5174",
+      ],
+    //credentials: true,
   }),
 );
 app.use(
@@ -161,6 +169,10 @@ app.get(
 );
 
 // Mounted Routes
+app.use(
+  "/api/admin",
+  adminRoutes,
+);
 app.use(
   "/api/auth",
   authRoutes,

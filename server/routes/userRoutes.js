@@ -12,12 +12,11 @@ const {
   deleteProfile,
   getProfile,
   updateSettings,
+  submitSupportTicket,
 } = require("../controllers/userController");
 const {
   toggleFollow,
 } = require("../controllers/userController");
-
-
 
 // --- GET Routes ---
 router.get(
@@ -71,6 +70,13 @@ router.post(
   "/:id/follow",
   requireAuth,
   toggleFollow,
+);
+
+// Add this near your other PUT/POST profile routes
+router.post(
+  "/support",
+  requireAuth,
+  submitSupportTicket,
 );
 
 module.exports =

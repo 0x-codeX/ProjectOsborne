@@ -96,6 +96,7 @@ const purchaseSchema =
           enum: [
             "CRYPTO",
             "FIAT",
+            "MANUAL",
           ],
           default:
             "CRYPTO",

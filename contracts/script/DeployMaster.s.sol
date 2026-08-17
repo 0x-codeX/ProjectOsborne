@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
+// Resolve imports relative to this script folder: contracts/script -> contracts/src
 import {NippyPaymentGateway} from "../src/NippyPaymentGateway.sol";
-import {MockUSDT} from "../src/MockUSDT.sol"; // Adjust path if necessary
+import {MockUSDT} from "../src/MockUSDT.sol";
 
 contract DeployMaster is Script {
     function run() external {

@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const ethers = require("ethers");
+const Ticket = require("../models/Ticket");
 
 // PUT /api/users/profile
 // Handles Bio Data Setup and Profile Updates
@@ -640,5 +641,30 @@ exports.toggleFollow = async (req, res) => {
   } catch (error) {
     console.error("Follow toggle error:", error);
     res.status(500).json({ message: "Server error toggling follow status." });
+  }
+};
+
+// SUBMIT SUPPORT TICKET (Used by both Fans and Creators)
+exports.submitSupportTicket = async (req, res) => {
+  try {
+    const { subject, message } = req.body;
+    
+    if (!subject || !message) {
+      return res.status(400).json({ message: 'Subject and message are required.' });
+    }
+
+    const newTicket = new Ticket({
+      userId: req.user._id, // Securely grabbed from the JWT token
+      subject,
+      message,
+      status: 'OPEN'
+    });
+
+    await newTicket.save();
+
+    res.status(201).json({ message: 'Support ticket submitted successfully.' });
+  } catch (error) {
+    console.error('Error submitting ticket:', error);
+    res.status(500).json({ message: 'Failed to submit support ticket.' });
   }
 };

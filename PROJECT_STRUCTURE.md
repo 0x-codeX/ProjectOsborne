@@ -56,12 +56,24 @@ The app is not just scaffolded. It has real backend controllers, models, routes,
 
 ```text
 nippy/
+├── admin/
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── components/
+│   │   ├── pages/
+│   │   │   ├── AdminLogin.jsx
+│   │   │   ├── AccessControl.jsx
+│   │   │   ├── SupportDesk.jsx
+│   │   │   └── User360.jsx
+│   │   └── main.jsx
+│   └── package.json
 ├── client/
 │   ├── src/
 │   │   ├── App.jsx
 │   │   ├── components/
 │   │   ├── hooks/
-│   │   └── pages/
+│   │   ├── pages/
+│   │   └── context/
 │   └── package.json
 ├── contracts/
 │   ├── src/
@@ -909,6 +921,12 @@ Why this matters:
 ### server/models/Wallet.js and server/models/Withdrawal.js
 - Track creator balances and payout requests
 
+### server/models/Ticket.js
+- Stores support tickets submitted by users
+- Main fields: userId, subject, message, status (OPEN, IN_PROGRESS, RESOLVED), resolvedBy, resolvedAt
+- Used by: Admin support desk to track and manage customer support requests
+- Linked to: User model (userId and resolvedBy are references to User documents)
+
 ## 10. Important cross-file relationships
 
 These are the most important wiring points an LLM should remember:
@@ -928,16 +946,33 @@ These are the most important wiring points an LLM should remember:
 - userController.submitBioData -> handles onboarding and sensitive-account updates
 - earningsController/requestWithdrawal -> creates withdrawal requests that are later processed by the withdrawal and treasury flow
 
-## 11. Important implementation notes for future work
+## 11. Admin Dashboard
 
-- The app already assumes a local dev setup with the frontend on port 5173 and backend on port 5000
+A new admin portal (`admin/` directory) has been added for platform administration:
+
+### Admin Pages
+- **AdminLogin.jsx** - Admin authentication with email/password
+- **AccessControl.jsx** - Manage user access, account status, and user restrictions
+- **SupportDesk.jsx** - View and manage support tickets with status filtering (OPEN, IN_PROGRESS, RESOLVED)
+- **User360.jsx** - Search users and view their complete profile, content, transactions, and activity
+
+### Admin Features
+- Support ticket management system using Ticket model
+- User account access control and management
+- Comprehensive user search and profile lookup
+- Admin role authentication
+
+## 12. Important implementation notes for future work
+
+- The app already assumes a local dev setup with the frontend on port 5173, admin on separate port, and backend on port 5000
 - The frontend uses localStorage keys named nippy_token and nippy_user
 - Web3 payments are wired to Polygon Amoy testnet values in useWeb3Transfer.js
 - The backend uses JWT auth and requires the JWT secret to be available in environment variables
 - The media pipeline is designed around Cloudflare R2 / S3-compatible object storage
 - Some routes and UI panels are present but may still be partially incomplete; the placeholders in App.jsx are evidence of that
+- The admin dashboard is a separate Vite app running independently from the main client application
 
-## 12. Best starting points for continuing the project
+## 13. Best starting points for continuing the project
 
 If a future agent needs to continue development, the best places to start are:
 
@@ -947,6 +982,7 @@ If a future agent needs to continue development, the best places to start are:
 4. server/controllers/messageController.js for messaging and access rules
 5. server/controllers/purchaseController.js for payment verification and monetization logic
 6. server/models/User.js and server/models/Purchase.js for the most important domain structures
+7. admin/src/pages/ for admin dashboard feature development and support ticket management
 
 This document should be treated as the compact memory of the current Nippy implementation state. It is the fastest way for a future LLM to understand the project without re-reading the entire repository from scratch.
 
@@ -1270,23 +1306,23 @@ When implementing this feature, verify:
 
 ### Summary Table of Files
 
-| File | Type | Action | Priority |
-|------|------|--------|----------|
-| `server/utils/priceRounding.js` | NEW | Create with `roundUpToNearestHalf()` | CRITICAL |
-| `server/utils/currencyConversion.js` | NEW | Create with exchange rate fetching & caching | CRITICAL |
-| `server/config/exchangeRates.js` | NEW | Create config for rate providers | HIGH |
+| File                                       | Type     | Action                                               | Priority |
+| ------------------------------------------ | -------- | ---------------------------------------------------- | -------- |
+| `server/utils/priceRounding.js`            | NEW      | Create with `roundUpToNearestHalf()`                 | CRITICAL |
+| `server/utils/currencyConversion.js`       | NEW      | Create with exchange rate fetching & caching         | CRITICAL |
+| `server/config/exchangeRates.js`           | NEW      | Create config for rate providers                     | HIGH     |
 | `server/controllers/purchaseController.js` | EXISTING | Modify `verifyPayment()` to validate rounded amounts | CRITICAL |
-| `server/controllers/contentController.js` | EXISTING | Modify `getFeed()` to return displayPrice | CRITICAL |
-| `server/controllers/messageController.js` | EXISTING | Modify `buyMessageBundle()` and `getMessages()` | CRITICAL |
-| `server/controllers/earningsController.js` | EXISTING | Modify `getDashboard()` to show margins separately | HIGH |
-| `server/models/Purchase.js` | EXISTING | Add basePrice, displayPrice, margin fields | CRITICAL |
-| `server/models/Content.js` | EXISTING | Add optional basePrice tracking field | OPTIONAL |
-| `server/models/Wallet.js` | EXISTING | Add accumulatedMarginNGN tracking | HIGH |
-| `client/src/hooks/useWeb3Transfer.js` | EXISTING | Ensure sends rounded amount only (minor update) | CRITICAL |
-| `client/src/components/FanFeed.jsx` | EXISTING | Display `displayPrice` instead of `price` | CRITICAL |
-| `client/src/components/FanChatWindow.jsx` | EXISTING | Display rounded bundle pricing | CRITICAL |
-| `client/src/utils/priceDisplay.js` | NEW | Create helper for price formatting (optional) | OPTIONAL |
-| Database Migration | SCRIPT | Add new fields to Purchase and other models | CRITICAL |
+| `server/controllers/contentController.js`  | EXISTING | Modify `getFeed()` to return displayPrice            | CRITICAL |
+| `server/controllers/messageController.js`  | EXISTING | Modify `buyMessageBundle()` and `getMessages()`      | CRITICAL |
+| `server/controllers/earningsController.js` | EXISTING | Modify `getDashboard()` to show margins separately   | HIGH     |
+| `server/models/Purchase.js`                | EXISTING | Add basePrice, displayPrice, margin fields           | CRITICAL |
+| `server/models/Content.js`                 | EXISTING | Add optional basePrice tracking field                | OPTIONAL |
+| `server/models/Wallet.js`                  | EXISTING | Add accumulatedMarginNGN tracking                    | HIGH     |
+| `client/src/hooks/useWeb3Transfer.js`      | EXISTING | Ensure sends rounded amount only (minor update)      | CRITICAL |
+| `client/src/components/FanFeed.jsx`        | EXISTING | Display `displayPrice` instead of `price`            | CRITICAL |
+| `client/src/components/FanChatWindow.jsx`  | EXISTING | Display rounded bundle pricing                       | CRITICAL |
+| `client/src/utils/priceDisplay.js`         | NEW      | Create helper for price formatting (optional)        | OPTIONAL |
+| Database Migration                         | SCRIPT   | Add new fields to Purchase and other models          | CRITICAL |
 
 ---
 
@@ -1310,13 +1346,13 @@ This section provides a detailed inventory of every frontend file, the backend e
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| POST | `/api/auth/register` | `authController.registerUser()` | `authRoutes.js` | User |
-| POST | `/api/auth/login` | `authController.loginUser()` | `authRoutes.js` | User |
-| POST | `/api/auth/web3/nonce` | `authController.getWeb3Nonce()` | `authRoutes.js` | User |
-| POST | `/api/auth/web3/login` | `authController.web3Login()` | `authRoutes.js` | User |
-| POST | `/api/auth/oauth/google` | *Not yet detailed* | `authRoutes.js` | User |
+| HTTP Method | Endpoint                 | Controller Function             | Route File      | Model(s) Accessed |
+| ----------- | ------------------------ | ------------------------------- | --------------- | ----------------- |
+| POST        | `/api/auth/register`     | `authController.registerUser()` | `authRoutes.js` | User              |
+| POST        | `/api/auth/login`        | `authController.loginUser()`    | `authRoutes.js` | User              |
+| POST        | `/api/auth/web3/nonce`   | `authController.getWeb3Nonce()` | `authRoutes.js` | User              |
+| POST        | `/api/auth/web3/login`   | `authController.web3Login()`    | `authRoutes.js` | User              |
+| POST        | `/api/auth/oauth/google` | *Not yet detailed*              | `authRoutes.js` | User              |
 
 **Request/Response Examples:**
 
@@ -1387,13 +1423,13 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| PUT | `/api/users/profile` | `userController.updateProfile()` | `userRoutes.js` | User |
-| POST | `/api/users/biodata` | `userController.submitBioData()` | `userRoutes.js` | User |
-| PUT | `/api/users/settings` | `userController.updateSettings()` | `userRoutes.js` | User |
-| POST | `/api/kyc/start` | `kycController.startKycSession()` | `authRoutes.js` | User |
-| GET | `/api/users/profile` | `userController.getProfile()` | `userRoutes.js` | User |
+| HTTP Method | Endpoint              | Controller Function               | Route File      | Model(s) Accessed |
+| ----------- | --------------------- | --------------------------------- | --------------- | ----------------- |
+| PUT         | `/api/users/profile`  | `userController.updateProfile()`  | `userRoutes.js` | User              |
+| POST        | `/api/users/biodata`  | `userController.submitBioData()`  | `userRoutes.js` | User              |
+| PUT         | `/api/users/settings` | `userController.updateSettings()` | `userRoutes.js` | User              |
+| POST        | `/api/kyc/start`      | `kycController.startKycSession()` | `authRoutes.js` | User              |
+| GET         | `/api/users/profile`  | `userController.getProfile()`     | `userRoutes.js` | User              |
 
 **Request/Response Examples:**
 
@@ -1465,11 +1501,11 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| POST | `/api/users/biodata` | `userController.submitBioData()` | `userRoutes.js` | User |
-| PUT | `/api/users/profile` | `userController.updateProfile()` | `userRoutes.js` | User |
-| GET | `/api/users/profile` | `userController.getProfile()` | `userRoutes.js` | User |
+| HTTP Method | Endpoint             | Controller Function              | Route File      | Model(s) Accessed |
+| ----------- | -------------------- | -------------------------------- | --------------- | ----------------- |
+| POST        | `/api/users/biodata` | `userController.submitBioData()` | `userRoutes.js` | User              |
+| PUT         | `/api/users/profile` | `userController.updateProfile()` | `userRoutes.js` | User              |
+| GET         | `/api/users/profile` | `userController.getProfile()`    | `userRoutes.js` | User              |
 
 **Request/Response Examples:**
 
@@ -1512,14 +1548,14 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| GET | `/api/content/feed` | `contentController.getFeed()` | `contentRoutes.js` | Content, User, Purchase |
-| POST | `/api/content/:id/like` | `contentController.toggleLike()` | `contentRoutes.js` | Content, User |
-| POST | `/api/content/:id/bookmark` | `contentController.toggleBookmark()` | `contentRoutes.js` | Content, User |
-| POST | `/api/content/:id/comment` | `contentController.addComment()` | `contentRoutes.js` | Content |
-| POST | `/api/purchases/verify` | `purchaseController.verifyPayment()` | `purchaseRoutes.js` | Purchase, Content, User, Wallet |
-| GET | `/api/content/bookmarks` | `contentController.getBookmarks()` | `contentRoutes.js` | Content, User |
+| HTTP Method | Endpoint                    | Controller Function                  | Route File          | Model(s) Accessed               |
+| ----------- | --------------------------- | ------------------------------------ | ------------------- | ------------------------------- |
+| GET         | `/api/content/feed`         | `contentController.getFeed()`        | `contentRoutes.js`  | Content, User, Purchase         |
+| POST        | `/api/content/:id/like`     | `contentController.toggleLike()`     | `contentRoutes.js`  | Content, User                   |
+| POST        | `/api/content/:id/bookmark` | `contentController.toggleBookmark()` | `contentRoutes.js`  | Content, User                   |
+| POST        | `/api/content/:id/comment`  | `contentController.addComment()`     | `contentRoutes.js`  | Content                         |
+| POST        | `/api/purchases/verify`     | `purchaseController.verifyPayment()` | `purchaseRoutes.js` | Purchase, Content, User, Wallet |
+| GET         | `/api/content/bookmarks`    | `contentController.getBookmarks()`   | `contentRoutes.js`  | Content, User                   |
 
 **Request/Response Examples:**
 
@@ -1606,13 +1642,13 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| GET | `/api/messages/:conversationId` | `messageController.getMessages()` | `messageRoutes.js` | Conversation, Message, User, Purchase |
-| POST | `/api/messages/send` | `messageController.sendMessage()` | `messageRoutes.js` | Message, Conversation, User, Wallet |
-| POST | `/api/messages/bundle` | `messageController.buyMessageBundle()` | `messageRoutes.js` | Purchase, User, Wallet |
-| POST | `/api/purchases/verify` | `purchaseController.verifyPayment()` | `purchaseRoutes.js` | Purchase, Message, User |
-| GET | `/api/messages/:conversationId/unread` | `messageController.getUnreadCount()` | `messageRoutes.js` | Message |
+| HTTP Method | Endpoint                               | Controller Function                    | Route File          | Model(s) Accessed                     |
+| ----------- | -------------------------------------- | -------------------------------------- | ------------------- | ------------------------------------- |
+| GET         | `/api/messages/:conversationId`        | `messageController.getMessages()`      | `messageRoutes.js`  | Conversation, Message, User, Purchase |
+| POST        | `/api/messages/send`                   | `messageController.sendMessage()`      | `messageRoutes.js`  | Message, Conversation, User, Wallet   |
+| POST        | `/api/messages/bundle`                 | `messageController.buyMessageBundle()` | `messageRoutes.js`  | Purchase, User, Wallet                |
+| POST        | `/api/purchases/verify`                | `purchaseController.verifyPayment()`   | `purchaseRoutes.js` | Purchase, Message, User               |
+| GET         | `/api/messages/:conversationId/unread` | `messageController.getUnreadCount()`   | `messageRoutes.js`  | Message                               |
 
 **Request/Response Examples:**
 
@@ -1722,13 +1758,13 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| GET | `/api/messages/inbox` | `messageController.getInbox()` | `messageRoutes.js` | Conversation, Message, User |
-| GET | `/api/messages/:conversationId` | `messageController.getMessages()` | `messageRoutes.js` | Conversation, Message, User, Purchase |
-| POST | `/api/messages/send` | `messageController.sendMessage()` | `messageRoutes.js` | Message, Conversation, User, Wallet |
-| GET | `/api/content/creator/:creatorId/vault` | `contentController.getCreatorVault()` | `contentRoutes.js` | Content, User |
-| POST | `/api/content/:contentId/attach` | *Not yet detailed* | `contentRoutes.js` | Message, Content |
+| HTTP Method | Endpoint                                | Controller Function                   | Route File         | Model(s) Accessed                     |
+| ----------- | --------------------------------------- | ------------------------------------- | ------------------ | ------------------------------------- |
+| GET         | `/api/messages/inbox`                   | `messageController.getInbox()`        | `messageRoutes.js` | Conversation, Message, User           |
+| GET         | `/api/messages/:conversationId`         | `messageController.getMessages()`     | `messageRoutes.js` | Conversation, Message, User, Purchase |
+| POST        | `/api/messages/send`                    | `messageController.sendMessage()`     | `messageRoutes.js` | Message, Conversation, User, Wallet   |
+| GET         | `/api/content/creator/:creatorId/vault` | `contentController.getCreatorVault()` | `contentRoutes.js` | Content, User                         |
+| POST        | `/api/content/:contentId/attach`        | *Not yet detailed*                    | `contentRoutes.js` | Message, Content                      |
 
 **Request/Response Examples:**
 
@@ -1828,13 +1864,13 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| GET | `/api/users/profile` | `userController.getProfile()` | `userRoutes.js` | User |
-| PUT | `/api/users/profile` | `userController.updateProfile()` | `userRoutes.js` | User |
-| GET | `/api/users/monetization` | `userController.getMonetizationSettings()` | `userRoutes.js` | User |
-| PUT | `/api/users/monetization` | `userController.updateMonetizationSettings()` | `userRoutes.js` | User |
-| PUT | `/api/users/settings` | `userController.updateSettings()` | `userRoutes.js` | User |
+| HTTP Method | Endpoint                  | Controller Function                           | Route File      | Model(s) Accessed |
+| ----------- | ------------------------- | --------------------------------------------- | --------------- | ----------------- |
+| GET         | `/api/users/profile`      | `userController.getProfile()`                 | `userRoutes.js` | User              |
+| PUT         | `/api/users/profile`      | `userController.updateProfile()`              | `userRoutes.js` | User              |
+| GET         | `/api/users/monetization` | `userController.getMonetizationSettings()`    | `userRoutes.js` | User              |
+| PUT         | `/api/users/monetization` | `userController.updateMonetizationSettings()` | `userRoutes.js` | User              |
+| PUT         | `/api/users/settings`     | `userController.updateSettings()`             | `userRoutes.js` | User              |
 
 **Request/Response Examples:**
 
@@ -1916,12 +1952,12 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| GET | `/api/users/creator/:creatorId/public` | `contentController.getCreatorPublicProfile()` | `contentRoutes.js` | User, Content, Purchase |
-| GET | `/api/content/creator/:creatorId/vault` | `contentController.getCreatorVault()` | `contentRoutes.js` | Content, User |
-| POST | `/api/users/follow` | `userController.toggleFollow()` | `userRoutes.js` | User |
-| GET | `/api/content/feed?creatorId=X` | `contentController.getFeed()` | `contentRoutes.js` | Content, User, Purchase |
+| HTTP Method | Endpoint                                | Controller Function                           | Route File         | Model(s) Accessed       |
+| ----------- | --------------------------------------- | --------------------------------------------- | ------------------ | ----------------------- |
+| GET         | `/api/users/creator/:creatorId/public`  | `contentController.getCreatorPublicProfile()` | `contentRoutes.js` | User, Content, Purchase |
+| GET         | `/api/content/creator/:creatorId/vault` | `contentController.getCreatorVault()`         | `contentRoutes.js` | Content, User           |
+| POST        | `/api/users/follow`                     | `userController.toggleFollow()`               | `userRoutes.js`    | User                    |
+| GET         | `/api/content/feed?creatorId=X`         | `contentController.getFeed()`                 | `contentRoutes.js` | Content, User, Purchase |
 
 **Request/Response Examples:**
 
@@ -1975,11 +2011,11 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| POST | `/api/content/create` | `contentController.createContentPost()` | `contentRoutes.js` | Content, User, Notification |
-| POST | `/api/content/upload` | `mediaController.uploadVideo()` or `contentController.uploadVideo()` | `contentRoutes.js` or `mediaRoutes.js` | *S3/R2 storage only* |
-| GET | `/api/content/:id` | `contentController.getContentPost()` | `contentRoutes.js` | Content |
+| HTTP Method | Endpoint              | Controller Function                                                  | Route File                             | Model(s) Accessed           |
+| ----------- | --------------------- | -------------------------------------------------------------------- | -------------------------------------- | --------------------------- |
+| POST        | `/api/content/create` | `contentController.createContentPost()`                              | `contentRoutes.js`                     | Content, User, Notification |
+| POST        | `/api/content/upload` | `mediaController.uploadVideo()` or `contentController.uploadVideo()` | `contentRoutes.js` or `mediaRoutes.js` | *S3/R2 storage only*        |
+| GET         | `/api/content/:id`    | `contentController.getContentPost()`                                 | `contentRoutes.js`                     | Content                     |
 
 **Request/Response Examples:**
 
@@ -2043,12 +2079,12 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| GET | `/api/earnings/dashboard` | `earningsController.getDashboard()` | `earningsRoutes.js` | Wallet, User, Purchase, Withdrawal |
-| GET | `/api/earnings/transactions` | *Not yet detailed* | `earningsRoutes.js` | Purchase |
-| POST | `/api/earnings/withdraw` | `earningsController.requestWithdrawal()` | `earningsRoutes.js` | Wallet, Withdrawal, User |
-| GET | `/api/earnings/stats` | *Not yet detailed* | `earningsRoutes.js` | Purchase, Content |
+| HTTP Method | Endpoint                     | Controller Function                      | Route File          | Model(s) Accessed                  |
+| ----------- | ---------------------------- | ---------------------------------------- | ------------------- | ---------------------------------- |
+| GET         | `/api/earnings/dashboard`    | `earningsController.getDashboard()`      | `earningsRoutes.js` | Wallet, User, Purchase, Withdrawal |
+| GET         | `/api/earnings/transactions` | *Not yet detailed*                       | `earningsRoutes.js` | Purchase                           |
+| POST        | `/api/earnings/withdraw`     | `earningsController.requestWithdrawal()` | `earningsRoutes.js` | Wallet, Withdrawal, User           |
+| GET         | `/api/earnings/stats`        | *Not yet detailed*                       | `earningsRoutes.js` | Purchase, Content                  |
 
 **Request/Response Examples:**
 
@@ -2129,11 +2165,11 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| GET | `/api/notifications` | `notificationController.getNotifications()` | `notificationRoutes.js` | Notification, User |
-| GET | `/api/notifications/unread-count` | `notificationController.getUnreadCount()` | `notificationRoutes.js` | Notification |
-| PUT | `/api/notifications/mark-read` | `notificationController.markAllAsRead()` | `notificationRoutes.js` | Notification |
+| HTTP Method | Endpoint                          | Controller Function                         | Route File              | Model(s) Accessed  |
+| ----------- | --------------------------------- | ------------------------------------------- | ----------------------- | ------------------ |
+| GET         | `/api/notifications`              | `notificationController.getNotifications()` | `notificationRoutes.js` | Notification, User |
+| GET         | `/api/notifications/unread-count` | `notificationController.getUnreadCount()`   | `notificationRoutes.js` | Notification       |
+| PUT         | `/api/notifications/mark-read`    | `notificationController.markAllAsRead()`    | `notificationRoutes.js` | Notification       |
 
 **Request/Response Examples:**
 
@@ -2193,10 +2229,10 @@ RESPONSE: {
 
 **Backend Endpoints Called:**
 
-| HTTP Method | Endpoint | Controller Function | Route File | Model(s) Accessed |
-|-------------|----------|-------------------|-----------|------------------|
-| POST | `/api/earnings/withdraw` | `earningsController.requestWithdrawal()` or `withdrawalController.requestWithdrawal()` | `earningsRoutes.js` or `withdrawalRoutes.js` | Withdrawal, Wallet, User |
-| GET | `/api/earnings/dashboard` | `earningsController.getDashboard()` | `earningsRoutes.js` | Wallet, User |
+| HTTP Method | Endpoint                  | Controller Function                                                                    | Route File                                   | Model(s) Accessed        |
+| ----------- | ------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------ |
+| POST        | `/api/earnings/withdraw`  | `earningsController.requestWithdrawal()` or `withdrawalController.requestWithdrawal()` | `earningsRoutes.js` or `withdrawalRoutes.js` | Withdrawal, Wallet, User |
+| GET         | `/api/earnings/dashboard` | `earningsController.getDashboard()`                                                    | `earningsRoutes.js`                          | Wallet, User             |
 
 **Request/Response Examples:**
 
@@ -2371,23 +2407,23 @@ This section shows the complete data flow for different purchase scenarios:
 
 ## 16. Summary: Frontend Files & Backend Dependencies
 
-| Frontend File | Primary Backend Endpoints | Key Controller(s) | Key Model(s) | Middleware |
-|---|---|---|---|---|
-| LandingPage.jsx | `/api/auth/*` | authController | User | None (public) |
-| BioDataSetup.jsx | `/api/users/*`, `/api/kyc/*` | userController, kycController | User | requireAuth |
-| FanBiodata.jsx | `/api/users/*` | userController | User | requireAuth |
-| FanFeed.jsx | `/api/content/feed`, `/api/content/:id/*`, `/api/purchases/verify` | contentController, purchaseController | Content, User, Purchase | requireAuth |
-| FanChatWindow.jsx | `/api/messages/*`, `/api/purchases/verify` | messageController, purchaseController | Conversation, Message, Purchase | requireAuth |
-| CreatorMessages.jsx | `/api/messages/*`, `/api/content/*/vault` | messageController, contentController | Conversation, Message, Content | requireAuth, requireVerifiedCreator |
-| CreatorProfile.jsx | `/api/users/*`, `/api/users/monetization` | userController | User | requireAuth, requireVerifiedCreator |
-| CreatorPublicProfile.jsx | `/api/users/creator/:id/public`, `/api/users/follow` | contentController, userController | User, Content | requireAuth (for follow) |
-| MediaUploader.jsx | `/api/content/create`, `/api/content/upload` | contentController, mediaController | Content, Notification | requireAuth, requireVerifiedCreator |
-| EarningsDashboard.jsx | `/api/earnings/dashboard`, `/api/earnings/withdraw` | earningsController, withdrawalController | Wallet, Purchase, Withdrawal | requireAuth, requireVerifiedCreator |
-| NotificationsFeed.jsx | `/api/notifications*` | notificationController | Notification | requireAuth |
-| WithdrawalModal.jsx | `/api/earnings/withdraw` | earningsController, withdrawalController | Wallet, Withdrawal | requireAuth, requireVerifiedCreator |
-| useWeb3Transfer.js | (No direct HTTP) → Post-tx: `/api/purchases/verify` | purchaseController | Purchase | (via component) |
-| FanLayout.jsx | None direct | N/A | N/A | N/A |
-| CreatorLayout.jsx | None direct | N/A | N/A | N/A |
+| Frontend File            | Primary Backend Endpoints                                          | Key Controller(s)                        | Key Model(s)                    | Middleware                          |
+| ------------------------ | ------------------------------------------------------------------ | ---------------------------------------- | ------------------------------- | ----------------------------------- |
+| LandingPage.jsx          | `/api/auth/*`                                                      | authController                           | User                            | None (public)                       |
+| BioDataSetup.jsx         | `/api/users/*`, `/api/kyc/*`                                       | userController, kycController            | User                            | requireAuth                         |
+| FanBiodata.jsx           | `/api/users/*`                                                     | userController                           | User                            | requireAuth                         |
+| FanFeed.jsx              | `/api/content/feed`, `/api/content/:id/*`, `/api/purchases/verify` | contentController, purchaseController    | Content, User, Purchase         | requireAuth                         |
+| FanChatWindow.jsx        | `/api/messages/*`, `/api/purchases/verify`                         | messageController, purchaseController    | Conversation, Message, Purchase | requireAuth                         |
+| CreatorMessages.jsx      | `/api/messages/*`, `/api/content/*/vault`                          | messageController, contentController     | Conversation, Message, Content  | requireAuth, requireVerifiedCreator |
+| CreatorProfile.jsx       | `/api/users/*`, `/api/users/monetization`                          | userController                           | User                            | requireAuth, requireVerifiedCreator |
+| CreatorPublicProfile.jsx | `/api/users/creator/:id/public`, `/api/users/follow`               | contentController, userController        | User, Content                   | requireAuth (for follow)            |
+| MediaUploader.jsx        | `/api/content/create`, `/api/content/upload`                       | contentController, mediaController       | Content, Notification           | requireAuth, requireVerifiedCreator |
+| EarningsDashboard.jsx    | `/api/earnings/dashboard`, `/api/earnings/withdraw`                | earningsController, withdrawalController | Wallet, Purchase, Withdrawal    | requireAuth, requireVerifiedCreator |
+| NotificationsFeed.jsx    | `/api/notifications*`                                              | notificationController                   | Notification                    | requireAuth                         |
+| WithdrawalModal.jsx      | `/api/earnings/withdraw`                                           | earningsController, withdrawalController | Wallet, Withdrawal              | requireAuth, requireVerifiedCreator |
+| useWeb3Transfer.js       | (No direct HTTP) → Post-tx: `/api/purchases/verify`                | purchaseController                       | Purchase                        | (via component)                     |
+| FanLayout.jsx            | None direct                                                        | N/A                                      | N/A                             | N/A                                 |
+| CreatorLayout.jsx        | None direct                                                        | N/A                                      | N/A                             | N/A                                 |
 
 
 

@@ -23,15 +23,12 @@ import {
   CheckCircle2,
   AlertCircle,
   X,
+  LifeBuoy,
+  Send,
 } from "lucide-react";
 import landingBackground from "../assets/background7.jpg";
 import nippyLogo from "../assets/NippyLogo.png";
-import { useUpload } from "../context/UploadContext";
-
-
-
-// IMPORT YOUR NEW CONTEXT HERE
-// import { useUpload } from "../context/UploadContext";
+import { useUpload } from "./UploadContext";
 
 const CreatorLayout =
   () => {
@@ -47,23 +44,78 @@ const CreatorLayout =
         0,
       );
 
-    // UNCOMMENT THIS WHEN CONTEXT IS WRAPPED AROUND APP
-    const { uploadState, clearUpload } = useUpload();
+    const {
+      uploadState,
+      clearUpload,
+    } =
+      useUpload();
 
-    // MOCK STATE (Remove this once Context is implemented)
-    // const uploadState =
-    //   {
-    //     isUploading: false,
-    //     progress: 0,
-    //     fileName:
-    //       "",
-    //     status:
-    //       "idle",
-    //     errorMessage:
-    //       "",
-    //   };
-    // const clearUpload =
-    //   () => {};
+    // --- SUPPORT WIDGET STATE ---
+    const [
+      isSupportOpen,
+      setIsSupportOpen,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      supportName,
+      setSupportName,
+    ] =
+      useState(
+        "",
+      );
+    const [
+      supportEmail,
+      setSupportEmail,
+    ] =
+      useState(
+        "",
+      );
+    const [
+      supportMessage,
+      setSupportMessage,
+    ] =
+      useState(
+        "",
+      );
+    const [
+      supportStatus,
+      setSupportStatus,
+    ] =
+      useState(
+        "idle",
+      );
+    const [
+      supportError,
+      setSupportError,
+    ] =
+      useState(
+        "",
+      );
+
+    // Auto-fill user details for the Support Widget
+    useEffect(() => {
+      const userObj =
+        JSON.parse(
+          localStorage.getItem(
+            "nippy_user",
+          ) ||
+            "{}",
+        );
+      if (
+        userObj.username
+      )
+        setSupportName(
+          userObj.username,
+        );
+      if (
+        userObj.email
+      )
+        setSupportEmail(
+          userObj.email,
+        );
+    }, []);
 
     useEffect(() => {
       const fetchUnreadCount =
@@ -112,6 +164,61 @@ const CreatorLayout =
           interval,
         );
     }, []);
+
+    // --- SUPPORT SUBMIT LOGIC ---
+    const handleSupportSubmit =
+      async (
+        e,
+      ) => {
+        e.preventDefault();
+        setSupportStatus(
+          "loading",
+        );
+        setSupportError(
+          "",
+        );
+
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            );
+          const payload =
+            {
+              subject: `Creator Support Request from ${supportName}`,
+              message: `Contact Email: ${supportEmail}\n\n${supportMessage}`,
+            };
+
+          await axios.post(
+            "http://localhost:5000/api/users/support",
+            payload,
+            {
+              headers:
+                {
+                  Authorization: `Bearer ${token}`,
+                },
+            },
+          );
+
+          setSupportStatus(
+            "success",
+          );
+          setSupportMessage(
+            "",
+          );
+        } catch (err) {
+          setSupportStatus(
+            "error",
+          );
+          setSupportError(
+            err
+              .response
+              ?.data
+              ?.message ||
+              "Failed to submit ticket. Please try again.",
+          );
+        }
+      };
 
     const desktopNavItems =
       [
@@ -408,11 +515,11 @@ const CreatorLayout =
 
         {/* --- GLOBAL UPLOAD PROGRESS TOAST --- */}
         {uploadState.isUploading && (
-          <div className="fixed bottom-24 left-4 right-4 md:left-auto md:bottom-8 md:right-8 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl md:w-80 z-[100] p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4">
+          <div className="fixed bottom-24 left-4 right-4 md:left-auto md:bottom-8 md:right-[26rem] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl md:w-80 z-[100] p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4">
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-3 overflow-hidden">
                 <div
-                  className={`p-2 rounded-xl shrink-0 ${uploadState.status === "error" ? "bg-red-500/10 text-red-500" : uploadState.status === "complete" ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"}`}
+                  className={`p-2 rounded-xl shrink-0 ${uploadState.status === "error" ? "bg-red-500/10 text-red-500" : uploadState.status === "complete" ? "bg-[#FF5757]/10 text-[#FF5757]" : "bg-blue-500/10 text-blue-500"}`}
                 >
                   {uploadState.status ===
                   "error" ? (
@@ -482,6 +589,7 @@ const CreatorLayout =
                     {
                       uploadState.progress
                     }
+
                     %
                   </span>
                 </div>
@@ -504,6 +612,239 @@ const CreatorLayout =
                 }
               </p>
             )}
+          </div>
+        )}
+
+        {/* --- FLOATING SUPPORT BUBBLE --- */}
+        <button
+          onClick={() =>
+            setIsSupportOpen(
+              !isSupportOpen,
+            )
+          }
+          className={`fixed z-[100] bottom-24 right-4 md:bottom-8 md:right-8 text-white p-3.5 sm:p-4 rounded-full shadow-[0_4px_20px_rgba(255,87,87,0.4)] transition-all flex items-center justify-center group ${isSupportOpen ? "bg-slate-700 hover:bg-slate-600 scale-100" : "bg-[#FF5757] hover:bg-rose-600 hover:scale-110"}`}
+          aria-label="Help & Support"
+        >
+          {isSupportOpen ? (
+            <X
+              size={
+                26
+              }
+            />
+          ) : (
+            <LifeBuoy
+              size={
+                26
+              }
+            />
+          )}
+          {!isSupportOpen && (
+            <span className="absolute right-full mr-4 bg-slate-800 text-white text-sm font-bold px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-slate-700 shadow-lg hidden md:block">
+              Creator
+              Support
+            </span>
+          )}
+        </button>
+
+        {/* --- INLINE SUPPORT WIDGET (Slides up from the bubble) --- */}
+        {isSupportOpen && (
+          <div className="fixed z-[95] bottom-[8.5rem] right-4 md:bottom-[5.5rem] md:right-8 w-[calc(100vw-2rem)] sm:w-[380px] bg-slate-900 border border-slate-700 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] flex flex-col animate-in slide-in-from-bottom-10 fade-in duration-300 overflow-hidden">
+            {/* Widget Header */}
+            <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-800/30">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <LifeBuoy
+                  className="text-[#FF5757]"
+                  size={
+                    20
+                  }
+                />{" "}
+                Creator
+                Support
+              </h3>
+              <button
+                onClick={() =>
+                  setIsSupportOpen(
+                    false,
+                  )
+                }
+                className="text-slate-400 hover:text-white transition-colors md:hidden"
+              >
+                <X
+                  size={
+                    20
+                  }
+                />
+              </button>
+            </div>
+
+            {/* Widget Body */}
+            <div className="p-5 max-h-[70vh] overflow-y-auto">
+              {supportStatus ===
+              "success" ? (
+                <div className="flex flex-col items-center text-center py-6">
+                  <div className="w-14 h-14 bg-[#FF5757]/10 rounded-full flex items-center justify-center mb-3">
+                    <CheckCircle2
+                      className="text-[#FF5757]"
+                      size={
+                        28
+                      }
+                    />
+                  </div>
+                  <h4 className="text-md font-bold text-white mb-1">
+                    Ticket
+                    Submitted
+                  </h4>
+                  <p className="text-slate-400 text-xs px-2">
+                    Our
+                    admins
+                    have
+                    received
+                    your
+                    message
+                    and
+                    will
+                    assist
+                    you
+                    shortly.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setSupportStatus(
+                        "idle",
+                      );
+                      setIsSupportOpen(
+                        false,
+                      );
+                    }}
+                    className="mt-5 w-full bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold py-2.5 rounded-xl transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              ) : (
+                <form
+                  onSubmit={
+                    handleSupportSubmit
+                  }
+                  className="space-y-4"
+                >
+                  {supportStatus ===
+                    "error" && (
+                    <div className="bg-red-500/10 border border-red-500/20 p-3 rounded-xl flex items-start gap-2">
+                      <AlertCircle
+                        className="text-red-500 shrink-0 mt-0.5"
+                        size={
+                          16
+                        }
+                      />
+                      <p className="text-red-400 text-xs">
+                        {
+                          supportError
+                        }
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-500 mb-1">
+                        Name
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={
+                          supportName
+                        }
+                        onChange={(
+                          e,
+                        ) =>
+                          setSupportName(
+                            e
+                              .target
+                              .value,
+                          )
+                        }
+                        className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#FF5757]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-500 mb-1">
+                        Email
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={
+                          supportEmail
+                        }
+                        onChange={(
+                          e,
+                        ) =>
+                          setSupportEmail(
+                            e
+                              .target
+                              .value,
+                          )
+                        }
+                        className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#FF5757]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-500 mb-1">
+                      How
+                      can
+                      we
+                      help?
+                    </label>
+                    <textarea
+                      required
+                      value={
+                        supportMessage
+                      }
+                      onChange={(
+                        e,
+                      ) =>
+                        setSupportMessage(
+                          e
+                            .target
+                            .value,
+                        )
+                      }
+                      placeholder="Describe your issue, payout delay, or bug report..."
+                      rows="4"
+                      className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-[#FF5757] resize-none"
+                    ></textarea>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={
+                      supportStatus ===
+                      "loading"
+                    }
+                    className="w-full bg-[#FF5757] hover:bg-rose-600 text-white text-sm font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-1 shadow-lg shadow-[#FF5757]/20"
+                  >
+                    {supportStatus ===
+                    "loading" ? (
+                      "Sending..."
+                    ) : (
+                      <>
+                        <Send
+                          size={
+                            16
+                          }
+                        />{" "}
+                        Send
+                        Message
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
         )}
 
