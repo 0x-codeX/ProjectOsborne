@@ -1,6 +1,7 @@
 // client/src/components/BioDataSetup.jsx
 import React, {
   useState,
+  useEffect,
 } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -11,7 +12,7 @@ import {
   Users,
   Camera,
 } from "lucide-react";
-import axios from "axios";
+import api from "../utils/api"; // 1. Imported your ironclad API utility
 
 const BioDataSetup =
   () => {
@@ -106,7 +107,8 @@ const BioDataSetup =
       useState(
         false,
       );
-    React.useEffect(() => {
+
+    useEffect(() => {
       const storedUser =
         JSON.parse(
           localStorage.getItem(
@@ -199,14 +201,9 @@ const BioDataSetup =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-
-          // Update the user in MongoDB
-          await axios.put(
-            "http://localhost:5000/api/users/biodata",
+          // 2. Used the clean `api` instance. No localhost, no manual token headers!
+          await api.put(
+            "/users/biodata",
             {
               username,
               email,
@@ -222,12 +219,6 @@ const BioDataSetup =
               subscribeEmails,
               hasCompletedBioData: true,
               profileImage, // Save the base64 string directly
-            },
-            {
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
             },
           );
 

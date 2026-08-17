@@ -2,7 +2,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import axios from "axios";
+import api from "../utils/api"; // <-- Replaced raw Axios
 import {
   Users,
   Video,
@@ -126,20 +126,6 @@ const EarningsDashboard =
             "",
           );
 
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
-          if (
-            !token
-          )
-            throw new Error(
-              "Authentication missing. Please log in again.",
-            );
-
           const storedUser =
             JSON.parse(
               localStorage.getItem(
@@ -156,29 +142,19 @@ const EarningsDashboard =
             ] ||
             COUNTRY_TO_CURRENCY.default;
 
+          // IRONCLAD FIX: Used the global API interceptor.
+          // No token grabbing, no headers, no /api prefixes.
           const [
             dashboardRes,
             settingsRes,
           ] =
             await Promise.all(
               [
-                axios.get(
-                  "/api/earnings/dashboard",
-                  {
-                    headers:
-                      {
-                        Authorization: `Bearer ${token}`,
-                      },
-                  },
+                api.get(
+                  "/earnings/dashboard",
                 ),
-                axios.get(
-                  "/api/users/settings/monetization",
-                  {
-                    headers:
-                      {
-                        Authorization: `Bearer ${token}`,
-                      },
-                  },
+                api.get(
+                  "/users/settings/monetization",
                 ),
               ],
             );
@@ -305,13 +281,6 @@ const EarningsDashboard =
             "",
           );
 
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
           const storedUser =
             JSON.parse(
               localStorage.getItem(
@@ -320,8 +289,9 @@ const EarningsDashboard =
                 "{}",
             );
 
-          await axios.post(
-            "/api/earnings/withdraw",
+          // IRONCLAD FIX: Raw Axios and headers removed.
+          await api.post(
+            "/earnings/withdraw",
             {
               currency:
                 withdrawalConfig.currency,
@@ -331,12 +301,6 @@ const EarningsDashboard =
                 storedUser.payoutAddress ||
                 storedUser.walletAddress ||
                 "",
-            },
-            {
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
             },
           );
 

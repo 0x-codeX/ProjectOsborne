@@ -10,12 +10,13 @@ import {
   ShieldAlert,
   User,
   LogOut,
-  FolderKanban,
+  Radio,
 } from "lucide-react";
 import { ethers } from "ethers";
 import MediaUploader from "../components/MediaUploader";
 import MonetizationSettings from "../components/MonetizationSettings";
 import EarningsDashboard from "../components/EarningsDashboard";
+import api from "../utils/api";
 
 const CreatorDashboard =
   () => {
@@ -66,7 +67,8 @@ const CreatorDashboard =
               JSON.parse(
                 localStorage.getItem(
                   "nippy_user",
-                ),
+                ) ||
+                  "{}",
               );
             const token =
               localStorage.getItem(
@@ -88,37 +90,17 @@ const CreatorDashboard =
               return;
             }
 
-            // Set local data first so UI renders immediately
             setUser(
               storedData,
             );
 
-            // Fetch source of truth from MongoDB
+            // Source of truth fetch using global API utility
             const response =
-              await fetch(
-                "http://localhost:5000/api/auth/me",
-                {
-                  method:
-                    "GET",
-                  headers:
-                    {
-                      "Content-Type":
-                        "application/json",
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                "/auth/me",
               );
-
-            if (
-              !response.ok
-            ) {
-              throw new Error(
-                "SESSION_INVALID",
-              );
-            }
-
             const freshUser =
-              await response.json();
+              response.data;
 
             setUser(
               freshUser,
@@ -134,26 +116,18 @@ const CreatorDashboard =
               "Auth Check Error:",
               error.message,
             );
-
-            if (
-              error.message ===
-                "SESSION_INVALID" ||
-              error.message ===
-                "UNAUTHORIZED"
-            ) {
-              localStorage.removeItem(
-                "nippy_user",
-              );
-              localStorage.removeItem(
-                "nippy_token",
-              );
-              localStorage.removeItem(
-                "token",
-              );
-              navigate(
-                "/auth/login",
-              );
-            }
+            localStorage.removeItem(
+              "nippy_user",
+            );
+            localStorage.removeItem(
+              "nippy_token",
+            );
+            localStorage.removeItem(
+              "token",
+            );
+            navigate(
+              "/auth/login",
+            );
           } finally {
             setIsLoading(
               false,
@@ -331,14 +305,6 @@ const CreatorDashboard =
           setIsStartingKyc(
             true,
           );
-
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
           const userId =
             user?._id ||
             user?.id;
@@ -353,42 +319,20 @@ const CreatorDashboard =
           }
 
           const response =
-            await fetch(
-              "http://localhost:5000/api/auth/kyc/start-session",
+            await api.post(
+              "/auth/kyc/start-session",
               {
-                method:
-                  "POST",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                body: JSON.stringify(
-                  {
-                    userId,
-                  },
-                ),
+                userId,
               },
             );
 
-          const data =
-            await response.json();
-
           if (
-            !response.ok
-          ) {
-            throw new Error(
-              data.message ||
-                "Failed to initialize verification",
-            );
-          }
-
-          if (
-            data.url
+            response
+              .data
+              .url
           ) {
             window.location.href =
-              data.url;
+              response.data.url;
           } else {
             alert(
               "Didit session URL not returned from backend.",
@@ -400,7 +344,10 @@ const CreatorDashboard =
             error,
           );
           alert(
-            error.message ||
+            error
+              .response
+              ?.data
+              ?.message ||
               "Could not start verification session.",
           );
         } finally {
@@ -443,7 +390,7 @@ const CreatorDashboard =
         {/* Top Header */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 border-b border-slate-800 pb-6 gap-4">
           <div className="flex items-center gap-4">
-            {/* PROFILE PICTURE AVATAR (CLICKABLE -> CREATOR VAULT) */}
+            {/* PROFILE PICTURE AVATAR */}
             <button
               onClick={() =>
                 navigate(
@@ -496,21 +443,21 @@ const CreatorDashboard =
             </div>
           </div>
 
-          {/* Right Side Container: Vault Link, Balance & Logout */}
+          {/* Right Side Container: Go Live, Balance & Logout */}
           <div className="flex items-center gap-3 w-full md:w-auto flex-wrap sm:flex-nowrap">
-            {/* Dedicated Creator Vault Nav Button */}
+            {/* RED GO LIVE BUTTON */}
             <button
               onClick={() =>
                 navigate(
-                  "/creator/vault",
+                  "/creator/live/setup",
                 )
               }
-              className="bg-slate-900 border border-slate-700 hover:border-[#FF5757] text-slate-200 hover:text-white px-4 py-3 rounded-xl flex items-center gap-2 shadow-lg transition-all cursor-pointer text-sm font-bold group"
+              className="bg-red-500 hover:bg-red-600 text-white px-5 py-3 rounded-xl flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all cursor-pointer text-sm font-bold animate-pulse"
             >
-              <FolderKanban className="w-5 h-5 text-[#FF5757] group-hover:scale-110 transition-transform" />
+              <Radio className="w-5 h-5 text-white" />
               <span>
-                My
-                Vault
+                Go
+                Live
               </span>
             </button>
 

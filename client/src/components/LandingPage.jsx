@@ -491,12 +491,12 @@ const LandingPage =
         },
       );
 
-    // Social Auth Handlers
-    const handleGoogleAuth =
-      () => {
-        window.location.href =
-          "http://localhost:5000/api/auth/google";
-      };
+    // // Social Auth Handlers
+    // const handleGoogleAuth =
+    //   () => {
+    //     window.location.href =
+    //       "http://localhost:5000/api/auth/google";
+    //   };
 
     const handleXAuth =
       () => {
@@ -688,17 +688,18 @@ const LandingPage =
                   <div className="flex gap-3 mt-3">
                     <button
                       type="button"
-                      onClick={
-                        handleGoogleAuth
+                      onClick={() =>
+                        loginWithGoogle()
                       }
                       disabled={
                         loading
                       }
-                      className="flex-1 bg-slate-800/50 hover:bg-slate-700/80 border border-slate-700 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                      className="flex-1 flex items-center justify-center gap-3 bg-slate-800/50 hover:bg-slate-700/80 border border-slate-700 text-white font-bold py-3 px-4 rounded-xl transition-all"
                     >
                       <svg
-                        className="w-5 h-5"
+                        className="w-5 h-5 shrink-0"
                         viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
                       >
                         <path
                           d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -717,7 +718,9 @@ const LandingPage =
                           fill="#EA4335"
                         />
                       </svg>
-                      Google
+                      <span>
+                        Google
+                      </span>
                     </button>
                   </div>
 

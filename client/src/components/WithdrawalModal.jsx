@@ -8,7 +8,7 @@ import {
   Wallet,
   CheckCircle,
 } from "lucide-react";
-import axios from "axios";
+import api from "../utils/api"; // <-- Replaced raw axios with your ironclad api utility
 
 const WithdrawalModal =
   ({
@@ -75,27 +75,14 @@ const WithdrawalModal =
         );
 
         try {
-          const storedUser =
-            JSON.parse(
-              localStorage.getItem(
-                "nippy_user",
-              ),
-            );
-
-          // Hit the secure endpoint we built earlier
-          await axios.post(
-            "/api/withdraw",
+          // Hit the secure endpoint: no headers needed, no localhost, no localStorage lookups!
+          await api.post(
+            "/withdraw",
             {
               amount:
                 withdrawAmount,
               destinationAddress:
                 userAddress,
-            },
-            {
-              headers:
-                {
-                  Authorization: `Bearer ${storedUser.token}`,
-                },
             },
           );
 

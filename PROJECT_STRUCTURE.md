@@ -2,6 +2,13 @@
 
 This file is meant to serve as a compact but detailed memory document for future LLM sessions. It is not just a folder tree. It explains the current implementation status, the important functions, the state variables, the imports, and the cross-file relationships that matter when continuing the project.
 
+**⚡ Quick Navigation:**
+- **Starting Work?** → Jump to [Section 15](#15-best-starting-points-for-continuing-the-project) for quick start guide
+- **Fixing Bugs?** → [Section 12](#12-critical-production-issues-must-fix-before-launch) lists all known issues
+- **Going to Production?** → [Section 14](#14-production-readiness-checklist) has deployment checklist
+- **Understanding Code Flow?** → [Section 14.2+](#14-complete-frontend-backend-connection-map) has detailed API mappings
+- **Need Admin Features?** → [Section 11](#11-admin-dashboard--controllers) documents admin system
+
 ## 1. What Nippy is
 
 Nippy is a creator-first content platform with the following working domains:
@@ -28,8 +35,25 @@ The project already has a meaningful working base in these areas:
 - Creator earnings dashboard and payout request handling
 - Cloudflare R2 / S3-style asset handling for private/public media
 - Background workers for treasury and test data
+- Admin dashboard with user management and support ticketing
 
 The app is not just scaffolded. It has real backend controllers, models, routes, and web3 integration logic already wired together.
+
+## 2.5 Production Status & Risk Assessment
+
+**Current Status:** Feature-complete for public beta on testnet; **NOT READY for mainnet**
+
+| Risk Category       | Status        | Impact                           | Priority   |
+| ------------------- | ------------- | -------------------------------- | ---------- |
+| Web3 Event Listener | ⚠️ Fragile     | Missed transactions if crash     | 🔴 CRITICAL |
+| Fiat Chargebacks    | ❌ Not Handled | Platform loss + creator debt     | 🔴 CRITICAL |
+| Treasury Key Mgmt   | ⚠️ Exposed     | All funds at risk if compromised | 🔴 CRITICAL |
+| Testnet Config      | ⚠️ Hardcoded   | Can't switch to mainnet USDT     | 🟡 MEDIUM   |
+| Smart Contract      | ⚠️ Ambiguous   | Can't distinguish payment types  | 🟡 MEDIUM   |
+| Media Streaming     | ⚠️ Incomplete  | No signed URLs for secure access | 🟠 LOW      |
+| Admin Email         | ⚠️ Untested    | Notifications may fail           | 🟠 LOW      |
+
+**Before any mainnet deployment, you MUST complete Section 12 (Critical Production Issues) and Section 14 (Production Readiness Checklist).**
 
 ## 3. High-level architecture
 
@@ -892,6 +916,48 @@ The route files are thin wiring layers. They map URL paths to controller functio
 - GET /dashboard
 - POST /withdraw
 
+## 8.5 Environment Variables Quick Reference
+
+**CRITICAL - Must be set before launch:**
+
+```env
+# Authentication & Security
+JWT_SECRET=<64+ char random string>        # Generate: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+DATABASE_URL=mongodb://...                 # MongoDB connection string
+
+# Web3 & Blockchain
+POLYGON_RPC_URL=<testnet for dev, mainnet for prod>
+MOCK_USDT_ADDRESS=<testnet address for dev>
+USDT_MAINNET_ADDRESS=0xc2132D05D31c914a87C6611C10748AEb04B58e8F  # Real USDT on Polygon
+PAYMENT_GATEWAY_ADDRESS=<deployed contract address>
+TREASURY_PRIVATE_KEY=<isolated private key on private network only>
+
+# Media & Storage
+CLOUDFLARE_ACCOUNT_ID=<from dashboard>
+CLOUDFLARE_API_TOKEN=<from dashboard>
+CLOUDFLARE_BUCKET_NAME=nippy-media
+
+# Payments (Fiat)
+PAYSTACK_SECRET_KEY=<from Paystack dashboard>
+PAYSTACK_WEBHOOK_SECRET=<from Paystack webhooks>
+
+# Email (Admin notifications)
+EMAIL_USER=<Gmail or SendGrid sender>
+EMAIL_PASS=<Gmail app password or SendGrid key>
+
+# KYC & Compliance
+KYC_API_KEY=<from KYC provider>
+
+# Admin & Support
+ADMIN_JWT_SECRET=<separate from main JWT_SECRET>
+```
+
+**Issues with Current Setup:**
+- ✅ Testnet: `.env` is fine with mock addresses for local development
+- ❌ Production: `.env` is insecure; move to AWS Secrets Manager or Vault
+- ❌ TREASURY_PRIVATE_KEY: Must be isolated from public-facing API server
+- ❌ MOCK_USDT_ADDRESS: Must be replaced before mainnet
+
 ## 9. Data models
 
 ### server/models/User.js
@@ -927,6 +993,18 @@ Why this matters:
 - Used by: Admin support desk to track and manage customer support requests
 - Linked to: User model (userId and resolvedBy are references to User documents)
 
+### server/models/AdminApproval.js
+- Tracks admin decisions on content access and special unlocks
+- Main fields: contentId, userId, adminId, approvalType (MANUAL_UNLOCK, FRAUD_REVERSAL), justification, approvalStatus (APPROVED, REJECTED), timestamp
+- Used by: Admin access control system for manual content access grants and fraud handling
+- Critical for: Chargeback reversal and exception handling workflows
+
+### server/models/SystemLog.js
+- Comprehensive audit trail for all admin actions
+- Main fields: adminId, action (APPROVED_MANUAL_UNLOCK, SUSPENDED_USER, PROCESSED_PAYOUT, DELETED_CONTENT), targetUserId, details, timestamp
+- Used by: Compliance and audit requirements, forensic investigation of disputes
+- Required for: Production readiness - all critical admin actions must be logged
+
 ## 10. Important cross-file relationships
 
 These are the most important wiring points an LLM should remember:
@@ -946,45 +1024,226 @@ These are the most important wiring points an LLM should remember:
 - userController.submitBioData -> handles onboarding and sensitive-account updates
 - earningsController/requestWithdrawal -> creates withdrawal requests that are later processed by the withdrawal and treasury flow
 
-## 11. Admin Dashboard
+## 11. Admin Dashboard & Controllers
 
 A new admin portal (`admin/` directory) has been added for platform administration:
 
-### Admin Pages
-- **AdminLogin.jsx** - Admin authentication with email/password
-- **AccessControl.jsx** - Manage user access, account status, and user restrictions
-- **SupportDesk.jsx** - View and manage support tickets with status filtering (OPEN, IN_PROGRESS, RESOLVED)
-- **User360.jsx** - Search users and view their complete profile, content, transactions, and activity
+### Admin Pages (Frontend)
+- **AdminLogin.jsx** - Admin authentication with email/password; supports GOD_ADMIN, SUPER_ADMIN, and MODERATE_ADMIN roles
+- **AccessControl.jsx** - Manage user access, account status, and user restrictions; grant/revoke special access
+- **SupportDesk.jsx** - View and manage support tickets with status filtering (OPEN, IN_PROGRESS, RESOLVED); assign resolution
+- **User360.jsx** - Search users and view their complete profile, content, transactions, activity, and fraud/chargeback history
 
-### Admin Features
-- Support ticket management system using Ticket model
-- User account access control and management
-- Comprehensive user search and profile lookup
-- Admin role authentication
+### Admin Controller Functions (Backend)
+**server/controllers/adminController.js** exports:
+- `logAdminAction()` - Helper to log all admin actions to SystemLog for audit trail
+- `searchUsers()` - Search users by email, username, or wallet address; returns paginated results
+- `getUser360()` - Comprehensive user profile with all purchases, withdrawals, complaints, and content history
+- `getTicketStats()` - Support desk statistics
+- `resolveTicket()` - Mark support ticket as resolved and log admin action
+- `approveManualUnlock()` - Grant special content access to user (e.g., chargeback reversal)
+- `suspendUser()` - Suspend user account and log action
+- `getSystemLogs()` - View audit trail of all admin actions
 
-## 12. Important implementation notes for future work
+### Admin Routes (Backend)
+**server/routes/adminRoutes.js** provides:
+- `GET /api/admin/users/search` - Search users (requireAnyAdmin middleware)
+- `GET /api/admin/users/360/:userId` - Full user profile (requireAnyAdmin)
+- `GET /api/admin/tickets` - Support ticket list (requireAnyAdmin)
+- `POST /api/admin/tickets/:id/resolve` - Mark ticket resolved (requireAnyAdmin)
+- `POST /api/admin/users/:id/approve-unlock` - Manual content unlock (requireSuperAdmin)
+- `POST /api/admin/users/:id/suspend` - Suspend user (requireGodAdmin)
+- `GET /api/admin/logs` - Audit trail (requireGodAdmin)
 
-- The app already assumes a local dev setup with the frontend on port 5173, admin on separate port, and backend on port 5000
-- The frontend uses localStorage keys named nippy_token and nippy_user
-- Web3 payments are wired to Polygon Amoy testnet values in useWeb3Transfer.js
-- The backend uses JWT auth and requires the JWT secret to be available in environment variables
-- The media pipeline is designed around Cloudflare R2 / S3-compatible object storage
-- Some routes and UI panels are present but may still be partially incomplete; the placeholders in App.jsx are evidence of that
+### Admin Role Hierarchy
+- **GOD_ADMIN** - Full platform control, can suspend users, process payouts, view all logs
+- **SUPER_ADMIN** - Support desk, user access control, manual unlocks for disputes
+- **MODERATE_ADMIN** - Limited support desk, view users, resolve tickets only
+
+Middleware in `server/middleware/adminMiddleware.js` enforces these role restrictions.
+
+## 12. Critical Production Issues (MUST FIX BEFORE LAUNCH)
+
+### 🔴 High Priority - Security & Payment Integrity
+
+**1. Web3 Event Listener Fragility**
+- **File:** `server/workers/web3Listener.js` and `server/services/chainListener.js`
+- **Issue:** Current 2000-block lookback is insufficient if Node server crashes/restarts; can miss transactions
+- **Impact:** Missed purchases = unpaid creators, angry fans
+- **Fix Required:** Migrate to dedicated indexer (The Graph) or implement Redis/BullMQ queue for retry logic
+- **Timeline:** Complete before mainnet deployment
+
+**2. Fiat Chargeback Risk (Paystack Integration)**
+- **Files:** `server/controllers/purchaseController.js`, `server/services/paystackService.js`
+- **Issue:** No handling for stolen credit card chargebacks; creator may withdraw funds before chargeback reversal
+- **Impact:** Platform loses money; creator may owe more than balance if charged back
+- **Fix Required:** Implement 7-14 day hold on creator withdrawals, chargeback detection logic, and AdminApproval flow
+- **Timeline:** Required for fiat payment launch
+
+**3. Treasury Worker Private Key Exposure**
+- **File:** `server/workers/treasuryWorker.js`
+- **Issue:** Private key handling on public-facing API server
+- **Impact:** Key compromise = all creator funds at risk
+- **Fix Required:** Isolate treasury operations on private network; use HSM or AWS KMS for key management
+- **Timeline:** Before mainnet with real funds
+
+### 🟡 Medium Priority - Configuration & Testnet Issues
+
+**4. Hardcoded Testnet Configuration**
+- **File:** `client/src/hooks/useWeb3Transfer.js`
+- **Current:** Polygon Amoy testnet with Mock USDT (0x3A08E5d...)
+- **Issue:** No mechanism to switch to mainnet USDT (0xc2132D05D31c914a87C6611C10748AEb04B58e8F)
+- **Fix Required:** Environment-based contract address switching; update all frontend payment logic
+- **Timeline:** Mainnet deployment
+
+**5. Smart Contract Type Ambiguity**
+- **File:** `contracts/src/NippyPaymentGateway.sol`
+- **Issue:** Payment events don't specify purchaseType (PPV vs Subscription vs Chat); backend guesses based on missing metadata
+- **Impact:** Can't reliably distinguish purchase types; potential unlock mismatches
+- **Fix Required:** Add purchaseType parameter to contract events; redeploy
+- **Timeline:** Before public beta
+
+**6. CloudFlare CORS Misconfiguration**
+- **File:** `server/config/cloudflare.js` (or upload route config)
+- **Current:** CORS policy allows `*` (all origins)
+- **Issue:** Media can be embedded anywhere; no domain protection
+- **Fix Required:** Lock CORS to production domain (e.g., `media.nippy.app`); implement rate limiting per user
+- **Timeline:** Production deployment
+
+### 🟠 Lower Priority - Code Quality & Completeness
+
+**7. Incomplete Media Features**
+- **File:** `server/controllers/mediaController.js` line ~94
+- **Issue:** Commented-out 15-minute signed URL generation; temp file handling in `uploads/` folder
+- **Impact:** No efficient secure streaming; temporary files accumulate
+- **Fix Required:** Implement proper signed URL caching; clean up temp files with cron job
+- **Timeline:** Before content launch
+
+**8. Placeholder UI Components**
+- **File:** `client/src/App.jsx`, `client/src/components/Placeholder.jsx`
+- **Issue:** Stub pages for incomplete routes
+- **Impact:** Broken UX for certain features
+- **Fix Required:** Complete all placeholder components or hide routes
+- **Timeline:** Feature completion
+
+**9. Email Configuration in Admin Routes**
+- **File:** `server/routes/adminRoutes.js` line ~18
+- **Issue:** Nodemailer transporter hardcoded with Gmail; uses `process.env.EMAIL_USER` / `EMAIL_PASS`
+- **Impact:** Admin email notifications fail if not configured
+- **Fix Required:** Verify email credentials; consider SendGrid for production reliability
+- **Timeline:** Before support features go live
+
+## 13. Important implementation notes for future work
+
+- The app already assumes a local dev setup with the frontend on port 5173, admin on port 5174, and backend on port 5000
+- The frontend uses localStorage keys named `nippy_token` and `nippy_user`
+- Web3 payments are wired to Polygon Amoy testnet values in `useWeb3Transfer.js`; mainnet USDT address must be configured in `.env`
+- The backend uses JWT auth with `JWT_SECRET` from environment; recommend minimum 64-character random secret
+- The media pipeline is designed around Cloudflare R2 / S3-compatible object storage; R2 credentials required in `.env`
+- Admin actions are logged to SystemLog for compliance; archive logs regularly for audit
 - The admin dashboard is a separate Vite app running independently from the main client application
+- Withdrawal processing requires Paystack API key and webhook secret in `.env` for fiat settlement
+- All secrets must be moved from `.env` to AWS Secrets Manager or HashiCorp Vault before production
+- Database backups should be automated and tested regularly; consider MongoDB Atlas automated backups
 
-## 13. Best starting points for continuing the project
+## 14. Production Readiness Checklist
+
+Before launching to mainnet and real money, verify these items:
+
+### Security & Secrets Management
+- [ ] All `.env` secrets moved to AWS Secrets Manager or HashiCorp Vault
+- [ ] JWT_SECRET is 64+ characters, randomly generated
+- [ ] Database passwords different from development
+- [ ] Private keys for treasury isolated on separate network
+- [ ] SSL/TLS certificates installed and auto-renewed
+- [ ] API rate limiting configured per user/IP
+- [ ] CORS locked to production domain only
+
+### Web3 & Payment Processing
+- [ ] Polygon Amoy testnet replaced with mainnet RPC URL
+- [ ] Real USDT mainnet address configured (0xc2132D05D31c914a87C6611C10748AEb04B58e8F)
+- [ ] Smart contract redeployed on mainnet with updated purchaseType parameter
+- [ ] Payment gateway tested with small amounts ($0.10 transactions)
+- [ ] Web3 listener switched to The Graph indexer or Redis queue fallback
+- [ ] Withdrawal worker isolated on private network
+- [ ] Mock USDT completely removed from production environment
+
+### Fiat & Risk Management
+- [ ] Paystack webhook signature validation enabled and tested
+- [ ] Chargeback detection logic implemented in purchaseController
+- [ ] Withdrawal hold period set (7-14 days recommended)
+- [ ] Fraud reversal policy documented and implemented
+- [ ] Creator payouts tested end-to-end with real amounts
+- [ ] Chargeback scenario tested (stolen card → payout → reversal)
+
+### Database & Audit
+- [ ] MongoDB Atlas automated backups configured
+- [ ] Database encryption at rest enabled
+- [ ] All SystemLog entries older than 1 year archived
+- [ ] Admin action logging tested for completeness
+- [ ] User data encryption for PII (email masking in logs)
+
+### Frontend & Admin Portal
+- [ ] All placeholder components removed or completed
+- [ ] Admin authentication tested with all role levels
+- [ ] Support ticket workflow tested end-to-end
+- [ ] User360 search performance tested with 100k+ users
+- [ ] Error boundaries and fallback UI in place
+
+### Monitoring & Alerting
+- [ ] Sentry or similar error tracking configured
+- [ ] CloudWatch/DataDog metrics for payment failures
+- [ ] Alert on Web3 listener lag > 10 blocks
+- [ ] Alert on withdrawal processing failures
+- [ ] Database backup verification runs weekly
+
+### Content & Media
+- [ ] CloudFlare R2 rate limiting tested
+- [ ] Temp file cleanup cron job active
+- [ ] Media signing URLs implemented for secure streaming
+- [ ] NSFW content filter tested (if enforcement required)
+
+### Documentation & Ops
+- [ ] Runbooks for common scenarios (payment reversal, user suspension, emergency pause)
+- [ ] Incident response plan documented
+- [ ] Support team trained on admin dashboard
+- [ ] Withdrawal/payout procedures documented
+- [ ] Post-launch monitoring metrics defined
+
+## 15. Best starting points for continuing the project
 
 If a future agent needs to continue development, the best places to start are:
 
-1. client/src/App.jsx for route-level context
-2. client/src/components/FanFeed.jsx and FanChatWindow.jsx for monetized content and chat flows
-3. server/controllers/contentController.js for content posting and feed logic
-4. server/controllers/messageController.js for messaging and access rules
-5. server/controllers/purchaseController.js for payment verification and monetization logic
-6. server/models/User.js and server/models/Purchase.js for the most important domain structures
-7. admin/src/pages/ for admin dashboard feature development and support ticket management
+### For Feature Development:
+1. `client/src/App.jsx` - Route-level context and role-based page structure
+2. `client/src/components/FanFeed.jsx` and `FanChatWindow.jsx` - Monetized content and chat flows
+3. `server/controllers/contentController.js` - Content posting and feed logic
+4. `server/controllers/messageController.js` - Messaging and access rules
+5. `server/controllers/purchaseController.js` - Payment verification and monetization logic
+6. `server/models/User.js` and `server/models/Purchase.js` - Most important domain structures
+
+### For Admin & Compliance:
+7. `admin/src/pages/` - Admin dashboard feature development and support ticket management
+8. `server/controllers/adminController.js` - Admin action implementations
+9. `server/models/SystemLog.js` and `server/models/AdminApproval.js` - Audit trail and exception handling
+
+### For Production Readiness (CRITICAL):
+10. **Start with "Critical Production Issues" section (Section 12)** - These MUST be fixed before mainnet
+11. **Complete "Production Readiness Checklist" (Section 14)** - Verify all items before launch
+12. Review `server/workers/web3Listener.js` for event listener reliability and crash recovery
+13. Review `server/workers/treasuryWorker.js` for private key management and security isolation
+14. Implement chargeback handling in `server/controllers/purchaseController.js` (Issue #2)
+15. Configure mainnet USDT address in `client/src/hooks/useWeb3Transfer.js` (Issue #4)
 
 This document should be treated as the compact memory of the current Nippy implementation state. It is the fastest way for a future LLM to understand the project without re-reading the entire repository from scratch.
+
+**Last Updated:** 2026-08-17
+**Status:** Feature-complete for public beta; CRITICAL production issues must be addressed before mainnet launch
+**Key Blockers (Fix in This Order):**
+1. 🔴 Web3 event listener reliability (Section 12.1)
+2. 🔴 Fiat chargeback handling (Section 12.2)
+3. 🔴 Treasury worker key management (Section 12.3)
+4. 🟡 Testnet → Mainnet configuration (Section 12.4)
 
 ---
 

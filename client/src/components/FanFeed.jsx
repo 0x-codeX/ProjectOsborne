@@ -3,7 +3,10 @@ import React, {
   useEffect,
   useRef,
 } from "react";
-import { Link } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+} from "react-router-dom";
 import { usePaystackPayment } from "react-paystack";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import {
@@ -19,7 +22,10 @@ import {
   X,
   UserPlus,
   UserCheck,
+  Radio,
+  PlayCircle,
 } from "lucide-react";
+import api from "../utils/api";
 
 const FanFeed =
   () => {
@@ -48,6 +54,8 @@ const FanFeed =
       transferUSDT,
     } =
       useWeb3Transfer();
+    const navigate =
+      useNavigate();
 
     // Current User for Fiat Checkout
     const currentUser =
@@ -143,7 +151,7 @@ const FanFeed =
     ]);
 
     // ==========================================
-    // 1. VIEW TRACKING LOGIC (INTERSECTION OBSERVER)
+    // 1. VIEW TRACKING LOGIC
     // ==========================================
     const viewedPosts =
       useRef(
@@ -165,20 +173,8 @@ const FanFeed =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          await fetch(
-            `http://localhost:5000/api/content/${postId}/view`,
-            {
-              method:
-                "POST",
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
-            },
+          await api.post(
+            `/content/${postId}/view`,
           );
         } catch (error) {
           console.error(
@@ -242,7 +238,9 @@ const FanFeed =
       feed,
     ]);
 
-    // Silent Polling Architecture
+    // ==========================================
+    // 2. FEED FETCHING & SILENT POLLING
+    // ==========================================
     useEffect(() => {
       fetchFeed();
       const pollInterval =
@@ -265,35 +263,12 @@ const FanFeed =
           true,
         );
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const response =
-            await fetch(
-              "http://localhost:5000/api/content/feed",
-              {
-                method:
-                  "GET",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-              },
+            await api.get(
+              "/content/feed",
             );
-
-          if (
-            !response.ok
-          )
-            throw new Error(
-              "Failed to load feed",
-            );
-          const data =
-            await response.json();
           setFeed(
-            data,
+            response.data,
           );
         } catch (error) {
           console.error(
@@ -310,31 +285,12 @@ const FanFeed =
     const pollForNewPosts =
       async () => {
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const response =
-            await fetch(
-              "http://localhost:5000/api/content/feed",
-              {
-                method:
-                  "GET",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-              },
+            await api.get(
+              "/content/feed",
             );
-
-          if (
-            !response.ok
-          )
-            return;
           const freshData =
-            await response.json();
+            response.data;
           const currentFeed =
             feedRef.current;
 
@@ -426,6 +382,9 @@ const FanFeed =
         );
       };
 
+    // ==========================================
+    // 3. SOCIAL INTERACTIONS
+    // ==========================================
     const handleFollowToggle =
       async (
         creatorId,
@@ -462,22 +421,8 @@ const FanFeed =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          await fetch(
-            `http://localhost:5000/api/users/${creatorId}/follow`,
-            {
-              method:
-                "POST",
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                  "Content-Type":
-                    "application/json",
-                },
-            },
+          await api.post(
+            `/users/${creatorId}/follow`,
           );
         } catch (error) {
           console.error(
@@ -527,20 +472,8 @@ const FanFeed =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          await fetch(
-            `http://localhost:5000/api/content/${postId}/like`,
-            {
-              method:
-                "POST",
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
-            },
+          await api.post(
+            `/content/${postId}/like`,
           );
         } catch (error) {
           console.error(
@@ -573,20 +506,8 @@ const FanFeed =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          await fetch(
-            `http://localhost:5000/api/content/${postId}/bookmark`,
-            {
-              method:
-                "POST",
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
-            },
+          await api.post(
+            `/content/${postId}/bookmark`,
           );
         } catch (error) {
           console.error(
@@ -608,38 +529,13 @@ const FanFeed =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const response =
-            await fetch(
-              `http://localhost:5000/api/content/${postId}/comment`,
+            await api.post(
+              `/content/${postId}/comment`,
               {
-                method:
-                  "POST",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    text: commentText,
-                  },
-                ),
+                text: commentText,
               },
             );
-
-          if (
-            !response.ok
-          )
-            throw new Error(
-              "Failed to post comment",
-            );
-          const data =
-            await response.json();
 
           setFeed(
             (
@@ -663,7 +559,9 @@ const FanFeed =
                         [
                           ...(post.comments ||
                             []),
-                          data.comment,
+                          response
+                            .data
+                            .comment,
                         ],
                     };
                   }
@@ -688,6 +586,9 @@ const FanFeed =
         }
       };
 
+    // ==========================================
+    // 4. PAYMENTS & CHECKOUT
+    // ==========================================
     const closeModal =
       () => {
         setPaymentModalPost(
@@ -713,46 +614,20 @@ const FanFeed =
           null,
         );
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const baseAmountUSD =
             paymentModalPost.displayPrice ||
             paymentModalPost.actualPrice ||
             0;
-
           const res =
-            await fetch(
-              "http://localhost:5000/api/purchases/crypto-quote",
+            await api.post(
+              "/purchases/crypto-quote",
               {
-                method:
-                  "POST",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    amountUSD:
-                      baseAmountUSD,
-                  },
-                ),
+                amountUSD:
+                  baseAmountUSD,
               },
             );
-
-          if (
-            !res.ok
-          )
-            throw new Error(
-              "Failed to fetch quote",
-            );
-          const data =
-            await res.json();
           setCryptoQuote(
-            data,
+            res.data,
           );
         } catch (error) {
           console.error(
@@ -772,7 +647,6 @@ const FanFeed =
         }
       };
 
-    // UNIFIED PAYMENT ROUTER
     const executePayment =
       async () => {
         if (
@@ -792,7 +666,7 @@ const FanFeed =
           paymentMethod ===
           "CARD"
         ) {
-          const exchangeRate = 1500; // Can be fetched from settings later
+          const exchangeRate = 1500;
           const amountInKobo =
             Math.round(
               baseAmountUSD *
@@ -822,59 +696,29 @@ const FanFeed =
                     paymentModalPost._id,
                   );
                   try {
-                    const token =
-                      localStorage.getItem(
-                        "nippy_token",
-                      );
-                    const res =
-                      await fetch(
-                        "http://localhost:5000/api/purchases/verify",
-                        {
-                          method:
-                            "POST",
-                          headers:
-                            {
-                              Authorization: `Bearer ${token}`,
-                              "Content-Type":
-                                "application/json",
-                            },
-                          body: JSON.stringify(
-                            {
-                              reference:
-                                reference.reference,
-                              paymentMethod:
-                                "FIAT",
-                              creatorId:
-                                creatorId,
-                              contentId:
-                                paymentModalPost._id,
-                              purchaseType:
-                                "PPV",
-                            },
-                          ),
-                        },
-                      );
-
-                    if (
-                      !res.ok
-                    ) {
-                      const errData =
-                        await res.json();
-                      throw new Error(
-                        errData.message ||
-                          "Verification failed on backend.",
-                      );
-                    }
-
+                    await api.post(
+                      "/purchases/verify",
+                      {
+                        reference:
+                          reference.reference,
+                        paymentMethod:
+                          "FIAT",
+                        creatorId:
+                          creatorId,
+                        contentId:
+                          paymentModalPost._id,
+                        purchaseType:
+                          "PPV",
+                      },
+                    );
                     await fetchFeed();
                     closeModal();
                   } catch (error) {
-                    console.error(
-                      "Fiat Error:",
-                      error,
-                    );
                     alert(
-                      error.message ||
+                      error
+                        .response
+                        ?.data
+                        ?.message ||
                         "Fiat verification failed.",
                     );
                   } finally {
@@ -893,7 +737,6 @@ const FanFeed =
           return;
         }
 
-        // WEB3 CRYPTO EXECUTION (Using the dynamic quote)
         try {
           setProcessingId(
             paymentModalPost._id,
@@ -934,59 +777,31 @@ const FanFeed =
               "Transaction completed but no hash returned.",
             );
 
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          const res =
-            await fetch(
-              "http://localhost:5000/api/purchases/verify",
-              {
-                method:
-                  "POST",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    txHash,
-                    paymentMethod:
-                      "CRYPTO",
-                    creatorId:
-                      creatorId,
-                    contentId:
-                      paymentModalPost._id,
-                    purchaseType:
-                      "PPV",
-                  },
-                ),
-              },
-            );
-
-          if (
-            !res.ok
-          ) {
-            const errData =
-              await res.json();
-            throw new Error(
-              errData.message ||
-                "Backend verification failed.",
-            );
-          }
+          await api.post(
+            "/purchases/verify",
+            {
+              txHash,
+              paymentMethod:
+                "CRYPTO",
+              creatorId:
+                creatorId,
+              contentId:
+                paymentModalPost._id,
+              purchaseType:
+                "PPV",
+            },
+          );
 
           await fetchFeed();
           closeModal();
         } catch (error) {
-          console.error(
-            "Unlock Error Trace:",
-            error,
-          );
           alert(
-            error.message ||
-              "Transaction failed. Check browser console for details.",
+            error
+              .response
+              ?.data
+              ?.message ||
+              error.message ||
+              "Transaction failed.",
           );
         } finally {
           setProcessingId(
@@ -999,7 +814,7 @@ const FanFeed =
       loading
     ) {
       return (
-        <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse">
+        <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse font-bold">
           Loading
           feed...
         </div>
@@ -1008,6 +823,7 @@ const FanFeed =
 
     return (
       <div className="max-w-2xl mx-auto py-8 px-4 relative">
+        {/* PENDING POSTS INJECT BUTTON */}
         {pendingPosts.length >
           0 && (
           <div className="sticky top-4 z-50 flex justify-center mb-6 animate-in slide-in-from-top-2 duration-300">
@@ -1042,185 +858,395 @@ const FanFeed =
           feed.map(
             (
               post,
-            ) => (
-              <div
-                key={
-                  post._id
-                }
-                data-post-id={
-                  post._id
-                }
-                className="feed-post-card mb-10 bg-nippy-obsidian/80 backdrop-blur-md border border-gray-800/60 rounded-2xl overflow-hidden shadow-xl"
-              >
-                <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
-                  <Link
-                    to={`/creator/${post.creator?._id}`}
-                    className="flex items-center gap-3 group cursor-pointer"
+            ) => {
+              // ==========================================
+              // LIVE STREAM CARD
+              // ==========================================
+              if (
+                post.type ===
+                "LIVE_STREAM"
+              ) {
+                return (
+                  <div
+                    key={
+                      post._id
+                    }
+                    data-post-id={
+                      post._id
+                    }
+                    className="feed-post-card mb-10 bg-red-950/20 backdrop-blur-md border border-red-500/40 rounded-2xl overflow-hidden shadow-[0_0_20px_rgba(239,68,68,0.15)] relative"
                   >
-                    <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center overflow-hidden border border-gray-600 group-hover:border-emerald-500 transition-colors">
-                      <span className="font-bold text-gray-300 group-hover:text-white">
-                        {post.creator?.username
-                          ?.charAt(
-                            0,
-                          )
-                          .toUpperCase() ||
-                          "U"}
-                      </span>
-                    </div>
-                    <div>
-                      <div className="font-bold text-slate-200 group-hover:text-emerald-500 transition-colors">
-                        {post
-                          .creator
-                          ?.username ||
-                          "Unknown"}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {new Date(
-                          post.createdAt,
-                        ).toLocaleDateString()}
-                      </div>
-                    </div>
-                  </Link>
+                    {/* Visual Flair */}
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-rose-500 animate-pulse"></div>
 
-                  <div className="flex items-center gap-3">
-                    {post.displayPrice >
-                      0 && (
-                      <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
-                        <BadgeDollarSign
-                          size={
-                            14
-                          }
-                        />{" "}
-                        PPV
+                    {/* Header */}
+                    <div className="flex items-center justify-between p-4 border-b border-red-500/20">
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <img
+                            src={
+                              post
+                                .creator
+                                ?.profileImage ||
+                              "https://placehold.co/100x100"
+                            }
+                            alt={
+                              post
+                                .creator
+                                ?.username
+                            }
+                            className="w-12 h-12 rounded-full object-cover border-2 border-red-500 animate-pulse"
+                          />
+                          <div className="absolute -bottom-1 -right-1 bg-red-500 rounded-full p-1 border border-black">
+                            <Radio
+                              size={
+                                10
+                              }
+                              className="text-white"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="font-bold text-white text-lg">
+                            {
+                              post
+                                .creator
+                                ?.username
+                            }
+                          </div>
+                          <div className="text-xs text-red-400 font-bold flex items-center gap-1 tracking-wider uppercase">
+                            LIVE
+                            NOW
+                          </div>
+                        </div>
                       </div>
-                    )}
+                    </div>
 
-                    <button
-                      onClick={() =>
-                        handleFollowToggle(
+                    {/* Body */}
+                    <div className="p-8 text-center bg-black/40">
+                      <h2 className="text-2xl font-black text-white mb-3">
+                        {
+                          post.title
+                        }
+                      </h2>
+                      <p className="text-gray-400 mb-8 max-w-md mx-auto">
+                        {
                           post
                             .creator
-                            ?._id,
-                        )
-                      }
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
-                        post
-                          .creator
-                          ?.isFollowed
-                          ? "bg-transparent text-gray-400 border-gray-700 hover:border-rose-500 hover:text-rose-500"
-                          : "bg-white text-black border-transparent hover:bg-gray-200"
-                      }`}
+                            ?.username
+                        }{" "}
+                        is
+                        broadcasting
+                        live
+                        right
+                        now.
+                        Join
+                        the
+                        room
+                        to
+                        watch,
+                        chat,
+                        and
+                        send
+                        gifts.
+                      </p>
+
+                      {post.hasAccess ? (
+                        <button
+                          onClick={() =>
+                            navigate(
+                              `/live/${post._id}`,
+                            )
+                          }
+                          className="inline-flex items-center justify-center w-full max-w-xs gap-2 bg-red-500 hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-xl transition-all hover:scale-105 shadow-lg shadow-red-500/30"
+                        >
+                          <PlayCircle
+                            size={
+                              20
+                            }
+                          />{" "}
+                          Join
+                          Stream
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            navigate(
+                              `/creator/${post.creator._id}`,
+                            )
+                          }
+                          className="inline-flex items-center justify-center w-full max-w-xs gap-2 bg-white hover:bg-gray-200 text-black font-bold py-3.5 px-8 rounded-xl transition-all hover:scale-105 shadow-lg"
+                        >
+                          <Lock
+                            size={
+                              20
+                            }
+                          />{" "}
+                          Subscribe
+                          (₦
+                          {post.subscriptionPriceNGN ||
+                            0}
+                          )
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
+              // ==========================================
+              // STANDARD POST CARD
+              // ==========================================
+              return (
+                <div
+                  key={
+                    post._id
+                  }
+                  data-post-id={
+                    post._id
+                  }
+                  className="feed-post-card mb-10 bg-nippy-obsidian/80 backdrop-blur-md border border-gray-800/60 rounded-2xl overflow-hidden shadow-xl"
+                >
+                  {/* Creator Header */}
+                  <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
+                    <Link
+                      to={`/creator/${post.creator?._id}`}
+                      className="flex items-center gap-3 group cursor-pointer"
                     >
                       {post
                         .creator
-                        ?.isFollowed ? (
-                        <>
-                          <UserCheck
-                            size={
-                              14
-                            }
-                          />{" "}
-                          Following
-                        </>
-                      ) : (
-                        <>
-                          <UserPlus
-                            size={
-                              14
-                            }
-                          />{" "}
-                          Follow
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="relative bg-black w-full min-h-[300px] max-h-[600px] flex items-center justify-center overflow-hidden">
-                  {post.isLocked ? (
-                    <video
-                      src={
-                        post.teaserUrl
-                      }
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
-                      onContextMenu={(
-                        e,
-                      ) =>
-                        e.preventDefault()
-                      }
-                      className="w-full h-auto max-h-[600px] object-cover blur-3xl scale-[1.2] opacity-70 pointer-events-none select-none"
-                    />
-                  ) : (
-                    <>
-                      {post.mediaUrl
-                        ?.toLowerCase()
-                        .match(
-                          /\.(jpg|jpeg|png|gif|webp)/i,
-                        ) ||
-                      post.fileType?.includes(
-                        "image",
-                      ) ||
-                      post.mediaType?.includes(
-                        "image",
-                      ) ? (
+                        ?.profileImage ? (
                         <img
                           src={
-                            post.mediaUrl
+                            post
+                              .creator
+                              .profileImage
                           }
-                          alt={
-                            post.title ||
-                            "Unlocked content"
-                          }
-                          onContextMenu={(
-                            e,
-                          ) =>
-                            e.preventDefault()
-                          }
-                          draggable="false"
-                          className="w-full h-auto max-h-[600px] object-contain select-none"
+                          alt="Creator"
+                          className="w-10 h-10 rounded-full object-cover border border-gray-700 group-hover:border-emerald-500 transition-colors"
                         />
                       ) : (
-                        <video
-                          src={
-                            post.mediaUrl
-                          }
-                          controls
-                          controlsList="nodownload noplaybackrate"
-                          disablePictureInPicture
-                          onContextMenu={(
-                            e,
-                          ) =>
-                            e.preventDefault()
-                          }
-                          className="w-full h-auto max-h-[600px] object-contain"
-                        />
+                        <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center border border-gray-600 group-hover:border-emerald-500 transition-colors">
+                          <span className="font-bold text-gray-300 group-hover:text-white">
+                            {post.creator?.username
+                              ?.charAt(
+                                0,
+                              )
+                              .toUpperCase() ||
+                              "U"}
+                          </span>
+                        </div>
                       )}
-                    </>
-                  )}
+                      <div>
+                        <div className="font-bold text-slate-200 group-hover:text-emerald-500 transition-colors">
+                          {post
+                            .creator
+                            ?.username ||
+                            "Unknown"}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {new Date(
+                            post.createdAt,
+                          ).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </Link>
 
-                  {post.isLocked && (
-                    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center z-10 p-6">
-                      <Lock className="w-12 h-12 text-white/70 mb-3" />
-                      <h3 className="text-2xl font-extrabold text-white mb-1 shadow-black drop-shadow-md">
-                        Content
-                        Locked
-                      </h3>
-                      <p className="text-gray-200 text-sm mb-6 font-medium drop-shadow-md text-center max-w-xs">
-                        Unlock
-                        this
-                        content
-                        to
-                        view
-                        the
-                        full
-                        resolution
-                        media.
-                      </p>
+                    <div className="flex items-center gap-3">
+                      {post.displayPrice >
+                        0 && (
+                        <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
+                          <BadgeDollarSign
+                            size={
+                              14
+                            }
+                          />{" "}
+                          PPV
+                        </div>
+                      )}
 
-                      <div className="flex flex-col gap-3 w-full max-w-xs">
+                      <button
+                        onClick={() =>
+                          handleFollowToggle(
+                            post
+                              .creator
+                              ?._id,
+                          )
+                        }
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                          post
+                            .creator
+                            ?.isFollowed
+                            ? "bg-transparent text-gray-400 border-gray-700 hover:border-rose-500 hover:text-rose-500"
+                            : "bg-white text-black border-transparent hover:bg-gray-200"
+                        }`}
+                      >
+                        {post
+                          .creator
+                          ?.isFollowed ? (
+                          <>
+                            <UserCheck
+                              size={
+                                14
+                              }
+                            />{" "}
+                            Following
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus
+                              size={
+                                14
+                              }
+                            />{" "}
+                            Follow
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Media Container */}
+                  <div className="relative bg-black w-full min-h-[300px] max-h-[600px] flex items-center justify-center overflow-hidden">
+                    {post.isLocked ? (
+                      <video
+                        src={
+                          post.teaserUrl
+                        }
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        onContextMenu={(
+                          e,
+                        ) =>
+                          e.preventDefault()
+                        }
+                        className="w-full h-auto max-h-[600px] object-cover blur-3xl scale-[1.2] opacity-70 pointer-events-none select-none"
+                      />
+                    ) : (
+                      <>
+                        {post.mediaUrl
+                          ?.toLowerCase()
+                          .match(
+                            /\.(jpg|jpeg|png|gif|webp)/i,
+                          ) ||
+                        post.fileType?.includes(
+                          "image",
+                        ) ||
+                        post.mediaType?.includes(
+                          "image",
+                        ) ? (
+                          <img
+                            src={
+                              post.mediaUrl
+                            }
+                            alt={
+                              post.title ||
+                              "Unlocked content"
+                            }
+                            onContextMenu={(
+                              e,
+                            ) =>
+                              e.preventDefault()
+                            }
+                            draggable="false"
+                            className="w-full h-auto max-h-[600px] object-contain select-none"
+                          />
+                        ) : (
+                          <video
+                            src={
+                              post.mediaUrl
+                            }
+                            controls
+                            controlsList="nodownload noplaybackrate"
+                            disablePictureInPicture
+                            onContextMenu={(
+                              e,
+                            ) =>
+                              e.preventDefault()
+                            }
+                            className="w-full h-auto max-h-[600px] object-contain"
+                          />
+                        )}
+                      </>
+                    )}
+
+                    {/* Lock Overlay */}
+                    {post.isLocked && (
+                      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center z-10 p-6">
+                        <Lock className="w-12 h-12 text-white/70 mb-3" />
+                        <h3 className="text-2xl font-extrabold text-white mb-1 shadow-black drop-shadow-md">
+                          Content
+                          Locked
+                        </h3>
+                        <p className="text-gray-200 text-sm mb-6 font-medium drop-shadow-md text-center max-w-xs">
+                          Unlock
+                          this
+                          content
+                          to
+                          view
+                          the
+                          full
+                          resolution
+                          media.
+                        </p>
+
+                        <div className="flex flex-col gap-3 w-full max-w-xs">
+                          <button
+                            onClick={() => {
+                              setPaymentModalPost(
+                                post,
+                              );
+                              setPaymentMethod(
+                                null,
+                              );
+                            }}
+                            className="bg-white hover:bg-gray-200 text-black font-bold py-3 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg"
+                          >
+                            <BadgeDollarSign
+                              size={
+                                20
+                              }
+                            />
+                            Unlock
+                            for
+                            $
+                            {post.displayPrice?.toFixed(
+                              2,
+                            ) ||
+                              post.actualPrice}{" "}
+                            USD
+                          </button>
+
+                          <Link
+                            to={`/creator/${post.creator?._id}`}
+                            className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-gray-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
+                          >
+                            Subscribe
+                            to
+                            Creator
+                          </Link>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Content Details */}
+                  <div className="p-4">
+                    <h2 className="text-lg font-bold text-slate-200 mb-1">
+                      {
+                        post.title
+                      }
+                    </h2>
+                    <p className="text-sm text-gray-400 mb-4">
+                      {
+                        post.description
+                      }
+                    </p>
+
+                    {post.isPaywalled &&
+                      !post.isUnlocked && (
                         <button
                           onClick={() => {
                             setPaymentModalPost(
@@ -1230,251 +1256,200 @@ const FanFeed =
                               null,
                             );
                           }}
-                          className="bg-white hover:bg-gray-200 text-black font-bold py-3 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg"
+                          className="px-4 py-2 mb-4 bg-[#FF5757] text-white rounded-lg font-bold text-sm hover:bg-rose-600 transition-colors"
                         >
-                          <BadgeDollarSign
-                            size={
-                              20
-                            }
-                          />
                           Unlock
                           for
-                          $
+                          USD{" "}
                           {post.displayPrice?.toFixed(
                             2,
                           ) ||
-                            post.actualPrice}{" "}
-                          USD
+                            post.actualPrice}
+                        </button>
+                      )}
+
+                    <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
+                      <div className="flex items-center gap-6">
+                        <button
+                          onClick={() =>
+                            handleLike(
+                              post._id,
+                            )
+                          }
+                          className="flex items-center gap-2 group transition-colors"
+                        >
+                          <Heart
+                            size={
+                              22
+                            }
+                            className={`transition-all duration-200 ${
+                              post.isLiked
+                                ? "text-rose-500 fill-current scale-110"
+                                : "text-gray-400 group-hover:text-rose-500"
+                            }`}
+                          />
+                          <span className="text-sm text-gray-400 font-medium">
+                            {post.likesCount ||
+                              0}
+                          </span>
                         </button>
 
-                        <Link
-                          to={`/creator/${post.creator?._id}`}
-                          className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-gray-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
+                        <button
+                          onClick={() =>
+                            setActiveCommentPostId(
+                              activeCommentPostId ===
+                                post._id
+                                ? null
+                                : post._id,
+                            )
+                          }
+                          className="flex items-center gap-2 group transition-colors"
                         >
-                          Subscribe
-                          to
-                          Creator
-                        </Link>
+                          <MessageCircle
+                            size={
+                              22
+                            }
+                            className="text-gray-400 group-hover:text-blue-400"
+                          />
+                          <span className="text-sm text-gray-400 font-medium">
+                            {post.commentsCount ||
+                              0}
+                          </span>
+                        </button>
+
+                        <div className="flex items-center gap-2 text-gray-500">
+                          <Eye
+                            size={
+                              22
+                            }
+                          />
+                          <span className="text-sm font-medium">
+                            {post.viewsCount ||
+                              0}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() =>
+                          handleBookmark(
+                            post._id,
+                          )
+                        }
+                        className="transition-colors"
+                      >
+                        <Bookmark
+                          size={
+                            22
+                          }
+                          className={
+                            post.isBookmarked
+                              ? "fill-white text-white"
+                              : "text-gray-400 hover:text-white"
+                          }
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Comments Section */}
+                  {activeCommentPostId ===
+                    post._id && (
+                    <div className="bg-slate-900/80 backdrop-blur-md border-t border-gray-800/60 p-4 animate-in slide-in-from-top-2">
+                      <div className="max-h-48 overflow-y-auto mb-4 space-y-3 pr-2 scrollbar-thin scrollbar-thumb-gray-700">
+                        {post.comments &&
+                        post
+                          .comments
+                          .length >
+                          0 ? (
+                          post.comments.map(
+                            (
+                              comment,
+                            ) => (
+                              <div
+                                key={
+                                  comment._id
+                                }
+                                className="text-sm"
+                              >
+                                <span className="font-bold text-slate-300 mr-2">
+                                  {
+                                    comment
+                                      .user
+                                      .username
+                                  }
+                                </span>
+                                <span className="text-gray-400">
+                                  {
+                                    comment.text
+                                  }
+                                </span>
+                              </div>
+                            ),
+                          )
+                        ) : (
+                          <p className="text-xs text-gray-500 text-center italic">
+                            No
+                            comments
+                            yet.
+                            Be
+                            the
+                            first!
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 relative">
+                        <input
+                          type="text"
+                          value={
+                            commentText
+                          }
+                          onChange={(
+                            e,
+                          ) =>
+                            setCommentText(
+                              e
+                                .target
+                                .value,
+                            )
+                          }
+                          placeholder="Write a comment..."
+                          onKeyDown={(
+                            e,
+                          ) =>
+                            e.key ===
+                              "Enter" &&
+                            submitComment(
+                              post._id,
+                            )
+                          }
+                          className="w-full bg-black border border-gray-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          onClick={() =>
+                            submitComment(
+                              post._id,
+                            )
+                          }
+                          disabled={
+                            submittingComment ||
+                            !commentText.trim()
+                          }
+                          className="absolute right-2 text-emerald-500 hover:text-emerald-400 disabled:opacity-50 transition-colors p-1"
+                        >
+                          <Send
+                            size={
+                              18
+                            }
+                          />
+                        </button>
                       </div>
                     </div>
                   )}
                 </div>
-
-                <div className="p-4">
-                  <h2 className="text-lg font-bold text-slate-200 mb-1">
-                    {
-                      post.title
-                    }
-                  </h2>
-                  <p className="text-sm text-gray-400 mb-4">
-                    {
-                      post.description
-                    }
-                  </p>
-
-                  {post.isPaywalled &&
-                    !post.isUnlocked && (
-                      <button
-                        onClick={() => {
-                          setPaymentModalPost(
-                            post,
-                          );
-                          setPaymentMethod(
-                            null,
-                          );
-                        }}
-                        className="px-4 py-2 mb-4 bg-[#FF5757] text-white rounded-lg font-bold text-sm hover:bg-rose-600 transition-colors"
-                      >
-                        Unlock
-                        for
-                        USD{" "}
-                        {post.displayPrice?.toFixed(
-                          2,
-                        ) ||
-                          post.actualPrice}
-                      </button>
-                    )}
-
-                  <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
-                    <div className="flex items-center gap-6">
-                      <button
-                        onClick={() =>
-                          handleLike(
-                            post._id,
-                          )
-                        }
-                        className="flex items-center gap-2 group transition-colors"
-                      >
-                        <Heart
-                          size={
-                            22
-                          }
-                          className={`transition-all duration-200 ${
-                            post.isLiked
-                              ? "text-rose-500 fill-current scale-110"
-                              : "text-gray-400 group-hover:text-rose-500"
-                          }`}
-                        />
-                        <span className="text-sm text-gray-400 font-medium">
-                          {post.likesCount ||
-                            0}
-                        </span>
-                      </button>
-
-                      <button
-                        onClick={() =>
-                          setActiveCommentPostId(
-                            activeCommentPostId ===
-                              post._id
-                              ? null
-                              : post._id,
-                          )
-                        }
-                        className="flex items-center gap-2 group transition-colors"
-                      >
-                        <MessageCircle
-                          size={
-                            22
-                          }
-                          className="text-gray-400 group-hover:text-blue-400"
-                        />
-                        <span className="text-sm text-gray-400 font-medium">
-                          {post.commentsCount ||
-                            0}
-                        </span>
-                      </button>
-
-                      <div className="flex items-center gap-2 text-gray-500">
-                        <Eye
-                          size={
-                            22
-                          }
-                        />
-                        <span className="text-sm font-medium">
-                          {post.viewsCount ||
-                            0}
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() =>
-                        handleBookmark(
-                          post._id,
-                        )
-                      }
-                      className="transition-colors"
-                    >
-                      <Bookmark
-                        size={
-                          22
-                        }
-                        className={
-                          post.isBookmarked
-                            ? "fill-white text-white"
-                            : "text-gray-400 hover:text-white"
-                        }
-                      />
-                    </button>
-                  </div>
-                </div>
-
-                {activeCommentPostId ===
-                  post._id && (
-                  <div className="bg-slate-900/80 backdrop-blur-md border-t border-gray-800/60 p-4 animate-in slide-in-from-top-2">
-                    <div className="max-h-48 overflow-y-auto mb-4 space-y-3 pr-2 scrollbar-thin scrollbar-thumb-gray-700">
-                      {post.comments &&
-                      post
-                        .comments
-                        .length >
-                        0 ? (
-                        post.comments.map(
-                          (
-                            comment,
-                          ) => (
-                            <div
-                              key={
-                                comment._id
-                              }
-                              className="text-sm"
-                            >
-                              <span className="font-bold text-slate-300 mr-2">
-                                {
-                                  comment
-                                    .user
-                                    .username
-                                }
-                              </span>
-                              <span className="text-gray-400">
-                                {
-                                  comment.text
-                                }
-                              </span>
-                            </div>
-                          ),
-                        )
-                      ) : (
-                        <p className="text-xs text-gray-500 text-center italic">
-                          No
-                          comments
-                          yet.
-                          Be
-                          the
-                          first!
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2 relative">
-                      <input
-                        type="text"
-                        value={
-                          commentText
-                        }
-                        onChange={(
-                          e,
-                        ) =>
-                          setCommentText(
-                            e
-                              .target
-                              .value,
-                          )
-                        }
-                        placeholder="Write a comment..."
-                        onKeyDown={(
-                          e,
-                        ) =>
-                          e.key ===
-                            "Enter" &&
-                          submitComment(
-                            post._id,
-                          )
-                        }
-                        className="w-full bg-black border border-gray-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:outline-none focus:border-emerald-500"
-                      />
-                      <button
-                        onClick={() =>
-                          submitComment(
-                            post._id,
-                          )
-                        }
-                        disabled={
-                          submittingComment ||
-                          !commentText.trim()
-                        }
-                        className="absolute right-2 text-emerald-500 hover:text-emerald-400 disabled:opacity-50 transition-colors p-1"
-                      >
-                        <Send
-                          size={
-                            18
-                          }
-                        />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ),
+              );
+            },
           )
         )}
 

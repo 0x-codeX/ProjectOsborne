@@ -3,7 +3,7 @@ import React, {
   useEffect,
   useRef,
 } from "react";
-import axios from "axios";
+import api from "../utils/api"; // <-- IRONCLAD FIX: Imported the global API interceptor
 import {
   Search,
   Filter,
@@ -184,19 +184,10 @@ const CreatorMessages =
       const fetchInbox =
         async () => {
           try {
-            const token =
-              localStorage.getItem(
-                "nippy_token",
-              );
+            // IRONCLAD FIX: Used global api instance. Stripped manual headers & token.
             const res =
-              await axios.get(
-                "/api/messages/inbox",
-                {
-                  headers:
-                    {
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                "/messages/inbox",
               );
             setInbox(
               res.data,
@@ -242,19 +233,10 @@ const CreatorMessages =
       const fetchMessages =
         async () => {
           try {
-            const token =
-              localStorage.getItem(
-                "nippy_token",
-              );
+            // IRONCLAD FIX: Used global api instance. Stripped manual headers & token.
             const res =
-              await axios.get(
-                `/api/messages/${selectedChat._id}`,
-                {
-                  headers:
-                    {
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                `/messages/${selectedChat._id}`,
               );
             setChatHistory(
               res
@@ -273,10 +255,17 @@ const CreatorMessages =
 
       fetchMessages();
 
+      // Note: WebSockets (socket.io) require their own URL connection,
+      // but we should make sure it points to the correct environment variable.
       const socket =
         io(
-          "http://localhost:5000",
+          import.meta.env.VITE_API_URL?.replace(
+            "/api",
+            "",
+          ) ||
+            "http://localhost:5000",
         );
+
       socket.emit(
         "join_chat",
         selectedChat._id,
@@ -539,19 +528,10 @@ const CreatorMessages =
           true,
         );
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
+          // IRONCLAD FIX: Used global api instance. Stripped manual headers & token.
           const res =
-            await axios.get(
-              "/api/content/vault",
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
+            await api.get(
+              "/content/vault",
             );
 
           const items =
@@ -606,10 +586,6 @@ const CreatorMessages =
           true,
         );
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const formData =
             new FormData();
           formData.append(
@@ -663,16 +639,12 @@ const CreatorMessages =
             }
           }
 
+          // IRONCLAD FIX: Used global api instance. Stripped manual headers & token.
+          // Axios automatically detects FormData and handles the multipart boundary securely.
           const res =
-            await axios.post(
-              "/api/messages/send",
+            await api.post(
+              "/messages/send",
               formData,
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
             );
 
           setChatHistory(

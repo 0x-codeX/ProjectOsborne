@@ -8,7 +8,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import axios from "axios";
+import api from "../utils/api";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -121,23 +121,10 @@ const CreatorLayout =
       const fetchUnreadCount =
         async () => {
           try {
-            const token =
-              localStorage.getItem(
-                "nippy_token",
-              );
-            if (
-              !token
-            )
-              return;
+            // Look how clean this is now. The interceptor handles the token and URL automatically.
             const res =
-              await axios.get(
-                "/api/messages/unread-count",
-                {
-                  headers:
-                    {
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                "/messages/unread-count",
               );
             setGlobalUnread(
               res
@@ -152,6 +139,7 @@ const CreatorLayout =
             );
           }
         };
+
       fetchUnreadCount();
 
       const interval =
@@ -179,25 +167,16 @@ const CreatorLayout =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const payload =
             {
               subject: `Creator Support Request from ${supportName}`,
               message: `Contact Email: ${supportEmail}\n\n${supportMessage}`,
             };
 
-          await axios.post(
-            "http://localhost:5000/api/users/support",
+          // Bulletproof network request relying on your global interceptor
+          await api.post(
+            "/users/support",
             payload,
-            {
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
-            },
           );
 
           setSupportStatus(
@@ -519,7 +498,15 @@ const CreatorLayout =
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-3 overflow-hidden">
                 <div
-                  className={`p-2 rounded-xl shrink-0 ${uploadState.status === "error" ? "bg-red-500/10 text-red-500" : uploadState.status === "complete" ? "bg-[#FF5757]/10 text-[#FF5757]" : "bg-blue-500/10 text-blue-500"}`}
+                  className={`p-2 rounded-xl shrink-0 ${
+                    uploadState.status ===
+                    "error"
+                      ? "bg-red-500/10 text-red-500"
+                      : uploadState.status ===
+                          "complete"
+                        ? "bg-[#FF5757]/10 text-[#FF5757]"
+                        : "bg-blue-500/10 text-blue-500"
+                  }`}
                 >
                   {uploadState.status ===
                   "error" ? (
@@ -589,7 +576,6 @@ const CreatorLayout =
                     {
                       uploadState.progress
                     }
-
                     %
                   </span>
                 </div>
@@ -622,7 +608,11 @@ const CreatorLayout =
               !isSupportOpen,
             )
           }
-          className={`fixed z-[100] bottom-24 right-4 md:bottom-8 md:right-8 text-white p-3.5 sm:p-4 rounded-full shadow-[0_4px_20px_rgba(255,87,87,0.4)] transition-all flex items-center justify-center group ${isSupportOpen ? "bg-slate-700 hover:bg-slate-600 scale-100" : "bg-[#FF5757] hover:bg-rose-600 hover:scale-110"}`}
+          className={`fixed z-[100] bottom-24 right-4 md:bottom-8 md:right-8 text-white p-3.5 sm:p-4 rounded-full shadow-[0_4px_20px_rgba(255,87,87,0.4)] transition-all flex items-center justify-center group ${
+            isSupportOpen
+              ? "bg-slate-700 hover:bg-slate-600 scale-100"
+              : "bg-[#FF5757] hover:bg-rose-600 hover:scale-110"
+          }`}
           aria-label="Help & Support"
         >
           {isSupportOpen ? (
@@ -876,7 +866,11 @@ const CreatorLayout =
                   }`}
                 >
                   <div
-                    className={`relative p-1.5 rounded-lg transition-colors ${isActive ? "bg-[#FF5757]/10" : "bg-transparent"}`}
+                    className={`relative p-1.5 rounded-lg transition-colors ${
+                      isActive
+                        ? "bg-[#FF5757]/10"
+                        : "bg-transparent"
+                    }`}
                   >
                     <Icon
                       size={

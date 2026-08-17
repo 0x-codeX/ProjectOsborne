@@ -4,12 +4,11 @@ import React, {
 import {
   Lock,
   PlayCircle,
-  Unlock,
   Loader2,
   AlertCircle,
 } from "lucide-react";
 import { ethers } from "ethers";
-import axios from "axios";
+import api from "../utils/api"; // The Ironclad Interceptor
 
 const FeedPost =
   ({
@@ -120,30 +119,19 @@ const FeedPost =
               "Transaction reverted by the blockchain.",
             );
 
-          const storedUser =
-            JSON.parse(
-              localStorage.getItem(
-                "nippy_user",
-              ),
-            );
-          const response =
-            await axios.post(
-              "/api/purchases/verify",
-              {
-                contentId:
-                  post._id,
-                txHash:
-                  tx.hash,
-                purchaseType:
-                  type,
-              },
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${storedUser.token}`,
-                  },
-              },
-            );
+          // CLEANUP: No token fetching, no manual headers. The interceptor handles it.
+          // Removed the "/api" prefix because api.js baseURL handles it.
+          await api.post(
+            "/purchases/verify",
+            {
+              contentId:
+                post._id,
+              txHash:
+                tx.hash,
+              purchaseType:
+                type,
+            },
+          );
 
           alert(
             "Payment verified! Content unlocked.",
@@ -172,23 +160,11 @@ const FeedPost =
         );
 
         try {
-          const storedUser =
-            JSON.parse(
-              localStorage.getItem(
-                "nippy_user",
-              ),
-            );
+          // CLEANUP: Clean, dry, and professional network request.
           const res =
-            await axios.get(
-              `/api/media/stream/${post._id}`,
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${storedUser.token}`,
-                  },
-              },
+            await api.get(
+              `/media/stream/${post._id}`,
             );
-
           setStreamUrl(
             res
               .data

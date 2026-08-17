@@ -2,7 +2,6 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import axios from "axios";
 import { usePaystackPayment } from "react-paystack";
 import {
   useParams,
@@ -24,6 +23,9 @@ import {
 } from "lucide-react";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 
+// 1. IMPORT YOUR NEW INTERCEPTOR (No more raw axios)
+import api from "../utils/api";
+
 const CreatorPublicProfile =
   () => {
     const {
@@ -32,6 +34,7 @@ const CreatorPublicProfile =
       useParams();
     const navigate =
       useNavigate();
+
     const [
       profileData,
       setProfileData,
@@ -123,29 +126,16 @@ const CreatorPublicProfile =
     const fetchProfile =
       async () => {
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
+          // THE FIX: Clean, one-line GET request. Headers and Base URL handled globally.
+          const {
+            data,
+          } =
+            await api.get(
+              `/content/creator/${id}`,
             );
-          const response =
-            await fetch(
-              `http://localhost:5000/api/content/creator/${id}`,
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
-            );
-          if (
-            response.ok
-          ) {
-            const data =
-              await response.json();
-            setProfileData(
-              data,
-            );
-          }
+          setProfileData(
+            data,
+          );
         } catch (error) {
           console.error(
             "Failed to load creator",
@@ -174,22 +164,9 @@ const CreatorPublicProfile =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          await fetch(
-            `http://localhost:5000/api/users/${id}/follow`,
-            {
-              method:
-                "POST",
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                  "Content-Type":
-                    "application/json",
-                },
-            },
+          // THE FIX: Clean POST request
+          await api.post(
+            `/users/${id}/follow`,
           );
         } catch (error) {
           console.error(
@@ -245,43 +222,22 @@ const CreatorPublicProfile =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const baseAmountUSD =
             checkoutData.amount ||
             0;
 
-          const res =
-            await fetch(
-              "http://localhost:5000/api/purchases/crypto-quote",
+          // THE FIX: Pass payload directly. Axios handles JSON stringification automatically.
+          const {
+            data,
+          } =
+            await api.post(
+              "/purchases/crypto-quote",
               {
-                method:
-                  "POST",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    amountUSD:
-                      baseAmountUSD,
-                  },
-                ),
+                amountUSD:
+                  baseAmountUSD,
               },
             );
 
-          if (
-            !res.ok
-          )
-            throw new Error(
-              "Failed to fetch quote",
-            );
-          const data =
-            await res.json();
           setCryptoQuote(
             data,
           );
@@ -349,56 +305,29 @@ const CreatorPublicProfile =
                       : checkoutData.type,
                   );
                   try {
-                    const token =
-                      localStorage.getItem(
-                        "nippy_token",
-                      );
-                    const verifyResponse =
-                      await fetch(
-                        "http://localhost:5000/api/purchases/verify",
-                        {
-                          method:
-                            "POST",
-                          headers:
-                            {
-                              "Content-Type":
-                                "application/json",
-                              Authorization: `Bearer ${token}`,
-                            },
-                          body: JSON.stringify(
-                            {
-                              reference:
-                                reference.reference, // Paystack ref
-                              paymentMethod:
-                                "FIAT", // Triggers the Web2 Backend logic
-                              creatorId:
-                                id,
-                              contentId:
-                                checkoutData.post
-                                  ? checkoutData
-                                      .post
-                                      ._id
-                                  : null,
-                              purchaseType:
-                                checkoutData.type,
-                              subscriptionTier:
-                                checkoutData.tier ||
-                                null,
-                            },
-                          ),
-                        },
-                      );
-
-                    const verifyData =
-                      await verifyResponse.json();
-                    if (
-                      !verifyResponse.ok
-                    ) {
-                      throw new Error(
-                        verifyData.message ||
-                          "Payment went through, but verification failed.",
-                      );
-                    }
+                    // THE FIX: Clean POST request for Fiat verification
+                    await api.post(
+                      "/purchases/verify",
+                      {
+                        reference:
+                          reference.reference, // Paystack ref
+                        paymentMethod:
+                          "FIAT",
+                        creatorId:
+                          id,
+                        contentId:
+                          checkoutData.post
+                            ? checkoutData
+                                .post
+                                ._id
+                            : null,
+                        purchaseType:
+                          checkoutData.type,
+                        subscriptionTier:
+                          checkoutData.tier ||
+                          null,
+                      },
+                    );
 
                     await fetchProfile();
                     closeCheckoutModal();
@@ -407,9 +336,14 @@ const CreatorPublicProfile =
                       "Verification Error:",
                       error,
                     );
+                    // Axios places backend error messages inside error.response.data
                     alert(
                       "Verification failed: " +
-                        error.message,
+                        (error
+                          .response
+                          ?.data
+                          ?.message ||
+                          error.message),
                     );
                   } finally {
                     setProcessingId(
@@ -462,7 +396,7 @@ const CreatorPublicProfile =
               profileData
                 .creator
                 .walletAddress,
-              cryptoQuote.requiredUSDT, // DYNAMIC AMOUNT
+              cryptoQuote.requiredUSDT,
               checkoutData.post
                 ? checkoutData
                     .post
@@ -477,57 +411,29 @@ const CreatorPublicProfile =
               "Transaction completed but no hash was returned.",
             );
 
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          const verifyResponse =
-            await fetch(
-              "http://localhost:5000/api/purchases/verify",
-              {
-                method:
-                  "POST",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                body: JSON.stringify(
-                  {
-                    txHash:
-                      txHash, // Blockchain hash
-                    paymentMethod:
-                      "CRYPTO", // Explicitly mark as Crypto
-                    creatorId:
-                      id,
-                    contentId:
-                      checkoutData.post
-                        ? checkoutData
-                            .post
-                            ._id
-                        : null,
-                    purchaseType:
-                      checkoutData.type,
-                    subscriptionTier:
-                      checkoutData.tier ||
-                      null,
-                  },
-                ),
-              },
-            );
-
-          const verifyData =
-            await verifyResponse.json();
-
-          if (
-            !verifyResponse.ok
-          ) {
-            throw new Error(
-              verifyData.message ||
-                "Payment went through, but backend verification failed.",
-            );
-          }
+          // THE FIX: Clean POST request for Crypto verification
+          await api.post(
+            "/purchases/verify",
+            {
+              txHash:
+                txHash,
+              paymentMethod:
+                "CRYPTO",
+              creatorId:
+                id,
+              contentId:
+                checkoutData.post
+                  ? checkoutData
+                      .post
+                      ._id
+                  : null,
+              purchaseType:
+                checkoutData.type,
+              subscriptionTier:
+                checkoutData.tier ||
+                null,
+            },
+          );
 
           await fetchProfile();
           closeCheckoutModal();
@@ -537,7 +443,11 @@ const CreatorPublicProfile =
             error,
           );
           alert(
-            error.message ||
+            error
+              .response
+              ?.data
+              ?.message ||
+              error.message ||
               "Transaction failed. Check browser console for details.",
           );
         } finally {
@@ -557,6 +467,7 @@ const CreatorPublicProfile =
           vault...
         </div>
       );
+
     if (
       !profileData
     )

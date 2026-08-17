@@ -19,6 +19,7 @@ const mediaRoutes = require("./routes/mediaRoutes");
 const userRoutes = require("./routes/userRoutes");
 const earningsRoutes = require("./routes/earningsRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const streamRoutes = require("./routes/streamRoutes");
 
 // Cron Jobs
 const startReaper = require("./cron/reaper");
@@ -208,6 +209,11 @@ app.use(
 app.use(
   "/api/messages",
   messageRoutes,
+);
+
+app.use(
+  "/api/streams",
+  streamRoutes,
 );
 
 // Server Initialization

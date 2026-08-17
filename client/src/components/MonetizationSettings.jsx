@@ -2,7 +2,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import {
   Settings,
   Loader2,
@@ -82,13 +82,6 @@ const MonetizationSettings =
       const fetchSettings =
         async () => {
           try {
-            const token =
-              localStorage.getItem(
-                "nippy_token",
-              ) ||
-              localStorage.getItem(
-                "token",
-              );
             const storedUser =
               JSON.parse(
                 localStorage.getItem(
@@ -96,18 +89,6 @@ const MonetizationSettings =
                 ) ||
                   "{}",
               );
-
-            if (
-              !token
-            ) {
-              setStatus(
-                "error",
-              );
-              setMessage(
-                "Authentication missing. Please log in again.",
-              );
-              return;
-            }
 
             const country =
               storedUser.country ||
@@ -121,15 +102,10 @@ const MonetizationSettings =
               ] ||
               COUNTRY_TO_CURRENCY.default;
 
+            // IRONCLAD FIX: Clean API call using the global interceptor
             const res =
-              await axios.get(
-                "/api/users/settings/monetization",
-                {
-                  headers:
-                    {
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                "/users/settings/monetization",
               );
 
             if (
@@ -328,22 +304,10 @@ const MonetizationSettings =
           };
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
-          await axios.put(
-            "/api/users/settings/monetization",
+          // IRONCLAD FIX: Clean API call using the global interceptor
+          await api.put(
+            "/users/settings/monetization",
             sanitizedPayload,
-            {
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
-            },
           );
 
           setSettings(

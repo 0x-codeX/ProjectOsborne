@@ -7,14 +7,14 @@ import {
   useParams,
   Link,
 } from "react-router-dom";
-import axios from "axios";
+import api from "../utils/api"; // <-- IRONCLAD FIX: Replaced raw axios with your global interceptor
 import {
   Send,
   Lock,
   Unlock,
   AlertCircle,
 } from "lucide-react";
-import { io } from "socket.io-client"; // <-- IRONCLAD FIX: Added Sockets to the Fan side
+import { io } from "socket.io-client";
 
 const ChatWindow =
   () => {
@@ -62,8 +62,6 @@ const ChatWindow =
       useRef(
         null,
       );
-
-    // Keep track of the socket instance
     const socketRef =
       useRef(
         null,
@@ -72,7 +70,7 @@ const ChatWindow =
     useEffect(() => {
       fetchMessages();
 
-      // IRONCLAD FIX: Wire up Socket.io for Fans
+      // Socket.io still needs the raw backend URL since it doesn't use Axios
       socketRef.current =
         io(
           import.meta
@@ -127,20 +125,13 @@ const ChatWindow =
     const fetchMessages =
       async () => {
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
+          // IRONCLAD FIX: No token fetching, no headers, no "/api" prefix needed.
+          // The interceptor handles it securely in the background.
           const res =
-            await axios.get(
-              `/api/messages/${conversationId}`,
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
+            await api.get(
+              `/messages/${conversationId}`,
             );
+
           setMessages(
             res
               .data
@@ -201,27 +192,17 @@ const ChatWindow =
             : null;
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
+          // IRONCLAD FIX: Clean, secure, and DRY request.
           const res =
-            await axios.post(
-              "/api/messages/send",
+            await api.post(
+              "/messages/send",
               {
                 receiverId,
                 text: inputText,
                 conversationId,
               },
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
             );
 
-          // We rely on the socket to append the message, or append optimistically:
           setMessages(
             (
               prev,
@@ -256,10 +237,10 @@ const ChatWindow =
         price,
       ) => {
         alert(
-          `Initiating Web3 Payment of ${price} USDT via Polygon... Once txHash is confirmed, call /api/messages/unlock`,
+          `Initiating Web3 Payment of ${price} USDT via Polygon... Once txHash is confirmed, call /messages/unlock`,
         );
         // 1. Call ethers.js transfer
-        // 2. await axios.post('/api/messages/unlock', { messageId, txHash })
+        // 2. await api.post('/messages/unlock', { messageId, txHash })  <-- IRONCLAD FIX: Updated comment to use api
         // 3. fetchMessages() to re-render as unlocked
       };
 
@@ -425,7 +406,11 @@ const ChatWindow =
                     )}
 
                     <div
-                      className={`text-[10px] mt-1.5 flex items-center gap-1 ${isMe ? "text-white/70 justify-end" : "text-slate-500"}`}
+                      className={`text-[10px] mt-1.5 flex items-center gap-1 ${
+                        isMe
+                          ? "text-white/70 justify-end"
+                          : "text-slate-500"
+                      }`}
                     >
                       {new Date(
                         msg.createdAt,

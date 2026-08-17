@@ -8,6 +8,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
+import { io } from "socket.io-client";
 import {
   PlaySquare,
   Bell,
@@ -24,7 +25,7 @@ import {
   CheckCircle,
   AlertCircle,
 } from "lucide-react";
-import axios from "axios";
+import api from "../utils/api";
 import landingBackground from "../assets/background7.jpg";
 import nippyLogo from "../assets/NippyLogo.png";
 
@@ -79,6 +80,7 @@ const FanLayout =
         "",
       );
 
+    // --- BADGE & LIVE STATE ---
     const [
       unreadData,
       setUnreadData,
@@ -92,6 +94,13 @@ const FanLayout =
     const [
       unreadNotifs,
       setUnreadNotifs,
+    ] =
+      useState(
+        0,
+      );
+    const [
+      activeLiveStreams,
+      setActiveLiveStreams,
     ] =
       useState(
         0,
@@ -120,28 +129,64 @@ const FanLayout =
         );
     }, []);
 
+    // --- REAL-TIME SOCKET LISTENER ---
+    useEffect(() => {
+      // Connect to the backend Socket.IO server
+      const socket =
+        io(
+          import.meta.env.VITE_API_URL?.replace(
+            "/api",
+            "",
+          ) ||
+            "http://localhost:5000",
+        );
+
+      socket.on(
+        "live_stream_started",
+        (
+          data,
+        ) => {
+          setActiveLiveStreams(
+            (
+              prev,
+            ) =>
+              prev +
+              1,
+          );
+        },
+      );
+
+      socket.on(
+        "live_stream_ended",
+        (
+          data,
+        ) => {
+          setActiveLiveStreams(
+            (
+              prev,
+            ) =>
+              Math.max(
+                0,
+                prev -
+                  1,
+              ),
+          );
+        },
+      );
+
+      return () => {
+        socket.disconnect();
+      };
+    }, []);
+
+    // --- BADGE FETCHING LOGIC ---
     useEffect(() => {
       const fetchBadges =
         async () => {
           try {
-            const token =
-              localStorage.getItem(
-                "nippy_token",
-              );
-            if (
-              !token
-            )
-              return;
-
             const msgRes =
-              await axios.get(
-                "/api/messages/inbox",
-                {
-                  headers:
-                    {
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                "/messages/inbox",
               );
             const chats =
               msgRes.data ||
@@ -169,14 +214,8 @@ const FanLayout =
             );
 
             const notifRes =
-              await axios.get(
-                "/api/notifications/unread-count",
-                {
-                  headers:
-                    {
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                "/notifications/unread-count",
               );
             setUnreadNotifs(
               notifRes
@@ -235,25 +274,15 @@ const FanLayout =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const payload =
             {
               subject: `Support Request from ${supportName}`,
               message: `Contact Email: ${supportEmail}\n\n${supportMessage}`,
             };
 
-          await axios.post(
-            "http://localhost:5000/api/users/support",
+          await api.post(
+            "/users/support",
             payload,
-            {
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
-            },
           );
 
           setSupportStatus(
@@ -452,6 +481,8 @@ const FanLayout =
                           18
                         }
                       />
+
+                      {/* Messages Badge */}
                       {item.label ===
                         "Messages" &&
                         unreadData.creatorsCount >
@@ -474,12 +505,21 @@ const FanLayout =
                             )}
                           </span>
                         )}
+
+                      {/* Notifications LIVE Pill OR Standard Dot */}
                       {item.label ===
                         "Notifications" &&
+                      activeLiveStreams >
+                        0 ? (
+                        <span className="absolute -top-1.5 -right-3 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-nippy-obsidian shadow-sm animate-pulse tracking-wide">
+                          LIVE
+                        </span>
+                      ) : item.label ===
+                          "Notifications" &&
                         unreadNotifs >
-                          0 && (
-                          <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-nippy-obsidian shadow-sm shadow-red-500/50"></span>
-                        )}
+                          0 ? (
+                        <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-nippy-obsidian shadow-sm shadow-red-500/50"></span>
+                      ) : null}
                     </div>
                     <span className="text-sm">
                       {
@@ -520,7 +560,11 @@ const FanLayout =
               !isSupportOpen,
             )
           }
-          className={`fixed z-[100] bottom-24 right-4 md:bottom-8 md:right-8 text-white p-3.5 sm:p-4 rounded-full shadow-[0_4px_20px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center group ${isSupportOpen ? "bg-slate-700 hover:bg-slate-600 scale-100" : "bg-emerald-500 hover:bg-emerald-600 hover:scale-110"}`}
+          className={`fixed z-[100] bottom-24 right-4 md:bottom-8 md:right-8 text-white p-3.5 sm:p-4 rounded-full shadow-[0_4px_20px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center group ${
+            isSupportOpen
+              ? "bg-slate-700 hover:bg-slate-600 scale-100"
+              : "bg-emerald-500 hover:bg-emerald-600 hover:scale-110"
+          }`}
           aria-label="Help & Support"
         >
           {isSupportOpen ? (
@@ -544,10 +588,9 @@ const FanLayout =
           )}
         </button>
 
-        {/* --- INLINE SUPPORT WIDGET (Slides up from the bubble) --- */}
+        {/* --- INLINE SUPPORT WIDGET --- */}
         {isSupportOpen && (
           <div className="fixed z-[95] bottom-[8.5rem] right-4 md:bottom-[5.5rem] md:right-8 w-[calc(100vw-2rem)] sm:w-[380px] bg-slate-900 border border-slate-700 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] flex flex-col animate-in slide-in-from-bottom-10 fade-in duration-300 overflow-hidden">
-            {/* Widget Header */}
             <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-800/30">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <LifeBuoy
@@ -575,7 +618,6 @@ const FanLayout =
               </button>
             </div>
 
-            {/* Widget Body */}
             <div className="p-5 max-h-[70vh] overflow-y-auto">
               {supportStatus ===
               "success" ? (
@@ -790,6 +832,8 @@ const FanLayout =
                             : ""
                         }
                       />
+
+                      {/* Mobile Messages Badge */}
                       {item.label ===
                         "Messages" &&
                         unreadData.creatorsCount >
@@ -812,12 +856,21 @@ const FanLayout =
                             )}
                           </span>
                         )}
+
+                      {/* Mobile Notifications LIVE Pill OR Standard Dot */}
                       {item.label ===
                         "Notifications" &&
+                      activeLiveStreams >
+                        0 ? (
+                        <span className="absolute -top-1 -right-3 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-nippy-obsidian shadow-sm animate-pulse tracking-wide">
+                          LIVE
+                        </span>
+                      ) : item.label ===
+                          "Notifications" &&
                         unreadNotifs >
-                          0 && (
-                          <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border border-nippy-obsidian shadow-sm shadow-red-500/50"></span>
-                        )}
+                          0 ? (
+                        <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border border-nippy-obsidian shadow-sm shadow-red-500/50"></span>
+                      ) : null}
                     </div>
                     <span className="text-[10px] mt-1 font-medium">
                       {

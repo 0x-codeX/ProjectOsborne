@@ -22,7 +22,7 @@ import {
   Plus,
   Minus,
 } from "lucide-react";
-import axios from "axios";
+import api from "../utils/api"; // <-- YOUR NEW IRONCLAD INTERCEPTOR
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import { io } from "socket.io-client";
 import { usePaystackPayment } from "react-paystack";
@@ -171,7 +171,11 @@ const FanChatWindow =
       fetchMessages();
       const socket =
         io(
-          "http://localhost:5000",
+          import.meta.env.VITE_API_URL?.replace(
+            "/api",
+            "",
+          ) ||
+            "http://localhost:5000",
         );
 
       if (
@@ -222,19 +226,10 @@ const FanChatWindow =
     const fetchMessages =
       async () => {
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
+          // 1. Refactored: Clean api call using interceptor
           const res =
-            await axios.get(
-              `/api/messages/${conversationId}`,
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
+            await api.get(
+              `/messages/${conversationId}`,
             );
 
           setMessages(
@@ -327,10 +322,6 @@ const FanChatWindow =
           return;
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           let receiverId =
             chatInfo?._id ||
             (typeof chatInfo ===
@@ -364,19 +355,14 @@ const FanChatWindow =
             return;
           }
 
+          // 2. Refactored: Clean api call using interceptor
           const res =
-            await axios.post(
-              "/api/messages/send",
+            await api.post(
+              "/messages/send",
               {
                 conversationId,
                 receiverId,
                 text: inputText,
-              },
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
               },
             );
 
@@ -445,45 +431,22 @@ const FanChatWindow =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const baseAmountUSD =
             checkoutData.amount ||
             0;
 
+          // 3. Refactored: Stripped out the raw 'fetch' and replaced with 'api'
           const res =
-            await fetch(
-              "http://localhost:5000/api/purchases/crypto-quote",
+            await api.post(
+              "/purchases/crypto-quote",
               {
-                method:
-                  "POST",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    amountUSD:
-                      baseAmountUSD,
-                  },
-                ),
+                amountUSD:
+                  baseAmountUSD,
               },
             );
 
-          if (
-            !res.ok
-          )
-            throw new Error(
-              "Failed to fetch quote",
-            );
-          const data =
-            await res.json();
           setCryptoQuote(
-            data,
+            res.data,
           );
         } catch (error) {
           console.error(
@@ -558,12 +521,9 @@ const FanChatWindow =
                     currentProcessingId,
                   );
                   try {
-                    const token =
-                      localStorage.getItem(
-                        "nippy_token",
-                      );
-                    await axios.post(
-                      "/api/purchases/verify",
+                    // 4. Refactored: Clean api call using interceptor
+                    await api.post(
+                      "/purchases/verify",
                       {
                         reference:
                           reference.reference,
@@ -579,12 +539,6 @@ const FanChatWindow =
                                 ._id,
                         purchaseType:
                           checkoutData.type,
-                      },
-                      {
-                        headers:
-                          {
-                            Authorization: `Bearer ${token}`,
-                          },
                       },
                     );
 
@@ -650,7 +604,7 @@ const FanChatWindow =
           const txHash =
             await transferUSDT(
               chatInfo.walletAddress,
-              cryptoQuote.requiredUSDT, // DYNAMIC AMOUNT
+              cryptoQuote.requiredUSDT,
               isBundle
                 ? null
                 : checkoutData
@@ -665,12 +619,9 @@ const FanChatWindow =
               "Transaction completed but no hash returned.",
             );
 
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          await axios.post(
-            "/api/purchases/verify",
+          // 5. Refactored: Clean api call using interceptor
+          await api.post(
+            "/purchases/verify",
             {
               txHash,
               paymentMethod:
@@ -685,12 +636,6 @@ const FanChatWindow =
                       ._id,
               purchaseType:
                 checkoutData.type,
-            },
-            {
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
             },
           );
 
@@ -1023,7 +968,11 @@ const FanChatWindow =
 
                       {/* TIMESTAMPS */}
                       <div
-                        className={`text-[10px] mt-1.5 flex items-center gap-1 ${isMe ? "text-white/70 justify-end" : "text-gray-500"}`}
+                        className={`text-[10px] mt-1.5 flex items-center gap-1 ${
+                          isMe
+                            ? "text-white/70 justify-end"
+                            : "text-gray-500"
+                        }`}
                       >
                         {new Date(
                           msg.createdAt,
@@ -1121,7 +1070,12 @@ const FanChatWindow =
                     className="w-full bg-[#262626] border border-gray-700 text-white rounded-full py-3 pl-4 pr-10 focus:outline-none focus:border-emerald-500 transition-colors text-sm"
                   />
                   <span
-                    className={`absolute right-4 top-3 text-xs ${inputText.length >= 200 ? "text-red-400" : "text-gray-500"}`}
+                    className={`absolute right-4 top-3 text-xs ${
+                      inputText.length >=
+                      200
+                        ? "text-red-400"
+                        : "text-gray-500"
+                    }`}
                   >
                     {
                       inputText.length

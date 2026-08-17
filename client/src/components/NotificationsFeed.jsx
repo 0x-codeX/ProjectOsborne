@@ -13,7 +13,9 @@ import {
   MessageCircleHeart,
   Unlock,
   Tag,
+  Video,
 } from "lucide-react";
+import api from "../utils/api"; // Using our new global interceptor
 
 const NotificationsFeed =
   () => {
@@ -41,44 +43,75 @@ const NotificationsFeed =
     const fetchNotifications =
       async () => {
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
+          // 1. Fetch using the global interceptor
           const response =
-            await fetch(
-              "http://localhost:5000/api/notifications",
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
+            await api.get(
+              "/notifications",
+            );
+
+          const rawData =
+            response
+              .data
+              .notifications ||
+            response.data ||
+            [];
+
+          // 2. The Sorting Engine: Pin ACTIVE LIVE streams to the top
+          const sortedData =
+            rawData.sort(
+              (
+                a,
+                b,
+              ) => {
+                const aIsActiveLive =
+                  a.type ===
+                    "LIVE" &&
+                  a.status ===
+                    "ACTIVE";
+                const bIsActiveLive =
+                  b.type ===
+                    "LIVE" &&
+                  b.status ===
+                    "ACTIVE";
+
+                if (
+                  aIsActiveLive &&
+                  !bIsActiveLive
+                )
+                  return -1; // Push A to top
+                if (
+                  !aIsActiveLive &&
+                  bIsActiveLive
+                )
+                  return 1; // Push B to top
+
+                // If both are the same status, sort chronologically by newest
+                return (
+                  new Date(
+                    b.createdAt,
+                  ) -
+                  new Date(
+                    a.createdAt,
+                  )
+                );
               },
             );
 
-          if (
-            response.ok
-          ) {
-            const data =
-              await response.json();
-            setNotifications(
-              data,
-            );
+          setNotifications(
+            sortedData,
+          );
 
-            // Tell the backend to mark as read, but KEEP local state as is
-            // so the user can see what was newly unread when they opened the page
-            if (
-              data.some(
-                (
-                  n,
-                ) =>
-                  !n.isRead,
-              )
-            ) {
-              markAsRead(
-                token,
-              );
-            }
+          // 3. Mark as read in the background if there are unread items
+          if (
+            sortedData.some(
+              (
+                n,
+              ) =>
+                !n.isRead &&
+                !n.read,
+            )
+          ) {
+            markAsRead();
           }
         } catch (error) {
           console.error(
@@ -93,26 +126,25 @@ const NotificationsFeed =
       };
 
     const markAsRead =
-      async (
-        token,
-      ) => {
-        await fetch(
-          "http://localhost:5000/api/notifications/read",
-          {
-            method:
-              "PUT",
-            headers:
-              {
-                Authorization: `Bearer ${token}`,
-              },
-          },
-        );
-        // Optional: Dispatch an event here if you want the layout badge to disappear instantly
-        window.dispatchEvent(
-          new Event(
-            "notificationsRead",
-          ),
-        );
+      async () => {
+        try {
+          // Updated to match your backend route map
+          await api.put(
+            "/notifications/mark-read",
+          );
+
+          // Dispatch an event so FanLayout clears the red dot instantly
+          window.dispatchEvent(
+            new Event(
+              "notificationsRead",
+            ),
+          );
+        } catch (error) {
+          console.error(
+            "Failed to mark notifications as read",
+            error,
+          );
+        }
       };
 
     const handleNotificationClick =
@@ -132,36 +164,57 @@ const NotificationsFeed =
       (
         notif,
       ) => {
-        // If it's from a creator and we have their image, show their face. It converts better.
+        const isActiveLive =
+          notif.type ===
+            "LIVE" &&
+          notif.status ===
+            "ACTIVE";
+
         if (
           notif
             .sender
             ?.profileImage
         ) {
           return (
-            <img
-              src={
-                notif
-                  .sender
-                  .profileImage
-              }
-              alt={
-                notif
-                  .sender
-                  .username
-              }
-              className="w-10 h-10 rounded-full object-cover border border-gray-700"
-            />
+            <div className="relative shrink-0">
+              <img
+                src={
+                  notif
+                    .sender
+                    .profileImage
+                }
+                alt={
+                  notif
+                    .sender
+                    .username
+                }
+                className={`w-10 h-10 rounded-full object-cover border ${
+                  isActiveLive
+                    ? "border-red-500 animate-pulse"
+                    : "border-gray-700"
+                }`}
+              />
+              {isActiveLive && (
+                <div className="absolute -bottom-2 -right-2 bg-red-500 rounded-full p-1 border border-black">
+                  <Radio
+                    size={
+                      10
+                    }
+                    className="text-white"
+                  />
+                </div>
+              )}
+            </div>
           );
         }
 
-        // Fallback to strict iconography
         const iconProps =
           {
             size: 20,
             className:
               "text-gray-400",
           };
+
         let IconComponent =
           Bell;
 
@@ -194,10 +247,14 @@ const NotificationsFeed =
               "text-purple-400";
             break;
           case "GO_LIVE":
+          case "LIVE":
             IconComponent =
               Radio;
             iconProps.className =
-              "text-rose-500 animate-pulse";
+              notif.status ===
+              "ACTIVE"
+                ? "text-red-500"
+                : "text-gray-500";
             break;
           case "WELCOME_MESSAGE":
             IconComponent =
@@ -217,10 +274,18 @@ const NotificationsFeed =
             iconProps.className =
               "text-emerald-400";
             break;
+          default:
+            break;
         }
 
         return (
-          <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center shrink-0 border border-gray-800">
+          <div
+            className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${
+              isActiveLive
+                ? "bg-red-500/10 border-red-500/50"
+                : "bg-gray-900 border-gray-800"
+            }`}
+          >
             <IconComponent
               {...iconProps}
             />
@@ -232,7 +297,7 @@ const NotificationsFeed =
       loading
     ) {
       return (
-        <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse">
+        <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse font-bold">
           Decrypting
           alerts...
         </div>
@@ -268,62 +333,104 @@ const NotificationsFeed =
             {notifications.map(
               (
                 notif,
-              ) => (
-                <div
-                  key={
-                    notif._id
-                  }
-                  onClick={() =>
-                    handleNotificationClick(
+              ) => {
+                const isActiveLive =
+                  notif.type ===
+                    "LIVE" &&
+                  notif.status ===
+                    "ACTIVE";
+                const isUnread =
+                  notif.isRead ===
+                    false ||
+                  notif.read ===
+                    false;
+
+                return (
+                  <div
+                    key={
+                      notif._id
+                    }
+                    onClick={() =>
+                      handleNotificationClick(
+                        notif,
+                      )
+                    }
+                    className={`flex items-start gap-4 p-4 rounded-xl border transition-all relative overflow-hidden ${
+                      notif.actionUrl
+                        ? "cursor-pointer hover:bg-gray-800/80"
+                        : ""
+                    } ${
+                      isActiveLive
+                        ? "bg-red-950/20 border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.1)]"
+                        : !isUnread
+                          ? "bg-nippy-obsidian border-gray-800/50 opacity-75"
+                          : "bg-gray-800/50 border-gray-700 shadow-lg shadow-black/20"
+                    }`}
+                  >
+                    {/* Visual Flair for Active Streams */}
+                    {isActiveLive && (
+                      <div className="absolute top-0 left-0 w-1 h-full bg-red-500 animate-pulse"></div>
+                    )}
+
+                    {renderIcon(
                       notif,
-                    )
-                  }
-                  className={`flex items-start gap-4 p-4 rounded-xl border transition-all ${notif.actionUrl ? "cursor-pointer hover:bg-gray-800/80" : ""} ${
-                    notif.isRead
-                      ? "bg-nippy-obsidian border-gray-800/50 opacity-75"
-                      : "bg-gray-800/50 border-gray-700 shadow-lg shadow-black/20"
-                  }`}
-                >
-                  {renderIcon(
-                    notif,
-                  )}
+                    )}
 
-                  <div className="flex-1">
-                    <h3
-                      className={`text-sm font-bold ${notif.isRead ? "text-gray-300" : "text-white"}`}
-                    >
-                      {
-                        notif.title
-                      }
-                    </h3>
-                    <p className="text-sm text-gray-400 mt-1 leading-snug whitespace-pre-wrap">
-                      {
-                        notif.message
-                      }
-                    </p>
-                    <span className="text-xs text-gray-600 mt-2 block font-medium">
-                      {new Date(
-                        notif.createdAt,
-                      ).toLocaleDateString()}{" "}
-                      at{" "}
-                      {new Date(
-                        notif.createdAt,
-                      ).toLocaleTimeString(
-                        [],
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <h3
+                          className={`text-sm font-bold ${
+                            isActiveLive
+                              ? "text-red-400"
+                              : !isUnread
+                                ? "text-gray-300"
+                                : "text-white"
+                          }`}
+                        >
+                          {
+                            notif.title
+                          }
+                        </h3>
+                        {isActiveLive && (
+                          <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-sm animate-pulse tracking-wider">
+                            LIVE
+                            NOW
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-sm text-gray-400 mt-1 leading-snug whitespace-pre-wrap">
                         {
-                          hour: "2-digit",
-                          minute:
-                            "2-digit",
-                        },
-                      )}
-                    </span>
-                  </div>
+                          notif.message
+                        }
+                      </p>
 
-                  {!notif.isRead && (
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 mt-2 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-                  )}
-                </div>
-              ),
+                      <span className="text-xs text-gray-600 mt-2 block font-medium">
+                        {new Date(
+                          notif.createdAt,
+                        ).toLocaleDateString()}{" "}
+                        at{" "}
+                        {new Date(
+                          notif.createdAt,
+                        ).toLocaleTimeString(
+                          [],
+                          {
+                            hour: "2-digit",
+                            minute:
+                              "2-digit",
+                          },
+                        )}
+                      </span>
+                    </div>
+
+                    {/* Standard Unread Dot (Hidden if it's an active live stream to prevent clutter) */}
+                    {isUnread &&
+                      !isActiveLive && (
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 mt-2 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                      )}
+                  </div>
+                );
+              },
             )}
           </div>
         )}

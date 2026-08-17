@@ -5,7 +5,7 @@ import { Wallet, ShieldCheck, CheckCircle, AlertOctagon, XCircle, Clock, ArrowRi
 const PayoutQueue = () => {
   const [payouts, setPayouts] = useState([]);
   const [selectedPayout, setSelectedPayout] = useState(null);
-  const [filter, setFilter] = useState("PENDING"); // PENDING, REVIEWED, COMPLETED, REJECTED
+  const [filter, setFilter] = useState("PENDING"); 
   const [actionStatus, setActionStatus] = useState("idle");
 
   // Grab the admin's role to enforce Maker-Checker protocol

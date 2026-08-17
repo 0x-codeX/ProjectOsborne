@@ -4,7 +4,7 @@ import React, {
   useEffect,
 } from "react";
 import { useDropzone } from "react-dropzone";
-import axios from "axios";
+import api from "../utils/api"; // <-- 1. Swapped axios for the global API interceptor
 import {
   Upload,
   Loader2,
@@ -89,6 +89,7 @@ const MediaUploader =
       useState(
         false,
       );
+
     const {
       startUpload,
       updateProgress,
@@ -101,27 +102,10 @@ const MediaUploader =
     const fetchDefaultPPV =
       async () => {
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
-          if (
-            !token
-          )
-            return;
-
+          // 2. Eradicated local token fetching and hardcoded URL
           const res =
-            await axios.get(
-              "http://localhost:5000/api/users/settings/monetization",
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
+            await api.get(
+              "/users/settings/monetization",
             );
 
           if (
@@ -186,7 +170,7 @@ const MediaUploader =
                   ".webm",
                   ".avi",
                   ".mkv",
-                ], // Expanded top video formats
+                ],
               "image/*":
                 [
                   ".jpg",
@@ -194,7 +178,7 @@ const MediaUploader =
                   ".png",
                   ".webp",
                   ".gif",
-                ], // Expanded top image formats
+                ],
             },
           maxFiles: 1,
         },
@@ -220,26 +204,12 @@ const MediaUploader =
           "",
         );
 
-        // 3. TRIGGER GLOBAL BACKGROUND UPLOAD
+        // TRIGGER GLOBAL BACKGROUND UPLOAD
         startUpload(
           selectedFile.name,
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
-          if (
-            !token
-          )
-            throw new Error(
-              "Authentication missing. Please log in again.",
-            );
-
           const formData =
             new FormData();
           formData.append(
@@ -273,13 +243,14 @@ const MediaUploader =
             isNsfw,
           );
 
-          await axios.post(
-            "http://localhost:5000/api/content/upload",
+          // 3. Clean, interceptor-powered request
+          await api.post(
+            "/content/upload",
             formData,
             {
               headers:
                 {
-                  Authorization: `Bearer ${token}`,
+                  // Authorization is handled globally, but we still must declare multipart data
                   "Content-Type":
                     "multipart/form-data",
                 },
@@ -309,7 +280,7 @@ const MediaUploader =
             },
           );
 
-          // 4. ON SUCCESS: Complete global, and instantly reset local so they can upload again
+          // ON SUCCESS: Complete global, and instantly reset local so they can upload again
           completeUpload();
           resetUploader();
         } catch (error) {
@@ -331,7 +302,7 @@ const MediaUploader =
             "error",
           );
 
-          // 5. ON FAIL: Trigger global error
+          // ON FAIL: Trigger global error
           failUpload(
             errorMsg,
           );
@@ -596,10 +567,18 @@ const MediaUploader =
                 {/* PPV Price Input */}
                 <div>
                   <label
-                    className={`flex items-center text-sm font-medium mb-1 transition-colors ${isFree ? "text-slate-600" : "text-slate-300"}`}
+                    className={`flex items-center text-sm font-medium mb-1 transition-colors ${
+                      isFree
+                        ? "text-slate-600"
+                        : "text-slate-300"
+                    }`}
                   >
                     <Tag
-                      className={`w-4 h-4 mr-2 transition-colors ${isFree ? "text-slate-600" : "text-[#FF5757]"}`}
+                      className={`w-4 h-4 mr-2 transition-colors ${
+                        isFree
+                          ? "text-slate-600"
+                          : "text-[#FF5757]"
+                      }`}
                     />
                     PPV
                     Unlock
@@ -671,10 +650,18 @@ const MediaUploader =
                       !isNsfw,
                     )
                   }
-                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${isNsfw ? "bg-[#FF5757]" : "bg-slate-700"}`}
+                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                    isNsfw
+                      ? "bg-[#FF5757]"
+                      : "bg-slate-700"
+                  }`}
                 >
                   <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${isNsfw ? "translate-x-6" : "translate-x-0"}`}
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                      isNsfw
+                        ? "translate-x-6"
+                        : "translate-x-0"
+                    }`}
                   />
                 </button>
               </div>

@@ -3,7 +3,8 @@ import React, {
   useEffect,
 } from "react";
 import { Link } from "react-router-dom";
-import axios from "axios";
+// 1. Swap raw axios for our new global interceptor
+import api from "../utils/api";
 import {
   Lock,
   Image as ImageIcon,
@@ -30,22 +31,10 @@ const Inbox =
       const fetchInbox =
         async () => {
           try {
-            const token =
-              localStorage.getItem(
-                "nippy_token",
-              ) ||
-              localStorage.getItem(
-                "token",
-              );
+            // 2. Look how clean this is. No headers, no token lookups, no /api prefix!
             const res =
-              await axios.get(
-                "/api/messages/inbox",
-                {
-                  headers:
-                    {
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                "/messages/inbox",
               );
             setInbox(
               res.data,

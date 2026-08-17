@@ -17,6 +17,7 @@ const fs = require("fs");
 const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
 const Conversation = require("../models/Conversation");
+const Stream = require("../models/Stream");
 const sharp = require("sharp");
 const {
   convertAndRoundPrice,
@@ -402,6 +403,7 @@ exports.getFeed =
           ?.country ||
         "United States";
 
+      // 1. Fetch Standard Posts
       const posts =
         await Content.find()
           .populate(
@@ -420,6 +422,22 @@ exports.getFeed =
           )
           .lean();
 
+      // 2. Fetch Active Live Streams
+      // Make sure you have imported your Stream model at the top of this file!
+      const activeStreams =
+        await Stream.find(
+          {
+            status:
+              "ACTIVE",
+          },
+        )
+          .populate(
+            "creatorId",
+            "username profileImage walletAddress monetizationSettings",
+          )
+          .lean();
+
+      // 3. Fetch User Data (Purchases & Profile)
       const userPurchases =
         await Purchase.find(
           {
@@ -430,6 +448,7 @@ exports.getFeed =
             "content creator purchaseType createdAt",
           )
           .lean();
+
       const viewer =
         await User.findById(
           viewerId,
@@ -439,6 +458,7 @@ exports.getFeed =
           )
           .lean();
 
+      // 4. Build Access Maps
       const unlockedContentMap =
         new Map();
       const subscribedCreatorMap =
@@ -472,30 +492,81 @@ exports.getFeed =
             p.purchaseType ===
               "PPV" &&
             p.content
-          )
+          ) {
             unlockedContentMap.set(
               p.content.toString(),
               new Date(
                 p.createdAt,
               ).getTime(),
             );
+          }
           if (
             p.purchaseType ===
               "SUBSCRIPTION" &&
             p.creator
-          )
+          ) {
             subscribedCreatorMap.set(
               p.creator.toString(),
               new Date(
                 p.createdAt,
               ).getTime(),
             );
+          }
         },
       );
 
       const secureFeed =
         [];
 
+      // 5. INJECT ACTIVE STREAMS FIRST (Force to Top of Feed)
+      for (const stream of activeStreams) {
+        const creatorIdStr =
+          stream.creatorId?._id.toString();
+        const hasActiveSub =
+          !!subscribedCreatorMap.get(
+            creatorIdStr,
+          );
+        const isCreator =
+          creatorIdStr ===
+          viewerId.toString();
+
+        secureFeed.push(
+          {
+            _id: stream._id,
+            type: "LIVE_STREAM", // Crucial for the frontend conditional render
+            title:
+              stream.title,
+            status:
+              stream.status,
+            createdAt:
+              stream.createdAt,
+            creator:
+              {
+                ...stream.creatorId,
+                isFollowed:
+                  followingSet.has(
+                    creatorIdStr,
+                  ),
+              },
+            hasAccess:
+              hasActiveSub ||
+              isCreator,
+            subscriptionPriceNGN:
+              stream
+                .creatorId
+                ?.monetizationSettings
+                ?.monthlySubscription ||
+              0,
+            // Mock standard metrics so feed UI components don't crash if they assume a standard post
+            likesCount: 0,
+            commentsCount: 0,
+            isLiked: false,
+            isBookmarked: false,
+          },
+        );
+      }
+
+      // 6. Process Standard Content Posts
       for (const post of posts) {
         const globalPPV =
           post
@@ -585,6 +656,7 @@ exports.getFeed =
             new Date(
               post.sunsetAt,
             ).getTime();
+
           if (
             hasPurchasedFiatPPV &&
             ppvDate <
@@ -601,6 +673,7 @@ exports.getFeed =
             hasPurchasedCrypto
           )
             isGrandfathered = true;
+
           if (
             !isGrandfathered
           )
@@ -651,9 +724,11 @@ exports.getFeed =
         const likesArray =
           post.likes ||
           [];
+
         secureFeed.push(
           {
             ...post,
+            type: "POST", // Differentiates from LIVE_STREAM
             creator:
               {
                 ...post.creator,
@@ -693,6 +768,7 @@ exports.getFeed =
           },
         );
       }
+
       res
         .status(
           200,
@@ -701,6 +777,10 @@ exports.getFeed =
           secureFeed,
         );
     } catch (error) {
+      console.error(
+        "Feed Error:",
+        error,
+      );
       res
         .status(
           500,
@@ -2076,118 +2156,3 @@ async function formatContentPricesForUser(
     ),
   );
 }
-
-// exports.uploadVideo =
-//   async (
-//     req,
-//     res,
-//   ) => {
-//     try {
-//       const creatorId =
-//         req
-//           .user
-//           ._id;
-
-//       // 1. Handle your standard video saving logic here...
-//       const newVideo =
-//         await Content.create(
-//           {
-//             creator:
-//               creatorId,
-//             title:
-//               req
-//                 .body
-//                 .title,
-//             videoUrl:
-//               req
-//                 .body
-//                 .videoUrl,
-//             isFree:
-//               req
-//                 .body
-//                 .isFree ||
-//               true, // Free or PPV
-//             // ... other fields
-//           },
-//         );
-
-//       // 2. THE MAILMAN: Fetch all fans who follow/subscribe to this creator
-//       // (Adjust the query based on your actual Follow/Subscription model schema)
-//       const followers =
-//         await Follower.find(
-//           {
-//             creator:
-//               creatorId,
-//           },
-//         ).select(
-//           "fan",
-//         );
-
-//       // 3. Build the notification payloads in memory
-//       if (
-//         followers.length >
-//         0
-//       ) {
-//         const notifications =
-//           followers.map(
-//             (
-//               follow,
-//             ) => ({
-//               recipient:
-//                 follow.fan,
-//               type: "NEW_CONTENT",
-//               title:
-//                 req
-//                   .body
-//                   .isFree
-//                   ? "New Free Video!"
-//                   : "New Exclusive Content",
-//               message: `${req.user.username} just dropped a new video: "${req.body.title}". Go watch it now!`,
-//               actionUrl: `/feed/video/${newVideo._id}`, // Make sure this matches your frontend route
-//               sender:
-//                 creatorId,
-//               relatedContent:
-//                 newVideo._id,
-//             }),
-//           );
-
-//         // 4. Bulk insert into the database (Lightning Fast)
-//         await Notification.insertMany(
-//           notifications,
-//         );
-
-//         // Optional but recommended: If you set up Socket.io globally, you can emit an event here
-//         // so online fans get the red dot instantly without waiting for the 30-second poll!
-//         // req.io.to(`creator_${creatorId}_followers`).emit('new_notification');
-//       }
-
-//       // 5. Finally, return success to the creator
-//       res
-//         .status(
-//           201,
-//         )
-//         .json(
-//           {
-//             success: true,
-//             message:
-//               "Video uploaded and fans notified!",
-//             data: newVideo,
-//           },
-//         );
-//     } catch (error) {
-//       console.error(
-//         "Upload Error:",
-//         error,
-//       );
-//       res
-//         .status(
-//           500,
-//         )
-//         .json(
-//           {
-//             message:
-//               "Upload failed.",
-//           },
-//         );
-//     }
-//   };

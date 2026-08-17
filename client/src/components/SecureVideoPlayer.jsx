@@ -2,12 +2,12 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import axios from "axios";
+import api from "../utils/api"; // Make sure this path matches where you saved api.js
 
+// 1. Removed 'token' from props. The interceptor handles it now.
 const SecureVideoPlayer =
   ({
     contentId,
-    token,
   }) => {
     const [
       videoUrl,
@@ -28,15 +28,10 @@ const SecureVideoPlayer =
       const fetchPayload =
         async () => {
           try {
+            // 2. Clean, single-line request. No headers, no manual tokens!
             const response =
-              await axios.get(
-                `/api/content/${contentId}/payload`,
-                {
-                  headers:
-                    {
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                `/content/${contentId}/payload`,
               );
 
             // This is the 60-second presigned URL
@@ -56,15 +51,18 @@ const SecureVideoPlayer =
           }
         };
 
-      fetchPayload();
+      if (
+        contentId
+      ) {
+        fetchPayload();
+      }
     }, [
       contentId,
-      token,
-    ]);
+    ]); // 3. Removed 'token' from the dependency array
 
     if (
       error
-    )
+    ) {
       return (
         <div className="text-red-500">
           {
@@ -72,15 +70,18 @@ const SecureVideoPlayer =
           }
         </div>
       );
+    }
+
     if (
       !videoUrl
-    )
+    ) {
       return (
         <div>
           Unlocking
           content...
         </div>
       );
+    }
 
     return (
       <video

@@ -2,8 +2,8 @@
 const crypto = require("crypto");
 const User = require("../models/User");
 const bcrypt = require("bcryptjs"); // For password hashing
-const jwt = require("jsonwebtoken"); // For token generation
-
+const jwt = require("jsonwebtoken");
+const axios = require("axios");
 
 
 // Generate JWT with a 30-day expiration
@@ -19,8 +19,7 @@ const generateToken =
       },
       process
         .env
-        .JWT_SECRET ||
-        "nippy_super_secret_key_2026",
+        .JWT_SECRET,
       {
         expiresIn:
           "30d",
@@ -438,5 +437,60 @@ exports.linkWalletToAccount = async (req, res) => {
   } catch (error) {
     console.error("Link Wallet Error:", error);
     res.status(500).json({ message: "Server error linking wallet." });
+  }
+};
+
+// @desc    Authenticate with Google OAuth
+// @route   POST /api/auth/google
+// @access  Public
+exports.googleAuth = async (req, res) => {
+  try {
+    const { credential, role } = req.body; // 'credential' is the access_token from React
+
+    if (!credential) {
+      return res.status(400).json({ message: "No credential provided." });
+    }
+
+    // 1. Verify token with Google's UserInfo endpoint
+    const googleResponse = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${credential}` },
+    });
+
+    if (!googleResponse.ok) {
+      throw new Error("Failed to verify token with Google");
+    }
+
+    const payload = await googleResponse.json();
+    const { email, sub: googleId } = payload;
+
+    // 2. Check if the user already exists in Nippy
+    let user = await User.findOne({ email });
+    let isNewUser = false;
+
+    if (!user) {
+      // 3. Create a new user if they don't exist
+      isNewUser = true;
+      user = new User({
+        email,
+        googleId,
+        role: role || "fan",
+        isEmailVerified: true,
+        hasCompletedBioData: false,
+        isAgeVerified: false,
+      });
+      await user.save();
+    }
+
+    // 4. Generate your platform's JWT using the helper at the top of your file
+    const token = generateToken(user._id, user.role);
+
+    res.status(200).json({
+      token,
+      user,
+      isNewUser,
+    });
+  } catch (error) {
+    console.error("Google Auth Error:", error);
+    res.status(401).json({ message: "Google authentication failed. Invalid token." });
   }
 };

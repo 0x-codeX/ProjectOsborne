@@ -10,7 +10,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import api from "../utils/api"; // IRONCLAD FIX: Using global interceptor
 
 const FanInbox =
   () => {
@@ -42,22 +42,14 @@ const FanInbox =
       const fetchInbox =
         async () => {
           try {
-            const token =
-              localStorage.getItem(
-                "nippy_token",
-              );
+            // IRONCLAD FIX: No token fetching, no headers, no manual error routing.
+            // The API interceptor handles all network security implicitly.
             const res =
-              await axios.get(
-                "/api/messages/inbox",
-                {
-                  headers:
-                    {
-                      Authorization: `Bearer ${token}`,
-                    },
-                },
+              await api.get(
+                "/messages/inbox",
               );
 
-            // IRONCLAD FIX: Sort conversations so the most recent is always at the top
+            // Sort conversations so the most recent is always at the top
             const sortedChats =
               res.data.sort(
                 (
@@ -270,7 +262,12 @@ const FanInbox =
                           </span>
                         )}
                         <p
-                          className={`text-sm truncate ${chat.unreadCount > 0 ? "text-slate-200 font-semibold" : "text-gray-500"}`}
+                          className={`text-sm truncate ${
+                            chat.unreadCount >
+                            0
+                              ? "text-slate-200 font-semibold"
+                              : "text-gray-500"
+                          }`}
                         >
                           {chat
                             .lastMessage
@@ -283,7 +280,12 @@ const FanInbox =
                     {/* IRONCLAD UI: WhatsApp style right-column for date and badges */}
                     <div className="flex flex-col items-end justify-center min-w-[50px] gap-1.5">
                       <span
-                        className={`text-xs whitespace-nowrap ${chat.unreadCount > 0 ? "text-emerald-500 font-bold" : "text-gray-500"}`}
+                        className={`text-xs whitespace-nowrap ${
+                          chat.unreadCount >
+                          0
+                            ? "text-emerald-500 font-bold"
+                            : "text-gray-500"
+                        }`}
                       >
                         {formatTime(
                           chat

@@ -5,30 +5,41 @@ import {
   Route,
   Outlet,
 } from "react-router-dom";
+import { GoogleOAuthProvider } from "@react-oauth/google";
+
+// Layouts & Context Providers
 import CreatorLayout from "./components/CreatorLayout";
 import FanLayout from "./components/FanLayout";
+import { UploadProvider } from "./components/UploadContext";
+
+// Public / Onboarding Pages
 import AgeGateway from "./components/AgeGateway";
 import LandingPage from "./components/LandingPage";
 import KycPage from "./components/KycPage";
-import CreatorDashboard from "./pages/CreatorDashboard";
 import BioDataSetup from "./components/BioDataSetup";
-import CreatorProfile from "./components/CreatorProfile";
-import CreatorSettings from "./components/CreatorSettings";
-import CreatorVault from "./pages/CreatorVault";
-import FanFeed from "./components/FanFeed";
 import FanBiodata from "./components/FanBiodata";
+
+// Fan Pages
+import FanFeed from "./components/FanFeed";
 import NotificationsFeed from "./components/NotificationsFeed";
 import BookmarksFeed from "./components/BookmarksFeed";
 import FanDashboard from "./components/FanDashboard";
 import FanProfile from "./components/FanProfile";
 import FanSettings from "./components/FanSettings";
-import CreatorPublicProfile from "./components/CreatorPublicProfile";
-import CreatorFeed from "./components/CreatorFeed";
-import CreatorMessages from "./components/CreatorMessages";
 import FanInbox from "./components/FanInbox";
 import FanChatWindow from "./components/FanChatWindow";
-import { GoogleOAuthProvider } from "@react-oauth/google";
-import { UploadProvider } from "./components/UploadContext";
+import CreatorPublicProfile from "./components/CreatorPublicProfile";
+import LivePlayer from "./components/LivePlayer";
+
+// Creator Pages
+import CreatorDashboard from "./pages/CreatorDashboard";
+import CreatorVault from "./pages/CreatorVault";
+import CreatorProfile from "./components/CreatorProfile";
+import CreatorSettings from "./components/CreatorSettings";
+import CreatorFeed from "./components/CreatorFeed";
+import CreatorMessages from "./components/CreatorMessages";
+import CreatorLiveSetup from "./components/CreatorLiveSetup";
+import CreatorLiveStudio from "./components/CreatorLiveStudio";
 
 // Dummy components to prevent white-screen crashes on new routes
 const Placeholder =
@@ -121,6 +132,12 @@ function App() {
               }
             />
             <Route
+              path="/live/:id"
+              element={
+                <LivePlayer />
+              }
+            />
+            <Route
               path="/fan/dashboard"
               element={
                 <FanDashboard />
@@ -154,6 +171,7 @@ function App() {
             />
           </Route>
 
+          {/* Standalone full-screen chat window */}
           <Route
             path="/messages/:id"
             element={
@@ -213,6 +231,13 @@ function App() {
                   <CreatorMessages />
                 }
               />
+              <Route
+                path="/creator/live/setup"
+                element={
+                  <CreatorLiveSetup />
+                }
+              />
+              <Route element="{<CreatorLiveStudio" path="/creator/studio/:id"/>
               <Route
                 path="/creator/notifications"
                 element={
