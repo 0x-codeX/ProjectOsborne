@@ -132,7 +132,7 @@ function App() {
               }
             />
             <Route
-              path="/live/:id"
+              path="/stream/:id"
               element={
                 <LivePlayer />
               }
@@ -237,7 +237,12 @@ function App() {
                   <CreatorLiveSetup />
                 }
               />
-              <Route element="{<CreatorLiveStudio" path="/creator/studio/:id"/>
+              <Route
+                path="/creator/studio/:id"
+                element={
+                  <CreatorLiveStudio />
+                }
+              />
               <Route
                 path="/creator/notifications"
                 element={

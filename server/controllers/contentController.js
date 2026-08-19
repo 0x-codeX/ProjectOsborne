@@ -1890,23 +1890,46 @@ exports.getCreatorPublicProfile =
       let hasActiveSub = false;
       const unlockedPPV =
         new Set();
+      const now =
+        new Date().getTime();
+
       viewerPurchases.forEach(
         (
           p,
         ) => {
+          // Strict Subscription Check: Must be completed and NOT expired
           if (
             p.purchaseType ===
-            "SUBSCRIPTION"
-          )
-            hasActiveSub = true;
+              "SUBSCRIPTION" &&
+            p.status ===
+              "completed"
+          ) {
+            const expirationTime =
+              p.expiresAt
+                ? new Date(
+                    p.expiresAt,
+                  ).getTime()
+                : Infinity;
+            if (
+              expirationTime >
+              now
+            ) {
+              hasActiveSub = true;
+            }
+          }
+
+          // Strict PPV Check: Must be completed
           if (
             p.purchaseType ===
               "PPV" &&
-            p.content
-          )
+            p.content &&
+            p.status ===
+              "completed"
+          ) {
             unlockedPPV.add(
               p.content.toString(),
             );
+          }
         },
       );
 

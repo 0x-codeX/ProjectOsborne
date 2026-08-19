@@ -13,9 +13,9 @@ import {
   MessageCircleHeart,
   Unlock,
   Tag,
-  Video,
+  X, // Added the X icon for dismissal
 } from "lucide-react";
-import api from "../utils/api"; // Using our new global interceptor
+import api from "../utils/api";
 
 const NotificationsFeed =
   () => {
@@ -36,19 +36,67 @@ const NotificationsFeed =
     const navigate =
       useNavigate();
 
+    // Load dismissed live notifications from local memory
+    const [
+      dismissedLives,
+      setDismissedLives,
+    ] =
+      useState(
+        () => {
+          return JSON.parse(
+            localStorage.getItem(
+              "nippy_dismissed_lives",
+            ) ||
+              "[]",
+          );
+        },
+      );
+
     useEffect(() => {
       fetchNotifications();
-    }, []);
+    }, [
+      dismissedLives,
+    ]); // Re-sort if a notification is dismissed
+
+    // THE STICKY ENGINE
+    const isSticky =
+      (
+        notif,
+      ) => {
+        if (
+          notif.type !==
+          "GO_LIVE"
+        )
+          return false;
+        if (
+          dismissedLives.includes(
+            notif._id,
+          )
+        )
+          return false; // Unpin if dismissed or clicked
+
+        // Failsafe: Streams rarely last over 12 hours. Auto-unpin old notifications so the feed doesn't break.
+        const twelveHoursInMs =
+          12 *
+          60 *
+          60 *
+          1000;
+        const isRecent =
+          new Date() -
+            new Date(
+              notif.createdAt,
+            ) <
+          twelveHoursInMs;
+        return isRecent;
+      };
 
     const fetchNotifications =
       async () => {
         try {
-          // 1. Fetch using the global interceptor
           const response =
             await api.get(
               "/notifications",
             );
-
           const rawData =
             response
               .data
@@ -56,36 +104,33 @@ const NotificationsFeed =
             response.data ||
             [];
 
-          // 2. The Sorting Engine: Pin ACTIVE LIVE streams to the top
+          // Sort: Sticky GO_LIVE first, then chronological
           const sortedData =
             rawData.sort(
               (
                 a,
                 b,
               ) => {
-                const aIsActiveLive =
-                  a.type ===
-                    "LIVE" &&
-                  a.status ===
-                    "ACTIVE";
-                const bIsActiveLive =
-                  b.type ===
-                    "LIVE" &&
-                  b.status ===
-                    "ACTIVE";
+                const aIsSticky =
+                  isSticky(
+                    a,
+                  );
+                const bIsSticky =
+                  isSticky(
+                    b,
+                  );
 
                 if (
-                  aIsActiveLive &&
-                  !bIsActiveLive
+                  aIsSticky &&
+                  !bIsSticky
                 )
-                  return -1; // Push A to top
+                  return -1;
                 if (
-                  !aIsActiveLive &&
-                  bIsActiveLive
+                  !aIsSticky &&
+                  bIsSticky
                 )
-                  return 1; // Push B to top
+                  return 1;
 
-                // If both are the same status, sort chronologically by newest
                 return (
                   new Date(
                     b.createdAt,
@@ -101,7 +146,6 @@ const NotificationsFeed =
             sortedData,
           );
 
-          // 3. Mark as read in the background if there are unread items
           if (
             sortedData.some(
               (
@@ -128,12 +172,9 @@ const NotificationsFeed =
     const markAsRead =
       async () => {
         try {
-          // Updated to match your backend route map
           await api.put(
             "/notifications/mark-read",
           );
-
-          // Dispatch an event so FanLayout clears the red dot instantly
           window.dispatchEvent(
             new Event(
               "notificationsRead",
@@ -151,6 +192,27 @@ const NotificationsFeed =
       (
         notif,
       ) => {
+        // If they click a GO_LIVE notification to join, dismiss it so it unpins
+        if (
+          notif.type ===
+          "GO_LIVE"
+        ) {
+          const updated =
+            [
+              ...dismissedLives,
+              notif._id,
+            ];
+          setDismissedLives(
+            updated,
+          );
+          localStorage.setItem(
+            "nippy_dismissed_lives",
+            JSON.stringify(
+              updated,
+            ),
+          );
+        }
+
         if (
           notif.actionUrl
         ) {
@@ -160,15 +222,36 @@ const NotificationsFeed =
         }
       };
 
+    const handleDismissLive =
+      (
+        e,
+        notifId,
+      ) => {
+        e.stopPropagation(); // Stops the click from triggering handleNotificationClick (which would navigate)
+        const updated =
+          [
+            ...dismissedLives,
+            notifId,
+          ];
+        setDismissedLives(
+          updated,
+        );
+        localStorage.setItem(
+          "nippy_dismissed_lives",
+          JSON.stringify(
+            updated,
+          ),
+        );
+      };
+
     const renderIcon =
       (
         notif,
       ) => {
-        const isActiveLive =
-          notif.type ===
-            "LIVE" &&
-          notif.status ===
-            "ACTIVE";
+        const sticky =
+          isSticky(
+            notif,
+          );
 
         if (
           notif
@@ -189,12 +272,12 @@ const NotificationsFeed =
                     .username
                 }
                 className={`w-10 h-10 rounded-full object-cover border ${
-                  isActiveLive
+                  sticky
                     ? "border-red-500 animate-pulse"
                     : "border-gray-700"
                 }`}
               />
-              {isActiveLive && (
+              {sticky && (
                 <div className="absolute -bottom-2 -right-2 bg-red-500 rounded-full p-1 border border-black">
                   <Radio
                     size={
@@ -214,7 +297,6 @@ const NotificationsFeed =
             className:
               "text-gray-400",
           };
-
         let IconComponent =
           Bell;
 
@@ -247,12 +329,10 @@ const NotificationsFeed =
               "text-purple-400";
             break;
           case "GO_LIVE":
-          case "LIVE":
             IconComponent =
               Radio;
             iconProps.className =
-              notif.status ===
-              "ACTIVE"
+              sticky
                 ? "text-red-500"
                 : "text-gray-500";
             break;
@@ -281,7 +361,7 @@ const NotificationsFeed =
         return (
           <div
             className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${
-              isActiveLive
+              sticky
                 ? "bg-red-500/10 border-red-500/50"
                 : "bg-gray-900 border-gray-800"
             }`}
@@ -334,11 +414,10 @@ const NotificationsFeed =
               (
                 notif,
               ) => {
-                const isActiveLive =
-                  notif.type ===
-                    "LIVE" &&
-                  notif.status ===
-                    "ACTIVE";
+                const sticky =
+                  isSticky(
+                    notif,
+                  );
                 const isUnread =
                   notif.isRead ===
                     false ||
@@ -360,7 +439,7 @@ const NotificationsFeed =
                         ? "cursor-pointer hover:bg-gray-800/80"
                         : ""
                     } ${
-                      isActiveLive
+                      sticky
                         ? "bg-red-950/20 border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.1)]"
                         : !isUnread
                           ? "bg-nippy-obsidian border-gray-800/50 opacity-75"
@@ -368,7 +447,7 @@ const NotificationsFeed =
                     }`}
                   >
                     {/* Visual Flair for Active Streams */}
-                    {isActiveLive && (
+                    {sticky && (
                       <div className="absolute top-0 left-0 w-1 h-full bg-red-500 animate-pulse"></div>
                     )}
 
@@ -376,22 +455,16 @@ const NotificationsFeed =
                       notif,
                     )}
 
-                    <div className="flex-1">
+                    <div className="flex-1 pr-6">
                       <div className="flex items-center gap-2">
                         <h3
-                          className={`text-sm font-bold ${
-                            isActiveLive
-                              ? "text-red-400"
-                              : !isUnread
-                                ? "text-gray-300"
-                                : "text-white"
-                          }`}
+                          className={`text-sm font-bold ${sticky ? "text-red-400" : !isUnread ? "text-gray-300" : "text-white"}`}
                         >
                           {
                             notif.title
                           }
                         </h3>
-                        {isActiveLive && (
+                        {sticky && (
                           <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-sm animate-pulse tracking-wider">
                             LIVE
                             NOW
@@ -423,9 +496,31 @@ const NotificationsFeed =
                       </span>
                     </div>
 
-                    {/* Standard Unread Dot (Hidden if it's an active live stream to prevent clutter) */}
+                    {/* THE DISMISS BUTTON (Only shows on Sticky Notifications) */}
+                    {sticky && (
+                      <button
+                        onClick={(
+                          e,
+                        ) =>
+                          handleDismissLive(
+                            e,
+                            notif._id,
+                          )
+                        }
+                        className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors bg-black/40 rounded-full p-1"
+                        title="Dismiss"
+                      >
+                        <X
+                          size={
+                            16
+                          }
+                        />
+                      </button>
+                    )}
+
+                    {/* Standard Unread Dot */}
                     {isUnread &&
-                      !isActiveLive && (
+                      !sticky && (
                         <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 mt-2 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
                       )}
                   </div>

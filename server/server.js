@@ -126,117 +126,47 @@ io.on(
 
 // Database Connection
 mongoose
-  .connect(
-    process
-      .env
-      .MONGO_URI,
-  )
-  .then(
-    () =>
-      console.log(
-        "MongoDB Connected: Nippy Core DB",
-      ),
-  )
-  .catch(
-    (
-      err,
-    ) =>
-      console.error(
-        "DB Connection Error:",
-        err,
-      ),
+  .connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log("MongoDB Connected: Nippy Core DB");
+    
+    // THE FIX: We are commenting this out temporarily!
+    // We must stabilize the server to test Livepeer first. 
+    // require("./workers/web3Listener.js");
+  })
+  .catch((err) =>
+    console.error("DB Connection Error:", err)
   );
 
 // Basic API Health Route
-app.get(
-  "/api/health",
-  (
-    req,
-    res,
-  ) => {
-    res
-      .status(
-        200,
-      )
-      .json(
-        {
-          status:
-            "ok",
-          message:
-            "Nippy API is running securely.",
-        },
-      );
-  },
-);
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    message: "Nippy API is running securely.",
+  });
+});
 
 // Mounted Routes
-app.use(
-  "/api/admin",
-  adminRoutes,
-);
-app.use(
-  "/api/auth",
-  authRoutes,
-);
-app.use(
-  "/api/media",
-  mediaRoutes,
-);
-app.use(
-  "/api/users",
-  userRoutes,
-);
-app.use(
-  "/api/earnings",
-  earningsRoutes,
-);
-app.use(
-  "/api/content",
-  contentRoutes,
-);
-app.use(
-  "/api/purchases",
-  purchaseRoutes,
-);
-app.use(
-  "/api/withdraw",
-  withdrawalRoutes,
-);
-app.use(
-  "/api/notifications",
-  notificationRoutes,
-);
-app.use(
-  "/api/messages",
-  messageRoutes,
-);
-
-app.use(
-  "/api/streams",
-  streamRoutes,
-);
+app.use("/api/admin", adminRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/media", mediaRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/earnings", earningsRoutes);
+app.use("/api/content", contentRoutes);
+app.use("/api/purchases", purchaseRoutes);
+app.use("/api/withdraw", withdrawalRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/streams", streamRoutes);
 
 // Server Initialization
-const PORT =
-  process
-    .env
-    .PORT ||
-  5000;
+const PORT = process.env.PORT || 5000;
 
-// THE FIX: Cleanly wrapping the listen callback to include the cron jobs
-server.listen(
-  PORT,
-  () => {
-    console.log(
-      `Server running on port ${PORT}`,
-    );
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 
-    // Start the background cron jobs
-    if (
-      typeof startReaper ===
-      "function"
-    ) {
-      startReaper();
-    }
-  },
-);
+  // Start the background cron jobs
+  if (typeof startReaper === "function") {
+    startReaper();
+  }
+});

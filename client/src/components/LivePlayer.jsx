@@ -7,8 +7,7 @@ import {
   useParams,
   useNavigate,
 } from "react-router-dom";
-import api from "../utils/api"; // THE FIX: Imported the global interceptor
-import Hls from "hls.js";
+import api from "../utils/api";
 import { io } from "socket.io-client";
 import {
   MessageSquare,
@@ -20,6 +19,7 @@ import {
   AlertCircle,
   Loader2,
   Lock,
+  Play,
 } from "lucide-react";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 
@@ -28,13 +28,10 @@ const LivePlayer =
     const {
       id,
     } =
-      useParams();
+      useParams(); // This is the STREAM ID
     const navigate =
       useNavigate();
-    const videoRef =
-      useRef(
-        null,
-      );
+
     const chatEndRef =
       useRef(
         null,
@@ -66,6 +63,8 @@ const LivePlayer =
       useState(
         null,
       );
+
+    // Paywall State
     const [
       requiresSub,
       setRequiresSub,
@@ -80,6 +79,13 @@ const LivePlayer =
       useState(
         0,
       );
+    const [
+      creatorIdToSub,
+      setCreatorIdToSub,
+    ] =
+      useState(
+        null,
+      ); // Fixed the navigation bug!
 
     // Chat State
     const [
@@ -118,7 +124,7 @@ const LivePlayer =
     ] =
       useState(
         "CRYPTO",
-      ); // 'CRYPTO' or 'FIAT'
+      );
     const [
       isProcessingGift,
       setIsProcessingGift,
@@ -144,7 +150,6 @@ const LivePlayer =
       const fetchStream =
         async () => {
           try {
-            // THE FIX: Clean, centralized API call
             const res =
               await api.get(
                 `/streams/${id}`,
@@ -165,6 +170,7 @@ const LivePlayer =
                 ?.data
                 ?.requiresSubscription
             ) {
+              // THE FIX: Save the actual creator ID so the subscribe button routes correctly
               setRequiresSub(
                 true,
               );
@@ -173,6 +179,12 @@ const LivePlayer =
                   .response
                   .data
                   .subscriptionPriceNGN,
+              );
+              setCreatorIdToSub(
+                err
+                  .response
+                  .data
+                  .creatorId,
               );
             } else {
               setError(
@@ -196,60 +208,19 @@ const LivePlayer =
     ]);
 
     useEffect(() => {
-      // Setup HLS Video Player
-      if (
-        stream?.playbackUrl &&
-        videoRef.current
-      ) {
-        if (
-          Hls.isSupported()
-        ) {
-          const hls =
-            new Hls();
-          hls.loadSource(
-            stream.playbackUrl,
-          );
-          hls.attachMedia(
-            videoRef.current,
-          );
-          hls.on(
-            Hls
-              .Events
-              .MANIFEST_PARSED,
-            () => {
-              videoRef.current
-                .play()
-                .catch(
-                  () =>
-                    console.log(
-                      "Autoplay prevented",
-                    ),
-                );
-            },
-          );
-        } else if (
-          videoRef.current.canPlayType(
-            "application/vnd.apple.mpegurl",
-          )
-        ) {
-          // Fallback for Safari natively supporting HLS
-          videoRef.current.src =
-            stream.playbackUrl;
-          videoRef.current.play();
-        }
-      }
-
       // Setup Socket.IO for Chat & Gifts
       if (
         stream
       ) {
         socketRef.current =
           io(
-            import.meta
-              .env
-              .VITE_API_URL ||
+            import.meta.env.VITE_API_URL?.replace(
+              "/api",
+              "",
+            ) ||
               "http://localhost:5000",
-          ); // Best practice to env var this too
+          );
+
         socketRef.current.emit(
           "join_live_chat",
           {
@@ -274,7 +245,6 @@ const LivePlayer =
           },
         );
 
-        // The Flex: Flashy Live Gift Event
         socketRef.current.on(
           "live_gift_received",
           (
@@ -292,6 +262,23 @@ const LivePlayer =
                 },
               ],
             );
+          },
+        );
+
+        // Listen for the stream ending so we can boot the fan out
+        socketRef.current.on(
+          "live_stream_ended",
+          (
+            data,
+          ) => {
+            if (
+              data.streamId ===
+              stream._id
+            ) {
+              setError(
+                "This live stream has ended.",
+              );
+            }
           },
         );
 
@@ -349,6 +336,16 @@ const LivePlayer =
           "send_live_message",
           msgPayload,
         );
+
+        // OPTIMISTIC UPDATE: Fan sees their own message instantly
+        setMessages(
+          (
+            prev,
+          ) => [
+            ...prev,
+            msgPayload,
+          ],
+        );
         setChatInput(
           "",
         );
@@ -369,19 +366,16 @@ const LivePlayer =
             paymentMethod ===
             "CRYPTO"
           ) {
-            // 1. Get Crypto Quote for NGN amount
-            // THE FIX: Clean, centralized API call
             const quoteRes =
               await api.post(
                 "/purchases/crypto-quote",
                 {
                   amountUSD:
                     giftAmountNGN /
-                    1500, // Rough static conversion just for quote request, backend handles true logic
+                    1500,
                 },
               );
 
-            // 2. Execute Web3 Transfer
             const txHash =
               await transferUSDT(
                 quoteRes
@@ -399,8 +393,6 @@ const LivePlayer =
                 "Transaction failed or was rejected.",
               );
 
-            // 3. Verify Payment
-            // THE FIX: Clean, centralized API call
             await api.post(
               "/purchases/verify",
               {
@@ -420,7 +412,6 @@ const LivePlayer =
               },
             );
           } else {
-            // FIAT (Paystack) Execution
             const user =
               JSON.parse(
                 localStorage.getItem(
@@ -428,7 +419,6 @@ const LivePlayer =
                 ) ||
                   "{}",
               );
-
             const handler =
               window.PaystackPop.setup(
                 {
@@ -439,14 +429,13 @@ const LivePlayer =
                     user.email,
                   amount:
                     giftAmountNGN *
-                    100, // Paystack uses kobo
+                    100,
                   currency:
                     "NGN",
                   callback:
                     async (
                       response,
                     ) => {
-                      // THE FIX: Clean, centralized API call
                       await api.post(
                         "/purchases/verify",
                         {
@@ -482,7 +471,7 @@ const LivePlayer =
                 },
               );
             handler.openIframe();
-            return; // Pause execution here until callback runs
+            return;
           }
 
           setIsGiftDrawerOpen(
@@ -521,57 +510,83 @@ const LivePlayer =
       );
     }
 
-    // Upsell Screen if not subscribed
+    // --- THE PAYWALL ---
     if (
       requiresSub
     ) {
       return (
-        <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 p-6">
-          <Lock
-            className="text-emerald-500 mb-4"
-            size={
-              48
-            }
-          />
-          <h2 className="text-2xl font-bold text-white mb-2">
-            Subscriber
-            Exclusive
-            Live
-          </h2>
-          <p className="text-slate-400 mb-6 text-center max-w-md">
-            You
-            need
-            an
-            active
-            subscription
-            to
-            watch
-            this
-            creator
-            go
-            live.
-            Subscribe
-            now
-            to
-            join
-            the
-            room!
-          </p>
-          <button
-            onClick={() =>
-              navigate(
-                `/creator/${id}`,
-              )
-            }
-            className="bg-emerald-500 text-white font-bold py-3 px-8 rounded-full hover:bg-emerald-600 transition-colors"
-          >
-            Subscribe
-            for
-            NGN{" "}
-            {
-              subPrice
-            }
-          </button>
+        <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 p-6 relative overflow-hidden">
+          {/* Cinematic Blur Background */}
+          <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1516280440502-a7f457788195?q=80&w=2000')] bg-cover bg-center opacity-10"></div>
+
+          <div className="z-10 bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full text-center shadow-2xl">
+            <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-500/20">
+              <Lock
+                className="text-red-500"
+                size={
+                  32
+                }
+              />
+            </div>
+            <h2 className="text-2xl font-black text-white mb-2 tracking-tight">
+              Subscriber
+              Exclusive
+            </h2>
+            <p className="text-slate-400 mb-8 text-sm">
+              You
+              are
+              missing
+              out!
+              You
+              need
+              an
+              active
+              subscription
+              to
+              watch
+              this
+              live
+              stream
+              and
+              join
+              the
+              chat
+              room.
+            </p>
+
+            {/* THE FIX: Routes securely to the Creator's profile using creatorIdToSub */}
+            <button
+              onClick={() =>
+                navigate(
+                  `/creator/${creatorIdToSub}`,
+                )
+              }
+              className="w-full bg-emerald-500 text-white font-bold py-4 rounded-xl hover:bg-emerald-600 transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:scale-105 flex items-center justify-center gap-2"
+            >
+              <Play
+                size={
+                  18
+                }
+                fill="currentColor"
+              />
+              Subscribe
+              for
+              ₦
+              {subPrice.toLocaleString()}
+            </button>
+
+            <button
+              onClick={() =>
+                navigate(
+                  -1,
+                )
+              }
+              className="mt-4 text-slate-500 text-sm hover:text-white transition-colors"
+            >
+              Go
+              Back
+            </button>
+          </div>
         </div>
       );
     }
@@ -580,10 +595,30 @@ const LivePlayer =
       error
     ) {
       return (
-        <div className="h-screen w-full flex items-center justify-center bg-slate-950 text-red-500">
-          {
-            error
-          }
+        <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 p-6 text-center">
+          <AlertCircle
+            className="text-red-500 mb-4"
+            size={
+              48
+            }
+          />
+          <h2 className="text-xl font-bold text-white mb-2">
+            {
+              error
+            }
+          </h2>
+          <button
+            onClick={() =>
+              navigate(
+                "/feed",
+              )
+            }
+            className="mt-4 px-6 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700"
+          >
+            Return
+            to
+            Feed
+          </button>
         </div>
       );
     }
@@ -592,19 +627,18 @@ const LivePlayer =
       <div className="flex flex-col md:flex-row h-screen w-full bg-black relative overflow-hidden">
         {/* --- VIDEO PANE --- */}
         <div className="flex-1 relative bg-black flex items-center justify-center">
-          <video
-            ref={
-              videoRef
-            }
-            controls
-            autoPlay
-            muted
-            className="w-full h-full object-contain"
+          {/* THE ENTERPRISE FIX: Livepeer's bulletproof playback iframe */}
+          <iframe
+            src={`https://lvpr.tv?v=${stream.playbackId}`}
+            className="w-full h-full"
+            allow="autoplay; fullscreen; picture-in-picture"
+            frameBorder="0"
           />
-          <div className="absolute top-4 left-4 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse">
+
+          <div className="absolute top-4 left-4 bg-red-600 text-white text-xs font-black tracking-widest px-3 py-1.5 rounded-md shadow-[0_0_15px_rgba(220,38,38,0.6)] animate-pulse pointer-events-none">
             LIVE
           </div>
-          <div className="absolute top-4 left-20 bg-slate-900/60 backdrop-blur text-white text-xs font-bold px-3 py-1 rounded-full">
+          <div className="absolute top-4 left-20 bg-slate-900/80 backdrop-blur border border-slate-700 text-white text-xs font-bold px-4 py-1.5 rounded-md pointer-events-none">
             {
               stream.title
             }
@@ -612,7 +646,7 @@ const LivePlayer =
         </div>
 
         {/* --- CHAT PANE --- */}
-        <div className="w-full md:w-80 lg:w-96 bg-slate-900 border-l border-slate-800 flex flex-col h-1/2 md:h-full relative">
+        <div className="w-full md:w-80 lg:w-96 bg-slate-900 border-l border-slate-800 flex flex-col h-1/2 md:h-full relative shrink-0">
           <div className="p-4 border-b border-slate-800 bg-slate-900 flex justify-between items-center z-10">
             <h3 className="text-white font-bold flex items-center gap-2">
               <MessageSquare
@@ -630,7 +664,7 @@ const LivePlayer =
                   true,
                 )
               }
-              className="bg-gradient-to-r from-purple-500 to-pink-500 text-white p-2 rounded-full hover:scale-105 transition-transform shadow-[0_0_15px_rgba(168,85,247,0.4)]"
+              className="bg-gradient-to-r from-purple-500 to-pink-500 text-white p-2 rounded-full hover:scale-110 transition-transform shadow-[0_0_15px_rgba(168,85,247,0.4)]"
             >
               <Gift
                 size={
@@ -642,6 +676,20 @@ const LivePlayer =
 
           {/* Messages List */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {messages.length ===
+              0 && (
+              <p className="text-center text-slate-500 text-sm mt-10">
+                Say
+                hi
+                to{" "}
+                {
+                  stream
+                    .creator
+                    .username
+                }
+                !
+              </p>
+            )}
             {messages.map(
               (
                 msg,
@@ -651,11 +699,7 @@ const LivePlayer =
                   key={
                     idx
                   }
-                  className={`text-sm ${
-                    msg.isGift
-                      ? "bg-gradient-to-r from-purple-900/50 to-pink-900/50 border border-purple-500/30 p-3 rounded-xl"
-                      : ""
-                  }`}
+                  className={`text-sm ${msg.isGift ? "bg-gradient-to-r from-purple-900/40 to-pink-900/40 border border-purple-500/30 p-3 rounded-xl" : ""}`}
                 >
                   {msg.isGift ? (
                     <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 flex items-center gap-2">
@@ -663,7 +707,7 @@ const LivePlayer =
                         size={
                           16
                         }
-                        className="text-pink-400"
+                        className="text-pink-400 shrink-0"
                       />{" "}
                       {
                         msg.text
@@ -716,7 +760,7 @@ const LivePlayer =
                       .value,
                   )
                 }
-                placeholder="Say something..."
+                placeholder="Send a message..."
                 className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500 text-sm"
               />
               <button
@@ -734,11 +778,7 @@ const LivePlayer =
 
           {/* --- SLIDING GIFT DRAWER --- */}
           <div
-            className={`absolute top-0 right-0 w-full h-full bg-slate-900 border-l border-slate-800 z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${
-              isGiftDrawerOpen
-                ? "translate-x-0"
-                : "translate-x-full"
-            }`}
+            className={`absolute top-0 right-0 w-full h-full bg-slate-900 border-l border-slate-800 z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${isGiftDrawerOpen ? "translate-x-0" : "translate-x-full"}`}
           >
             <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
               <h3 className="text-white font-bold flex items-center gap-2">
@@ -809,12 +849,7 @@ const LivePlayer =
                             amount,
                           )
                         }
-                        className={`py-2 rounded-lg text-sm font-bold transition-all ${
-                          giftAmountNGN ===
-                          amount
-                            ? "bg-purple-500 text-white border-transparent"
-                            : "bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700"
-                        }`}
+                        className={`py-2 rounded-lg text-sm font-bold transition-all ${giftAmountNGN === amount ? "bg-purple-500 text-white border-transparent" : "bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700"}`}
                       >
                         ₦
                         {amount /
@@ -838,12 +873,7 @@ const LivePlayer =
                         "CRYPTO",
                       )
                     }
-                    className={`flex-1 py-3 flex justify-center items-center gap-2 rounded-xl border transition-all ${
-                      paymentMethod ===
-                      "CRYPTO"
-                        ? "bg-emerald-500/10 border-emerald-500 text-emerald-500"
-                        : "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700"
-                    }`}
+                    className={`flex-1 py-3 flex justify-center items-center gap-2 rounded-xl border transition-all ${paymentMethod === "CRYPTO" ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700"}`}
                   >
                     <Wallet
                       size={
@@ -858,12 +888,7 @@ const LivePlayer =
                         "FIAT",
                       )
                     }
-                    className={`flex-1 py-3 flex justify-center items-center gap-2 rounded-xl border transition-all ${
-                      paymentMethod ===
-                      "FIAT"
-                        ? "bg-blue-500/10 border-blue-500 text-blue-500"
-                        : "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700"
-                    }`}
+                    className={`flex-1 py-3 flex justify-center items-center gap-2 rounded-xl border transition-all ${paymentMethod === "FIAT" ? "bg-blue-500/10 border-blue-500 text-blue-500" : "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700"}`}
                   >
                     <CreditCard
                       size={
@@ -894,7 +919,7 @@ const LivePlayer =
                     }
                   />
                 ) : (
-                  `Send NGN ${giftAmountNGN} Gift`
+                  `Send NGN ${giftAmountNGN.toLocaleString()} Gift`
                 )}
               </button>
             </div>

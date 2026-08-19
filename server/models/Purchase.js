@@ -20,6 +20,17 @@ const purchaseSchema =
           ref: "Content",
           required: false,
         },
+      // ADDED: Track which live stream a gift was sent to
+      stream:
+        {
+          type: mongoose
+            .Schema
+            .Types
+            .ObjectId,
+          ref: "Stream",
+          default:
+            null,
+        },
       expiresAt:
         {
           type: Date,
@@ -65,24 +76,26 @@ const purchaseSchema =
       purchaseType:
         {
           type: String,
+          // CRITICAL FIX: Added LIVE_GIFT so the database doesn't reject gift payments
           enum: [
             "SUBSCRIPTION",
             "PPV",
             "DM_UNLOCK",
             "CHAT_BUNDLE",
+            "LIVE_GIFT",
           ],
           required: true,
         },
       txHash:
         {
           type: String,
-          sparse: true, // Crucial for Web3, optional for Fiat
+          sparse: true,
           unique: true,
         },
       fiatReference:
         {
           type: String,
-          sparse: true, // Crucial for Fiat, optional for Web3
+          sparse: true,
           unique: true,
         },
       amountPaid:
