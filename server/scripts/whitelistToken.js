@@ -35,7 +35,7 @@ async function main() {
     );
 
   const GATEWAY_ADDRESS =
-    "0xdb9Ea8BCd26aC0c99AE0518187D2082646e42461";
+    "0x87ee106bd7Fa3DA44B6FaA432c3f3FfA4DB2A72E";
   const USDT_ADDRESS =
     "0x3A08E5dC512f099648e491bA38D0c7E2efFbb7DB";
 

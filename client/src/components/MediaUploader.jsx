@@ -4,7 +4,7 @@ import React, {
   useEffect,
 } from "react";
 import { useDropzone } from "react-dropzone";
-import api from "../utils/api"; // <-- 1. Swapped axios for the global API interceptor
+import api from "../utils/api";
 import {
   Upload,
   Loader2,
@@ -28,7 +28,7 @@ const MediaUploader =
     ] =
       useState(
         "idle",
-      ); // idle, file_selected, uploading, complete, error
+      );
     const [
       progress,
       setProgress,
@@ -69,12 +69,19 @@ const MediaUploader =
         "",
       );
     const [
-      priceInUSDT,
-      setPriceInUSDT,
+      price,
+      setPrice,
     ] =
       useState(
         "",
-      ); // Reverted to priceInUSDT to match backend
+      );
+    const [
+      currency,
+      setCurrency,
+    ] =
+      useState(
+        "USD",
+      ); // Dynamically set from profile
     const [
       isFree,
       setIsFree,
@@ -98,37 +105,49 @@ const MediaUploader =
     } =
       useUpload();
 
-    // Fetch the Global Default PPV on component mount
-    const fetchDefaultPPV =
+    // Fetch the Global Default PPV and Currency on mount
+    const fetchSettings =
       async () => {
         try {
-          // 2. Eradicated local token fetching and hardcoded URL
           const res =
             await api.get(
               "/users/settings/monetization",
             );
 
           if (
-            res.data &&
-            res
-              .data
-              .defaultPPVPrice
+            res.data
           ) {
-            setPriceInUSDT(
-              res.data.defaultPPVPrice.toString(),
+            // Grab their specific pricing currency, fallback to USD
+            setCurrency(
+              res
+                .data
+                .priceCurrency ||
+                res
+                  .data
+                  .baseCurrency ||
+                "USD",
             );
+
+            if (
+              res
+                .data
+                .defaultPPVPrice
+            ) {
+              setPrice(
+                res.data.defaultPPVPrice.toString(),
+              );
+            }
           }
         } catch (error) {
           console.error(
-            "Failed to fetch default PPV settings:",
+            "Failed to fetch creator settings:",
             error,
           );
-          // Fail silently. The box will just remain empty for manual entry.
         }
       };
 
     useEffect(() => {
-      fetchDefaultPPV();
+      fetchSettings();
     }, []);
 
     const onDrop =
@@ -204,7 +223,6 @@ const MediaUploader =
           "",
         );
 
-        // TRIGGER GLOBAL BACKGROUND UPLOAD
         startUpload(
           selectedFile.name,
         );
@@ -224,33 +242,52 @@ const MediaUploader =
             "description",
             description,
           );
-
-          const finalPrice =
-            isFree
-              ? 0
-              : priceInUSDT ===
-                  ""
-                ? 0
-                : Number(
-                    priceInUSDT,
-                  );
-          formData.append(
-            "priceInUSDT",
-            finalPrice,
-          );
           formData.append(
             "isNsfw",
             isNsfw,
           );
 
-          // 3. Clean, interceptor-powered request
+          // Ensures the backend gets the exact raw number entered by the creator
+          const exactPrice =
+            (
+              val,
+            ) => {
+              const raw =
+                parseFloat(
+                  val,
+                );
+              return !isNaN(
+                raw,
+              ) &&
+                raw >
+                  0
+                ? raw
+                : 0;
+            };
+
+          const finalPrice =
+            isFree
+              ? 0
+              : exactPrice(
+                  price,
+                );
+
+          // Changed to generic 'price' instead of 'priceInUSDT'
+          formData.append(
+            "price",
+            finalPrice,
+          );
+          formData.append(
+            "priceCurrency",
+            currency,
+          );
+
           await api.post(
             "/content/upload",
             formData,
             {
               headers:
                 {
-                  // Authorization is handled globally, but we still must declare multipart data
                   "Content-Type":
                     "multipart/form-data",
                 },
@@ -272,15 +309,14 @@ const MediaUploader =
 
                   setProgress(
                     cappedPercent,
-                  ); // Update local UI
+                  );
                   updateProgress(
                     cappedPercent,
-                  ); // Update global background UI
+                  );
                 },
             },
           );
 
-          // ON SUCCESS: Complete global, and instantly reset local so they can upload again
           completeUpload();
           resetUploader();
         } catch (error) {
@@ -294,15 +330,12 @@ const MediaUploader =
               ?.data
               ?.message ||
             "Server rejected the upload.";
-
           setErrorMessage(
             errorMsg,
           );
           setStatus(
             "error",
           );
-
-          // ON FAIL: Trigger global error
           failUpload(
             errorMsg,
           );
@@ -332,10 +365,9 @@ const MediaUploader =
         setProgress(
           0,
         );
-        fetchDefaultPPV();
+        fetchSettings(); // Re-fetch default price on reset
       };
 
-    // Determine if the selected file is an image or video for UI logic
     const isImageFile =
       selectedFile &&
       selectedFile.type.startsWith(
@@ -564,61 +596,66 @@ const MediaUploader =
                   </div>
                 </div>
 
-                {/* PPV Price Input */}
+                {/* Dynamic PPV Price Input */}
                 <div>
                   <label
-                    className={`flex items-center text-sm font-medium mb-1 transition-colors ${
-                      isFree
-                        ? "text-slate-600"
-                        : "text-slate-300"
-                    }`}
+                    className={`flex items-center text-sm font-medium mb-1 transition-colors ${isFree ? "text-slate-600" : "text-slate-300"}`}
                   >
                     <Tag
-                      className={`w-4 h-4 mr-2 transition-colors ${
-                        isFree
-                          ? "text-slate-600"
-                          : "text-[#FF5757]"
-                      }`}
+                      className={`w-4 h-4 mr-2 transition-colors ${isFree ? "text-slate-600" : "text-[#FF5757]"}`}
                     />
                     PPV
                     Unlock
                     Price
-                    (USDT)
+                    (
+                    {
+                      currency
+                    }
+                    )
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={
-                      isFree
-                        ? ""
-                        : priceInUSDT
-                    }
-                    onChange={(
-                      e,
-                    ) =>
-                      setPriceInUSDT(
-                        e
-                          .target
-                          .value,
-                      )
-                    }
-                    disabled={
-                      isFree ||
-                      status ===
-                        "uploading"
-                    }
-                    className={`w-full border rounded-lg px-4 py-3 text-white focus:outline-none transition-all ${
-                      isFree
-                        ? "bg-slate-900 border-slate-800 opacity-50 cursor-not-allowed"
-                        : "bg-slate-950 border-slate-700 focus:border-[#FF5757]"
-                    }`}
-                    placeholder={
-                      isFree
-                        ? "Content is set to Free"
-                        : "Enter price in USDT"
-                    }
-                  />
+                  <div className="relative">
+                    <span
+                      className={`absolute left-4 top-1/2 transform -translate-y-1/2 font-bold ${isFree ? "text-slate-600" : "text-slate-400"}`}
+                    >
+                      {
+                        currency
+                      }
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={
+                        isFree
+                          ? ""
+                          : price
+                      }
+                      onChange={(
+                        e,
+                      ) =>
+                        setPrice(
+                          e
+                            .target
+                            .value,
+                        )
+                      }
+                      disabled={
+                        isFree ||
+                        status ===
+                          "uploading"
+                      }
+                      className={`w-full border rounded-lg pl-16 pr-4 py-3 text-white focus:outline-none transition-all ${
+                        isFree
+                          ? "bg-slate-900 border-slate-800 opacity-50 cursor-not-allowed"
+                          : "bg-slate-950 border-slate-700 focus:border-[#FF5757]"
+                      }`}
+                      placeholder={
+                        isFree
+                          ? "Content is set to Free"
+                          : `Enter price`
+                      }
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -657,11 +694,7 @@ const MediaUploader =
                   }`}
                 >
                   <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      isNsfw
-                        ? "translate-x-6"
-                        : "translate-x-0"
-                    }`}
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${isNsfw ? "translate-x-6" : "translate-x-0"}`}
                   />
                 </button>
               </div>

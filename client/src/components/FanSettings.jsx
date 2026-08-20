@@ -9,9 +9,27 @@ import {
   Wallet,
   Save,
   Loader2,
+  Globe,
+  MapPin,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
+
+const COUNTRY_TO_CURRENCY =
+  {
+    Nigeria:
+      "NGN",
+    "United States":
+      "USD",
+    "United Kingdom":
+      "GBP",
+    Kenya:
+      "KES",
+    Ghana:
+      "GHS",
+    default:
+      "USD",
+  };
 
 const FanSettings =
   () => {
@@ -41,6 +59,8 @@ const FanSettings =
           text: "",
         },
       );
+
+    // Deletion state
     const [
       showDeleteConfirm,
       setShowDeleteConfirm,
@@ -62,6 +82,10 @@ const FanSettings =
     ] =
       useState(
         {
+          country:
+            "",
+          preferredCurrency:
+            "USD",
           currentPassword:
             "",
           newEmail:
@@ -80,30 +104,72 @@ const FanSettings =
         );
       if (
         storedData
-      )
+      ) {
         setUser(
           storedData,
         );
+
+        const autoCurrency =
+          COUNTRY_TO_CURRENCY[
+            storedData
+              .country
+          ] ||
+          COUNTRY_TO_CURRENCY.default;
+
+        setFormData(
+          (
+            prev,
+          ) => ({
+            ...prev,
+            country:
+              storedData.country ||
+              "",
+            preferredCurrency:
+              storedData.preferredCurrency ||
+              autoCurrency,
+          }),
+        );
+      }
     }, []);
 
     const handleChange =
       (
         e,
       ) => {
+        const {
+          name,
+          value,
+        } =
+          e.target;
         setFormData(
-          {
-            ...formData,
-            [e
-              .target
-              .name]:
-              e
-                .target
-                .value,
+          (
+            prev,
+          ) => {
+            const newData =
+              {
+                ...prev,
+                [name]:
+                  value,
+              };
+
+            // Auto-select currency if they change their country
+            if (
+              name ===
+              "country"
+            ) {
+              newData.preferredCurrency =
+                COUNTRY_TO_CURRENCY[
+                  value
+                ] ||
+                COUNTRY_TO_CURRENCY.default;
+            }
+
+            return newData;
           },
         );
       };
 
-    // WEB2 UPDATE: Email & Password
+    // WEB2 UPDATE: Profile Settings
     const handleStandardUpdate =
       async (
         e,
@@ -115,7 +181,7 @@ const FanSettings =
           return setMessage(
             {
               type: "error",
-              text: "Current password is required.",
+              text: "Current password is required to authorize updates.",
             },
           );
         }
@@ -164,15 +230,48 @@ const FanSettings =
                 text: data.message,
               },
             );
+
+            // Update local storage user safely
+            if (
+              user
+            ) {
+              const updatedUser =
+                {
+                  ...user,
+                  country:
+                    formData.country,
+                  preferredCurrency:
+                    formData.preferredCurrency,
+                };
+              if (
+                formData.newEmail
+              )
+                updatedUser.email =
+                  formData.newEmail;
+
+              setUser(
+                updatedUser,
+              );
+              localStorage.setItem(
+                "nippy_user",
+                JSON.stringify(
+                  updatedUser,
+                ),
+              );
+            }
+
             setFormData(
-              {
+              (
+                prev,
+              ) => ({
+                ...prev,
                 currentPassword:
                   "",
                 newEmail:
                   "",
                 newPassword:
                   "",
-              },
+              }),
             );
           } else {
             setMessage(
@@ -323,7 +422,169 @@ const FanSettings =
 
     const handleDeleteAccount =
       async () => {
-        /* Retain your existing deletion logic here */
+        setMessage(
+          {
+            type: "",
+            text: "",
+          },
+        );
+        let authPayload =
+          {};
+
+        try {
+          if (
+            user.walletAddress
+          ) {
+            // --- WEB3 FLOW: Require MetaMask Signature ---
+            if (
+              !window.ethereum
+            )
+              throw new Error(
+                "MetaMask wallet is required to confirm deletion.",
+              );
+
+            let targetProvider =
+              window.ethereum;
+            if (
+              window
+                .ethereum
+                .providers
+                ?.length
+            ) {
+              targetProvider =
+                window.ethereum.providers.find(
+                  (
+                    p,
+                  ) =>
+                    p.isMetaMask,
+                ) ||
+                window
+                  .ethereum
+                  .providers[0];
+            }
+
+            const provider =
+              new ethers.BrowserProvider(
+                targetProvider,
+              );
+            const signer =
+              await provider.getSigner();
+
+            const expectedMessage = `CONFIRM_ACCOUNT_DELETION: I confirm that I want to permanently delete my Nippy account (${user.walletAddress.toLowerCase()}).`;
+            const signature =
+              await signer.signMessage(
+                expectedMessage,
+              );
+
+            authPayload =
+              {
+                signature,
+              };
+          } else {
+            // --- WEB2 FLOW: Require Password ---
+            if (
+              !deletePassword
+            ) {
+              return setMessage(
+                {
+                  type: "error",
+                  text: "Password is required to delete your account.",
+                },
+              );
+            }
+            authPayload =
+              {
+                password:
+                  deletePassword,
+              };
+          }
+
+          setLoading(
+            true,
+          );
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            ) ||
+            localStorage.getItem(
+              "token",
+            );
+
+          // --- EXECUTE DELETION ---
+          const response =
+            await fetch(
+              "http://localhost:5000/api/users/profile",
+              {
+                method:
+                  "DELETE",
+                headers:
+                  {
+                    "Content-Type":
+                      "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                body: JSON.stringify(
+                  authPayload,
+                ),
+              },
+            );
+
+          const data =
+            await response.json();
+
+          if (
+            !response.ok
+          ) {
+            throw new Error(
+              data.message ||
+                "Failed to delete account.",
+            );
+          }
+
+          // --- WIPE LOCAL STATE & REDIRECT ---
+          localStorage.removeItem(
+            "nippy_user",
+          );
+          localStorage.removeItem(
+            "nippy_token",
+          );
+          localStorage.removeItem(
+            "token",
+          );
+
+          navigate(
+            "/auth/login",
+          );
+        } catch (err) {
+          console.error(
+            "Deletion Error:",
+            err,
+          );
+          if (
+            err.code ===
+            "ACTION_REJECTED"
+          ) {
+            setMessage(
+              {
+                type: "error",
+                text: "Signature request rejected. Account deletion cancelled.",
+              },
+            );
+          } else {
+            setMessage(
+              {
+                type: "error",
+                text:
+                  err.message ||
+                  "An error occurred during account deletion.",
+              },
+            );
+          }
+        } finally {
+          setLoading(
+            false,
+          );
+        }
       };
 
     if (
@@ -347,19 +608,157 @@ const FanSettings =
           </h1>
         </div>
 
-        <div className="bg-nippy-obsidian border border-red-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden mb-8">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-orange-500"></div>
-          <h2 className="text-white font-bold mb-4">
-            Web2
-            Credentials
-          </h2>
-
-          <form
-            onSubmit={
-              handleStandardUpdate
-            }
-            className="space-y-6"
+        {message.text && (
+          <div
+            className={`p-4 rounded-xl font-bold text-sm text-center mb-8 ${
+              message.type ===
+              "error"
+                ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                : "bg-green-500/10 text-green-400 border border-green-500/20"
+            }`}
           >
+            {
+              message.text
+            }
+          </div>
+        )}
+
+        <form
+          onSubmit={
+            handleStandardUpdate
+          }
+        >
+          {/* PREFERENCES SECTION */}
+          <div className="bg-nippy-obsidian border border-slate-800 rounded-2xl p-6 shadow-xl mb-8">
+            <h2 className="text-white font-bold mb-6">
+              General
+              Preferences
+            </h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
+                  <MapPin
+                    size={
+                      16
+                    }
+                  />{" "}
+                  Location
+                  (Country)
+                </label>
+                <input
+                  type="text"
+                  name="country"
+                  value={
+                    formData.country
+                  }
+                  onChange={
+                    handleChange
+                  }
+                  className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
+                  placeholder="e.g. Nigeria"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
+                  <Globe
+                    size={
+                      16
+                    }
+                    className="text-amber-500"
+                  />{" "}
+                  Display
+                  Currency
+                </label>
+                <div className="relative">
+                  <select
+                    name="preferredCurrency"
+                    value={
+                      formData.preferredCurrency
+                    }
+                    onChange={
+                      handleChange
+                    }
+                    className="w-full bg-black border border-gray-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-nippy-coral transition-colors appearance-none font-medium"
+                  >
+                    <option value="USD">
+                      USD
+                      -
+                      US
+                      Dollar
+                    </option>
+                    <option value="NGN">
+                      NGN
+                      -
+                      Nigerian
+                      Naira
+                    </option>
+                    <option value="GHS">
+                      GHS
+                      -
+                      Ghanaian
+                      Cedi
+                    </option>
+                    <option value="GBP">
+                      GBP
+                      -
+                      British
+                      Pound
+                    </option>
+                    <option value="KES">
+                      KES
+                      -
+                      Kenyan
+                      Shilling
+                    </option>
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
+                    <svg
+                      className="fill-current h-4 w-4"
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                    >
+                      <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-4 leading-relaxed">
+              Content
+              prices
+              across
+              the
+              platform
+              will
+              automatically
+              be
+              displayed
+              in
+              your
+              preferred
+              currency.
+              Changing
+              your
+              location
+              will
+              automatically
+              update
+              your
+              currency
+              default.
+            </p>
+          </div>
+
+          {/* WEB2 CREDENTIALS */}
+          <div className="bg-nippy-obsidian border border-red-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden mb-8">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-orange-500"></div>
+            <h2 className="text-white font-bold mb-4">
+              Web2
+              Credentials
+            </h2>
+
             <div className="bg-red-500/5 border border-red-500/20 p-4 rounded-xl mb-6">
               <label className="block text-sm font-bold text-red-400 mb-2 flex items-center gap-2">
                 <Lock
@@ -443,7 +842,7 @@ const FanSettings =
                 loading ||
                 !formData.currentPassword
               }
-              className="w-full bg-nippy-coral text-white font-bold py-3 rounded-xl hover:bg-nippy-coralHover transition-all flex justify-center items-center gap-2 disabled:opacity-50 mt-4"
+              className="w-full bg-nippy-coral text-white font-bold py-3 rounded-xl hover:bg-nippy-coralHover transition-all flex justify-center items-center gap-2 disabled:opacity-50 mt-6"
             >
               {loading ? (
                 <Loader2
@@ -459,13 +858,14 @@ const FanSettings =
                   }
                 />
               )}
-              Update
-              Web2
+              Save
+              Profile
               Settings
             </button>
-          </form>
-        </div>
+          </div>
+        </form>
 
+        {/* WEB3 INTEGRATION */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative mb-8">
           <h2 className="text-white font-bold mb-4 flex items-center gap-2">
             <Wallet className="text-emerald-500" />{" "}
@@ -525,22 +925,110 @@ const FanSettings =
           )}
         </div>
 
-        {message.text && (
-          <div
-            className={`p-4 rounded-xl font-bold text-sm text-center mb-8 ${
-              message.type ===
-              "error"
-                ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                : "bg-green-500/10 text-green-400 border border-green-500/20"
-            }`}
-          >
-            {
-              message.text
-            }
-          </div>
-        )}
+        {/* DANGER ZONE */}
+        <div className="border border-red-900/40 rounded-2xl bg-red-950/20 p-6 mt-8">
+          <h3 className="text-lg font-bold text-red-500 mb-4">
+            Danger
+            Zone
+          </h3>
 
-        {/* DANGER ZONE - Keep your existing block here */}
+          {!showDeleteConfirm ? (
+            <button
+              onClick={() =>
+                setShowDeleteConfirm(
+                  true,
+                )
+              }
+              className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 px-6 py-3 rounded-xl transition-colors font-bold w-full md:w-auto"
+            >
+              Delete
+              Account
+            </button>
+          ) : (
+            <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+              <p className="text-slate-300 text-sm leading-relaxed mb-6 border-l-2 border-red-500 pl-4">
+                Deleting
+                your
+                account
+                is
+                permanent.
+                This
+                will
+                erase
+                your
+                profile,
+                revoke
+                your
+                purchases,
+                cancel
+                subscriptions,
+                and
+                wipe
+                your
+                data.
+              </p>
+
+              {!user.walletAddress && (
+                <input
+                  type="password"
+                  placeholder="Enter your password to confirm"
+                  value={
+                    deletePassword
+                  }
+                  onChange={(
+                    e,
+                  ) =>
+                    setDeletePassword(
+                      e
+                        .target
+                        .value,
+                    )
+                  }
+                  className="w-full bg-black border border-red-900/50 rounded-xl py-3 px-4 text-white text-sm mb-4 focus:outline-none focus:border-red-500"
+                />
+              )}
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => {
+                    setShowDeleteConfirm(
+                      false,
+                    );
+                    setDeletePassword(
+                      "",
+                    );
+                    setMessage(
+                      {
+                        type: "",
+                        text: "",
+                      },
+                    );
+                  }}
+                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-xl transition-colors font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={
+                    handleDeleteAccount
+                  }
+                  disabled={
+                    loading
+                  }
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold transition-colors shadow-lg shadow-red-500/20 flex justify-center items-center"
+                >
+                  {loading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : user.walletAddress ? (
+                    "Sign in MetaMask"
+                  ) : (
+                    "Confirm Deletion"
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   };

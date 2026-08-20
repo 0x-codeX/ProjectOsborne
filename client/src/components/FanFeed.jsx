@@ -24,9 +24,547 @@ import {
   UserCheck,
   Radio,
   PlayCircle,
+  Loader2,
 } from "lucide-react";
 import api from "../utils/api";
 
+// ==========================================
+// INDIVIDUAL POST COMPONENT
+// ==========================================
+const FeedPostItem =
+  ({
+    post,
+    onFollowToggle,
+    onLike,
+    onBookmark,
+    activeCommentPostId,
+    setActiveCommentPostId,
+    commentText,
+    setCommentText,
+    submitComment,
+    submittingComment,
+    openPaymentModal,
+    exchangeRates,
+    fanCurrency,
+  }) => {
+    // Extract Raw Creator Data
+    const creatorRawPrice =
+      post.actualPrice !==
+      undefined
+        ? post.actualPrice
+        : post.price ||
+          0;
+    const creatorCurrency =
+      post.priceCurrency ||
+      post.creator?.monetizationSettings?.priceCurrency || post.creator?.preferredCurrency || "USD";
+    const isFreeContent =
+      creatorRawPrice <=
+      0;
+
+    // --- THE PROFIT ENGINE (Synchronous Skim) ---
+    const getFanPrice =
+      (
+        creatorPrice,
+        cCurr = "USD",
+      ) => {
+        if (
+          !creatorPrice ||
+          creatorPrice <=
+            0 ||
+          !exchangeRates
+        ) {
+          return {
+            price: 0,
+            currency:
+              fanCurrency,
+            raw: 0,
+            rawCurrency:
+              cCurr,
+          };
+        }
+        const toUSD =
+          exchangeRates[
+            cCurr
+          ] ||
+          1;
+        const toFan =
+          exchangeRates[
+            fanCurrency
+          ] ||
+          1;
+        const exactUSD =
+          creatorPrice /
+          toUSD;
+        const exactFanPrice =
+          exactUSD *
+          toFan;
+        // The Skim: Round UP to the nearest 0.50 interval
+        const roundedPrice =
+          Math.ceil(
+            exactFanPrice *
+              2,
+          ) /
+          2;
+
+        return {
+          price:
+            roundedPrice,
+          currency:
+            fanCurrency,
+          raw: creatorPrice,
+          rawCurrency:
+            cCurr,
+        };
+      };
+
+    const ppvPriceData =
+      getFanPrice(
+        creatorRawPrice,
+        creatorCurrency,
+      );
+
+    return (
+      <div
+        data-post-id={
+          post._id
+        }
+        className="feed-post-card mb-10 bg-nippy-obsidian/80 backdrop-blur-md border border-gray-800/60 rounded-2xl overflow-hidden shadow-xl"
+      >
+        {/* Creator Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
+          <Link
+            to={`/creator/${post.creator?._id}`}
+            className="flex items-center gap-3 group cursor-pointer"
+          >
+            {post
+              .creator
+              ?.profileImage ? (
+              <img
+                src={
+                  post
+                    .creator
+                    .profileImage
+                }
+                alt="Creator"
+                className="w-10 h-10 rounded-full object-cover border border-gray-700 group-hover:border-emerald-500 transition-colors"
+              />
+            ) : (
+              <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center border border-gray-600 group-hover:border-emerald-500 transition-colors">
+                <span className="font-bold text-gray-300 group-hover:text-white">
+                  {post.creator?.username
+                    ?.charAt(
+                      0,
+                    )
+                    .toUpperCase() ||
+                    "U"}
+                </span>
+              </div>
+            )}
+            <div>
+              <div className="font-bold text-slate-200 group-hover:text-emerald-500 transition-colors">
+                {post
+                  .creator
+                  ?.username ||
+                  "Unknown"}
+              </div>
+              <div className="text-xs text-gray-500">
+                {new Date(
+                  post.createdAt,
+                ).toLocaleDateString()}
+              </div>
+            </div>
+          </Link>
+
+          <div className="flex items-center gap-3">
+            {post.isPaywalled &&
+              !isFreeContent && (
+                <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
+                  <BadgeDollarSign
+                    size={
+                      14
+                    }
+                  />{" "}
+                  PPV
+                </div>
+              )}
+
+            <button
+              onClick={() =>
+                onFollowToggle(
+                  post
+                    .creator
+                    ?._id,
+                )
+              }
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                post
+                  .creator
+                  ?.isFollowed
+                  ? "bg-transparent text-gray-400 border-gray-700 hover:border-rose-500 hover:text-rose-500"
+                  : "bg-white text-black border-transparent hover:bg-gray-200"
+              }`}
+            >
+              {post
+                .creator
+                ?.isFollowed ? (
+                <>
+                  <UserCheck
+                    size={
+                      14
+                    }
+                  />{" "}
+                  Following
+                </>
+              ) : (
+                <>
+                  <UserPlus
+                    size={
+                      14
+                    }
+                  />{" "}
+                  Follow
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Media Container */}
+        <div className="relative bg-black w-full min-h-[300px] max-h-[600px] flex items-center justify-center overflow-hidden">
+          {post.isLocked &&
+          !isFreeContent ? (
+            <video
+              src={
+                post.teaserUrl
+              }
+              autoPlay
+              loop
+              muted
+              playsInline
+              onContextMenu={(
+                e,
+              ) =>
+                e.preventDefault()
+              }
+              className="w-full h-auto max-h-[600px] object-cover blur-3xl scale-[1.2] opacity-70 pointer-events-none select-none"
+            />
+          ) : (
+            <>
+              {post.mediaUrl
+                ?.toLowerCase()
+                .match(
+                  /\.(jpg|jpeg|png|gif|webp)/i,
+                ) ||
+              post.fileType?.includes(
+                "image",
+              ) ? (
+                <img
+                  src={
+                    post.mediaUrl
+                  }
+                  alt={
+                    post.title ||
+                    "Unlocked content"
+                  }
+                  onContextMenu={(
+                    e,
+                  ) =>
+                    e.preventDefault()
+                  }
+                  draggable="false"
+                  className="w-full h-auto max-h-[600px] object-contain select-none"
+                />
+              ) : (
+                <video
+                  src={
+                    post.mediaUrl
+                  }
+                  controls
+                  controlsList="nodownload noplaybackrate"
+                  disablePictureInPicture
+                  onContextMenu={(
+                    e,
+                  ) =>
+                    e.preventDefault()
+                  }
+                  className="w-full h-auto max-h-[600px] object-contain"
+                />
+              )}
+            </>
+          )}
+
+          {/* Lock Overlay */}
+          {post.isLocked &&
+            !isFreeContent && (
+              <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center z-10 p-6">
+                <Lock className="w-12 h-12 text-white/70 mb-3" />
+                <h3 className="text-2xl font-extrabold text-white mb-1 shadow-black drop-shadow-md">
+                  Content
+                  Locked
+                </h3>
+                <p className="text-gray-200 text-sm mb-6 font-medium drop-shadow-md text-center max-w-xs">
+                  Unlock
+                  this
+                  content
+                  to
+                  view
+                  the
+                  full
+                  resolution
+                  media.
+                </p>
+
+                <div className="flex flex-col gap-3 w-full max-w-xs">
+                  <button
+                    disabled={
+                      !exchangeRates
+                    }
+                    onClick={() => {
+                      openPaymentModal(
+                        {
+                          ...post,
+                          fanPrice:
+                            ppvPriceData.price,
+                          fanCurrency:
+                            ppvPriceData.currency,
+                          creatorRawPrice:
+                            ppvPriceData.raw,
+                          creatorCurrency:
+                            ppvPriceData.rawCurrency,
+                        },
+                      );
+                    }}
+                    className="bg-white hover:bg-gray-200 text-black font-bold py-3 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg disabled:opacity-70"
+                  >
+                    {!exchangeRates ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <BadgeDollarSign
+                        size={
+                          20
+                        }
+                      />
+                    )}
+                    {!exchangeRates
+                      ? "Calculating..."
+                      : `Unlock for ${ppvPriceData.price.toFixed(2)} ${ppvPriceData.currency}`}
+                  </button>
+                  <Link
+                    to={`/creator/${post.creator?._id}`}
+                    className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-gray-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
+                  >
+                    Subscribe
+                    to
+                    Creator
+                  </Link>
+                </div>
+              </div>
+            )}
+        </div>
+
+        {/* Content Details */}
+        <div className="p-4">
+          <h2 className="text-lg font-bold text-slate-200 mb-1">
+            {
+              post.title
+            }
+          </h2>
+          <p className="text-sm text-gray-400 mb-4">
+            {
+              post.description
+            }
+          </p>
+
+          {post.isPaywalled &&
+            !post.isLocked &&
+            !isFreeContent && (
+              <div className="inline-flex px-4 py-2 mb-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg font-bold text-sm">
+                Purchased
+              </div>
+            )}
+
+          <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
+            <div className="flex items-center gap-6">
+              <button
+                onClick={() =>
+                  onLike(
+                    post._id,
+                  )
+                }
+                className="flex items-center gap-2 group transition-colors"
+              >
+                <Heart
+                  size={
+                    22
+                  }
+                  className={`transition-all duration-200 ${
+                    post.isLiked
+                      ? "text-rose-500 fill-current scale-110"
+                      : "text-gray-400 group-hover:text-rose-500"
+                  }`}
+                />
+                <span className="text-sm text-gray-400 font-medium">
+                  {post.likesCount ||
+                    0}
+                </span>
+              </button>
+              <button
+                onClick={() =>
+                  setActiveCommentPostId(
+                    activeCommentPostId ===
+                      post._id
+                      ? null
+                      : post._id,
+                  )
+                }
+                className="flex items-center gap-2 group transition-colors"
+              >
+                <MessageCircle
+                  size={
+                    22
+                  }
+                  className="text-gray-400 group-hover:text-blue-400"
+                />
+                <span className="text-sm text-gray-400 font-medium">
+                  {post.commentsCount ||
+                    0}
+                </span>
+              </button>
+              <div className="flex items-center gap-2 text-gray-500">
+                <Eye
+                  size={
+                    22
+                  }
+                />
+                <span className="text-sm font-medium">
+                  {post.viewsCount ||
+                    0}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() =>
+                onBookmark(
+                  post._id,
+                )
+              }
+              className="transition-colors"
+            >
+              <Bookmark
+                size={
+                  22
+                }
+                className={
+                  post.isBookmarked
+                    ? "fill-white text-white"
+                    : "text-gray-400 hover:text-white"
+                }
+              />
+            </button>
+          </div>
+        </div>
+
+        {/* Comments Section */}
+        {activeCommentPostId ===
+          post._id && (
+          <div className="bg-slate-900/80 backdrop-blur-md border-t border-gray-800/60 p-4 animate-in slide-in-from-top-2">
+            <div className="max-h-48 overflow-y-auto mb-4 space-y-3 pr-2 scrollbar-thin scrollbar-thumb-gray-700">
+              {post.comments &&
+              post
+                .comments
+                .length >
+                0 ? (
+                post.comments.map(
+                  (
+                    comment,
+                  ) => (
+                    <div
+                      key={
+                        comment._id
+                      }
+                      className="text-sm"
+                    >
+                      <span className="font-bold text-slate-300 mr-2">
+                        {
+                          comment
+                            .user
+                            .username
+                        }
+                      </span>
+                      <span className="text-gray-400">
+                        {
+                          comment.text
+                        }
+                      </span>
+                    </div>
+                  ),
+                )
+              ) : (
+                <p className="text-xs text-gray-500 text-center italic">
+                  No
+                  comments
+                  yet.
+                  Be
+                  the
+                  first!
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 relative">
+              <input
+                type="text"
+                value={
+                  commentText
+                }
+                onChange={(
+                  e,
+                ) =>
+                  setCommentText(
+                    e
+                      .target
+                      .value,
+                  )
+                }
+                placeholder="Write a comment..."
+                onKeyDown={(
+                  e,
+                ) =>
+                  e.key ===
+                    "Enter" &&
+                  submitComment(
+                    post._id,
+                  )
+                }
+                className="w-full bg-black border border-gray-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:outline-none focus:border-emerald-500"
+              />
+              <button
+                onClick={() =>
+                  submitComment(
+                    post._id,
+                  )
+                }
+                disabled={
+                  submittingComment ||
+                  !commentText.trim()
+                }
+                className="absolute right-2 text-emerald-500 hover:text-emerald-400 disabled:opacity-50 transition-colors p-1"
+              >
+                <Send
+                  size={
+                    18
+                  }
+                />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+// ==========================================
+// MAIN FEED COMPONENT
+// ==========================================
 const FanFeed =
   () => {
     const [
@@ -50,6 +588,23 @@ const FanFeed =
       useState(
         null,
       );
+
+    // --- GLOBAL PRICING STATES ---
+    const [
+      exchangeRates,
+      setExchangeRates,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      fanCurrency,
+      setFanCurrency,
+    ] =
+      useState(
+        "USD",
+      );
+
     const {
       transferUSDT,
     } =
@@ -57,7 +612,6 @@ const FanFeed =
     const navigate =
       useNavigate();
 
-    // Current User for Fiat Checkout
     const currentUser =
       JSON.parse(
         localStorage.getItem(
@@ -65,8 +619,6 @@ const FanFeed =
         ) ||
           "{}",
       );
-
-    // Paystack Initialization
     const initializePayment =
       usePaystackPayment(
         {
@@ -77,7 +629,6 @@ const FanFeed =
         },
       );
 
-    // Staging Area for new posts
     const [
       pendingPosts,
       setPendingPosts,
@@ -90,7 +641,6 @@ const FanFeed =
         [],
       );
 
-    // Interaction States
     const [
       activeCommentPostId,
       setActiveCommentPostId,
@@ -150,14 +700,10 @@ const FanFeed =
       feed,
     ]);
 
-    // ==========================================
-    // 1. VIEW TRACKING LOGIC
-    // ==========================================
     const viewedPosts =
       useRef(
         new Set(),
       );
-
     const recordView =
       async (
         postId,
@@ -171,7 +717,6 @@ const FanFeed =
         viewedPosts.current.add(
           postId,
         );
-
         try {
           await api.post(
             `/content/${postId}/view`,
@@ -218,7 +763,6 @@ const FanFeed =
             threshold: 0.6,
           },
         );
-
       const elements =
         document.querySelectorAll(
           ".feed-post-card",
@@ -231,48 +775,80 @@ const FanFeed =
             el,
           ),
       );
-
       return () =>
         observer.disconnect();
     }, [
       feed,
     ]);
 
-    // ==========================================
-    // 2. FEED FETCHING & SILENT POLLING
-    // ==========================================
     useEffect(() => {
-      fetchFeed();
+      fetchFeedAndRates();
       const pollInterval =
         setInterval(
-          () => {
-            pollForNewPosts();
-          },
+          () =>
+            pollForNewPosts(),
           15000,
         );
-
       return () =>
         clearInterval(
           pollInterval,
         );
     }, []);
 
-    const fetchFeed =
+    const FALLBACK_RATES =
+      {
+        USD: 1,
+        NGN: 1500,
+        EUR: 0.92,
+        GBP: 0.79,
+        GHS: 14.5,
+      };
+
+    const fetchFeedAndRates =
       async () => {
         setLoading(
           true,
         );
         try {
-          const response =
-            await api.get(
-              "/content/feed",
+          // Set local currency immediately from local storage
+          setFanCurrency(
+            currentUser?.preferredCurrency ||
+              "USD",
+          );
+
+          // Fetch feed and exchange rates simultaneously
+          const [
+            feedRes,
+            ratesRes,
+          ] =
+            await Promise.all(
+              [
+                api.get(
+                  "/content/feed",
+                ),
+                // If the API fails, it falls back to realistic rates, NOT just { USD: 1 }
+                api
+                  .get(
+                    "/exchange-rates",
+                  )
+                  .catch(
+                    () => ({
+                      data: FALLBACK_RATES,
+                    }),
+                  ),
+              ],
             );
+
           setFeed(
-            response.data,
+            feedRes.data,
+          );
+          setExchangeRates(
+            ratesRes.data ||
+              FALLBACK_RATES,
           );
         } catch (error) {
           console.error(
-            "Failed to load feed",
+            "Failed to load feed and rates",
             error,
           );
         } finally {
@@ -293,7 +869,6 @@ const FanFeed =
             response.data;
           const currentFeed =
             feedRef.current;
-
           if (
             currentFeed.length ===
             0
@@ -382,9 +957,6 @@ const FanFeed =
         );
       };
 
-    // ==========================================
-    // 3. SOCIAL INTERACTIONS
-    // ==========================================
     const handleFollowToggle =
       async (
         creatorId,
@@ -419,17 +991,11 @@ const FanFeed =
               },
             ),
         );
-
         try {
           await api.post(
             `/users/${creatorId}/follow`,
           );
-        } catch (error) {
-          console.error(
-            "Failed to sync follow state",
-            error,
-          );
-        }
+        } catch (error) {}
       };
 
     const handleLike =
@@ -470,16 +1036,11 @@ const FanFeed =
               },
             ),
         );
-
         try {
           await api.post(
             `/content/${postId}/like`,
           );
-        } catch (error) {
-          console.error(
-            "Failed to sync like with server",
-          );
-        }
+        } catch (error) {}
       };
 
     const handleBookmark =
@@ -504,16 +1065,11 @@ const FanFeed =
                   : post,
             ),
         );
-
         try {
           await api.post(
             `/content/${postId}/bookmark`,
           );
-        } catch (error) {
-          console.error(
-            "Failed to sync bookmark with server",
-          );
-        }
+        } catch (error) {}
       };
 
     const submitComment =
@@ -527,7 +1083,6 @@ const FanFeed =
         setSubmittingComment(
           true,
         );
-
         try {
           const response =
             await api.post(
@@ -536,7 +1091,6 @@ const FanFeed =
                 text: commentText,
               },
             );
-
           setFeed(
             (
               prevFeed,
@@ -573,9 +1127,6 @@ const FanFeed =
             "",
           );
         } catch (error) {
-          console.error(
-            "Failed to post comment",
-          );
           alert(
             "Could not post comment. Try again.",
           );
@@ -586,9 +1137,6 @@ const FanFeed =
         }
       };
 
-    // ==========================================
-    // 4. PAYMENTS & CHECKOUT
-    // ==========================================
     const closeModal =
       () => {
         setPaymentModalPost(
@@ -613,19 +1161,39 @@ const FanFeed =
         setCryptoQuote(
           null,
         );
+
         try {
-          const baseAmountUSD =
-            paymentModalPost.displayPrice ||
-            paymentModalPost.actualPrice ||
-            0;
+          let exactUSDAmount = 0;
+
+          // Use the exact reverse calculation leveraging the globally cached rates
+          if (
+            paymentModalPost.creatorCurrency ===
+            "USD"
+          ) {
+            exactUSDAmount =
+              paymentModalPost.creatorRawPrice;
+          } else {
+            const toFanRate =
+              exchangeRates[
+                paymentModalPost
+                  .fanCurrency
+              ] ||
+              1;
+            exactUSDAmount =
+              paymentModalPost.fanPrice /
+              toFanRate;
+          }
+
+          // Send the exact USD amount to Bybit Quote endpoint
           const res =
             await api.post(
               "/purchases/crypto-quote",
               {
                 amountUSD:
-                  baseAmountUSD,
+                  exactUSDAmount,
               },
             );
+
           setCryptoQuote(
             res.data,
           );
@@ -658,19 +1226,14 @@ const FanFeed =
           paymentModalPost
             .creator
             ?._id;
-        const baseAmountUSD =
-          paymentModalPost.displayPrice ||
-          paymentModalPost.actualPrice;
 
         if (
           paymentMethod ===
           "CARD"
         ) {
-          const exchangeRate = 1500;
-          const amountInKobo =
+          const amountInSubunits =
             Math.round(
-              baseAmountUSD *
-                exchangeRate *
+              paymentModalPost.fanPrice *
                 100,
             );
 
@@ -686,7 +1249,9 @@ const FanFeed =
                     currentUser?.email ||
                     "fan@nippy.com",
                   amount:
-                    amountInKobo,
+                    amountInSubunits,
+                  currency:
+                    paymentModalPost.fanCurrency,
                 },
               onSuccess:
                 async (
@@ -709,9 +1274,18 @@ const FanFeed =
                           paymentModalPost._id,
                         purchaseType:
                           "PPV",
+                        // DUAL LEDGER PAYLOAD
+                        chargeAmount:
+                          paymentModalPost.fanPrice,
+                        chargeCurrency:
+                          paymentModalPost.fanCurrency,
+                        rawAmount:
+                          paymentModalPost.creatorRawPrice,
+                        rawCurrency:
+                          paymentModalPost.creatorCurrency,
                       },
                     );
-                    await fetchFeed();
+                    await fetchFeedAndRates();
                     closeModal();
                   } catch (error) {
                     alert(
@@ -741,35 +1315,30 @@ const FanFeed =
           setProcessingId(
             paymentModalPost._id,
           );
-
           if (
             !paymentModalPost
               .creator
               ?.walletAddress
-          ) {
+          )
             throw new Error(
-              "This creator has not set up their Web3 wallet address yet!",
+              "Creator missing Web3 wallet.",
             );
-          }
-
           if (
-            !cryptoQuote ||
-            !cryptoQuote.requiredUSDT
-          ) {
+            !cryptoQuote?.requiredUSDT
+          )
             throw new Error(
-              "Missing crypto quote. Please re-select the payment method.",
+              "Missing crypto quote.",
             );
-          }
 
           const txHash =
             await transferUSDT(
               paymentModalPost
                 .creator
                 .walletAddress,
-              cryptoQuote.requiredUSDT,
+              cryptoQuote.requiredUSDT, // chargeAmount (The fan's payment)
+              paymentModalPost.creatorRawPrice, // rawAmount (The creator's base price)
               paymentModalPost._id,
             );
-
           if (
             !txHash
           )
@@ -789,10 +1358,19 @@ const FanFeed =
                 paymentModalPost._id,
               purchaseType:
                 "PPV",
+              // DUAL LEDGER PAYLOAD
+              chargeAmount:
+                paymentModalPost.fanPrice,
+              chargeCurrency:
+                paymentModalPost.fanCurrency,
+              rawAmount:
+                paymentModalPost.creatorRawPrice,
+              rawCurrency:
+                paymentModalPost.creatorCurrency,
             },
           );
 
-          await fetchFeed();
+          await fetchFeedAndRates();
           closeModal();
         } catch (error) {
           alert(
@@ -812,18 +1390,16 @@ const FanFeed =
 
     if (
       loading
-    ) {
+    )
       return (
         <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse font-bold">
           Loading
           feed...
         </div>
       );
-    }
 
     return (
       <div className="max-w-2xl mx-auto py-8 px-4 relative">
-        {/* PENDING POSTS INJECT BUTTON */}
         {pendingPosts.length >
           0 && (
           <div className="sticky top-4 z-50 flex justify-center mb-6 animate-in slide-in-from-top-2 duration-300">
@@ -859,9 +1435,6 @@ const FanFeed =
             (
               post,
             ) => {
-              // ==========================================
-              // LIVE STREAM CARD
-              // ==========================================
               if (
                 post.type ===
                 "LIVE_STREAM"
@@ -876,10 +1449,7 @@ const FanFeed =
                     }
                     className="feed-post-card mb-10 bg-red-950/20 backdrop-blur-md border border-red-500/40 rounded-2xl overflow-hidden shadow-[0_0_20px_rgba(239,68,68,0.15)] relative"
                   >
-                    {/* Visual Flair */}
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-rose-500 animate-pulse"></div>
-
-                    {/* Header */}
                     <div className="flex items-center justify-between p-4 border-b border-red-500/20">
                       <div className="flex items-center gap-3">
                         <div className="relative">
@@ -921,8 +1491,6 @@ const FanFeed =
                         </div>
                       </div>
                     </div>
-
-                    {/* Body */}
                     <div className="p-8 text-center bg-black/40">
                       <h2 className="text-2xl font-black text-white mb-3">
                         {
@@ -950,7 +1518,6 @@ const FanFeed =
                         send
                         gifts.
                       </p>
-
                       {post.hasAccess ? (
                         <button
                           onClick={() =>
@@ -983,10 +1550,7 @@ const FanFeed =
                             }
                           />{" "}
                           Subscribe
-                          (₦
-                          {post.subscriptionPriceNGN ||
-                            0}
-                          )
+                          Profile
                         </button>
                       )}
                     </div>
@@ -994,460 +1558,58 @@ const FanFeed =
                 );
               }
 
-              // ==========================================
-              // STANDARD POST CARD
-              // ==========================================
               return (
-                <div
+                <FeedPostItem
                   key={
                     post._id
                   }
-                  data-post-id={
-                    post._id
+                  post={
+                    post
                   }
-                  className="feed-post-card mb-10 bg-nippy-obsidian/80 backdrop-blur-md border border-gray-800/60 rounded-2xl overflow-hidden shadow-xl"
-                >
-                  {/* Creator Header */}
-                  <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
-                    <Link
-                      to={`/creator/${post.creator?._id}`}
-                      className="flex items-center gap-3 group cursor-pointer"
-                    >
-                      {post
-                        .creator
-                        ?.profileImage ? (
-                        <img
-                          src={
-                            post
-                              .creator
-                              .profileImage
-                          }
-                          alt="Creator"
-                          className="w-10 h-10 rounded-full object-cover border border-gray-700 group-hover:border-emerald-500 transition-colors"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center border border-gray-600 group-hover:border-emerald-500 transition-colors">
-                          <span className="font-bold text-gray-300 group-hover:text-white">
-                            {post.creator?.username
-                              ?.charAt(
-                                0,
-                              )
-                              .toUpperCase() ||
-                              "U"}
-                          </span>
-                        </div>
-                      )}
-                      <div>
-                        <div className="font-bold text-slate-200 group-hover:text-emerald-500 transition-colors">
-                          {post
-                            .creator
-                            ?.username ||
-                            "Unknown"}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {new Date(
-                            post.createdAt,
-                          ).toLocaleDateString()}
-                        </div>
-                      </div>
-                    </Link>
-
-                    <div className="flex items-center gap-3">
-                      {post.displayPrice >
-                        0 && (
-                        <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
-                          <BadgeDollarSign
-                            size={
-                              14
-                            }
-                          />{" "}
-                          PPV
-                        </div>
-                      )}
-
-                      <button
-                        onClick={() =>
-                          handleFollowToggle(
-                            post
-                              .creator
-                              ?._id,
-                          )
-                        }
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
-                          post
-                            .creator
-                            ?.isFollowed
-                            ? "bg-transparent text-gray-400 border-gray-700 hover:border-rose-500 hover:text-rose-500"
-                            : "bg-white text-black border-transparent hover:bg-gray-200"
-                        }`}
-                      >
-                        {post
-                          .creator
-                          ?.isFollowed ? (
-                          <>
-                            <UserCheck
-                              size={
-                                14
-                              }
-                            />{" "}
-                            Following
-                          </>
-                        ) : (
-                          <>
-                            <UserPlus
-                              size={
-                                14
-                              }
-                            />{" "}
-                            Follow
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Media Container */}
-                  <div className="relative bg-black w-full min-h-[300px] max-h-[600px] flex items-center justify-center overflow-hidden">
-                    {post.isLocked ? (
-                      <video
-                        src={
-                          post.teaserUrl
-                        }
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
-                        onContextMenu={(
-                          e,
-                        ) =>
-                          e.preventDefault()
-                        }
-                        className="w-full h-auto max-h-[600px] object-cover blur-3xl scale-[1.2] opacity-70 pointer-events-none select-none"
-                      />
-                    ) : (
-                      <>
-                        {post.mediaUrl
-                          ?.toLowerCase()
-                          .match(
-                            /\.(jpg|jpeg|png|gif|webp)/i,
-                          ) ||
-                        post.fileType?.includes(
-                          "image",
-                        ) ||
-                        post.mediaType?.includes(
-                          "image",
-                        ) ? (
-                          <img
-                            src={
-                              post.mediaUrl
-                            }
-                            alt={
-                              post.title ||
-                              "Unlocked content"
-                            }
-                            onContextMenu={(
-                              e,
-                            ) =>
-                              e.preventDefault()
-                            }
-                            draggable="false"
-                            className="w-full h-auto max-h-[600px] object-contain select-none"
-                          />
-                        ) : (
-                          <video
-                            src={
-                              post.mediaUrl
-                            }
-                            controls
-                            controlsList="nodownload noplaybackrate"
-                            disablePictureInPicture
-                            onContextMenu={(
-                              e,
-                            ) =>
-                              e.preventDefault()
-                            }
-                            className="w-full h-auto max-h-[600px] object-contain"
-                          />
-                        )}
-                      </>
-                    )}
-
-                    {/* Lock Overlay */}
-                    {post.isLocked && (
-                      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center z-10 p-6">
-                        <Lock className="w-12 h-12 text-white/70 mb-3" />
-                        <h3 className="text-2xl font-extrabold text-white mb-1 shadow-black drop-shadow-md">
-                          Content
-                          Locked
-                        </h3>
-                        <p className="text-gray-200 text-sm mb-6 font-medium drop-shadow-md text-center max-w-xs">
-                          Unlock
-                          this
-                          content
-                          to
-                          view
-                          the
-                          full
-                          resolution
-                          media.
-                        </p>
-
-                        <div className="flex flex-col gap-3 w-full max-w-xs">
-                          <button
-                            onClick={() => {
-                              setPaymentModalPost(
-                                post,
-                              );
-                              setPaymentMethod(
-                                null,
-                              );
-                            }}
-                            className="bg-white hover:bg-gray-200 text-black font-bold py-3 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg"
-                          >
-                            <BadgeDollarSign
-                              size={
-                                20
-                              }
-                            />
-                            Unlock
-                            for
-                            $
-                            {post.displayPrice?.toFixed(
-                              2,
-                            ) ||
-                              post.actualPrice}{" "}
-                            USD
-                          </button>
-
-                          <Link
-                            to={`/creator/${post.creator?._id}`}
-                            className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-gray-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
-                          >
-                            Subscribe
-                            to
-                            Creator
-                          </Link>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Content Details */}
-                  <div className="p-4">
-                    <h2 className="text-lg font-bold text-slate-200 mb-1">
-                      {
-                        post.title
-                      }
-                    </h2>
-                    <p className="text-sm text-gray-400 mb-4">
-                      {
-                        post.description
-                      }
-                    </p>
-
-                    {post.isPaywalled &&
-                      !post.isUnlocked && (
-                        <button
-                          onClick={() => {
-                            setPaymentModalPost(
-                              post,
-                            );
-                            setPaymentMethod(
-                              null,
-                            );
-                          }}
-                          className="px-4 py-2 mb-4 bg-[#FF5757] text-white rounded-lg font-bold text-sm hover:bg-rose-600 transition-colors"
-                        >
-                          Unlock
-                          for
-                          USD{" "}
-                          {post.displayPrice?.toFixed(
-                            2,
-                          ) ||
-                            post.actualPrice}
-                        </button>
-                      )}
-
-                    <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
-                      <div className="flex items-center gap-6">
-                        <button
-                          onClick={() =>
-                            handleLike(
-                              post._id,
-                            )
-                          }
-                          className="flex items-center gap-2 group transition-colors"
-                        >
-                          <Heart
-                            size={
-                              22
-                            }
-                            className={`transition-all duration-200 ${
-                              post.isLiked
-                                ? "text-rose-500 fill-current scale-110"
-                                : "text-gray-400 group-hover:text-rose-500"
-                            }`}
-                          />
-                          <span className="text-sm text-gray-400 font-medium">
-                            {post.likesCount ||
-                              0}
-                          </span>
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            setActiveCommentPostId(
-                              activeCommentPostId ===
-                                post._id
-                                ? null
-                                : post._id,
-                            )
-                          }
-                          className="flex items-center gap-2 group transition-colors"
-                        >
-                          <MessageCircle
-                            size={
-                              22
-                            }
-                            className="text-gray-400 group-hover:text-blue-400"
-                          />
-                          <span className="text-sm text-gray-400 font-medium">
-                            {post.commentsCount ||
-                              0}
-                          </span>
-                        </button>
-
-                        <div className="flex items-center gap-2 text-gray-500">
-                          <Eye
-                            size={
-                              22
-                            }
-                          />
-                          <span className="text-sm font-medium">
-                            {post.viewsCount ||
-                              0}
-                          </span>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() =>
-                          handleBookmark(
-                            post._id,
-                          )
-                        }
-                        className="transition-colors"
-                      >
-                        <Bookmark
-                          size={
-                            22
-                          }
-                          className={
-                            post.isBookmarked
-                              ? "fill-white text-white"
-                              : "text-gray-400 hover:text-white"
-                          }
-                        />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Comments Section */}
-                  {activeCommentPostId ===
-                    post._id && (
-                    <div className="bg-slate-900/80 backdrop-blur-md border-t border-gray-800/60 p-4 animate-in slide-in-from-top-2">
-                      <div className="max-h-48 overflow-y-auto mb-4 space-y-3 pr-2 scrollbar-thin scrollbar-thumb-gray-700">
-                        {post.comments &&
-                        post
-                          .comments
-                          .length >
-                          0 ? (
-                          post.comments.map(
-                            (
-                              comment,
-                            ) => (
-                              <div
-                                key={
-                                  comment._id
-                                }
-                                className="text-sm"
-                              >
-                                <span className="font-bold text-slate-300 mr-2">
-                                  {
-                                    comment
-                                      .user
-                                      .username
-                                  }
-                                </span>
-                                <span className="text-gray-400">
-                                  {
-                                    comment.text
-                                  }
-                                </span>
-                              </div>
-                            ),
-                          )
-                        ) : (
-                          <p className="text-xs text-gray-500 text-center italic">
-                            No
-                            comments
-                            yet.
-                            Be
-                            the
-                            first!
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 relative">
-                        <input
-                          type="text"
-                          value={
-                            commentText
-                          }
-                          onChange={(
-                            e,
-                          ) =>
-                            setCommentText(
-                              e
-                                .target
-                                .value,
-                            )
-                          }
-                          placeholder="Write a comment..."
-                          onKeyDown={(
-                            e,
-                          ) =>
-                            e.key ===
-                              "Enter" &&
-                            submitComment(
-                              post._id,
-                            )
-                          }
-                          className="w-full bg-black border border-gray-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:outline-none focus:border-emerald-500"
-                        />
-                        <button
-                          onClick={() =>
-                            submitComment(
-                              post._id,
-                            )
-                          }
-                          disabled={
-                            submittingComment ||
-                            !commentText.trim()
-                          }
-                          className="absolute right-2 text-emerald-500 hover:text-emerald-400 disabled:opacity-50 transition-colors p-1"
-                        >
-                          <Send
-                            size={
-                              18
-                            }
-                          />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                  exchangeRates={
+                    exchangeRates
+                  }
+                  fanCurrency={
+                    fanCurrency
+                  }
+                  onFollowToggle={
+                    handleFollowToggle
+                  }
+                  onLike={
+                    handleLike
+                  }
+                  onBookmark={
+                    handleBookmark
+                  }
+                  activeCommentPostId={
+                    activeCommentPostId
+                  }
+                  setActiveCommentPostId={
+                    setActiveCommentPostId
+                  }
+                  commentText={
+                    commentText
+                  }
+                  setCommentText={
+                    setCommentText
+                  }
+                  submitComment={
+                    submitComment
+                  }
+                  submittingComment={
+                    submittingComment
+                  }
+                  openPaymentModal={(
+                    modalData,
+                  ) => {
+                    setPaymentModalPost(
+                      modalData,
+                    );
+                    setPaymentMethod(
+                      null,
+                    );
+                  }}
+                />
               );
             },
           )
@@ -1497,10 +1659,12 @@ const FanFeed =
                   </span>{" "}
                   for{" "}
                   <span className="text-emerald-500 font-bold">
-                    $
-                    {paymentModalPost.displayPrice ||
-                      paymentModalPost.actualPrice}{" "}
-                    USD
+                    {paymentModalPost.fanPrice?.toFixed(
+                      2,
+                    )}{" "}
+                    {
+                      paymentModalPost.fanCurrency
+                    }
                   </span>
                 </p>
 
@@ -1529,7 +1693,6 @@ const FanFeed =
                       MetaMask
                     </span>
                   </button>
-
                   <button
                     onClick={() =>
                       setPaymentMethod(
@@ -1560,7 +1723,6 @@ const FanFeed =
                   </button>
                 </div>
 
-                {/* DYNAMIC CRYPTO QUOTE DISPLAY */}
                 {paymentMethod ===
                   "CRYPTO" &&
                   fetchingQuote && (
@@ -1578,11 +1740,12 @@ const FanFeed =
                       <p className="text-sm text-gray-400 mb-1">
                         Total:{" "}
                         <span className="text-white">
-                          $
-                          {cryptoQuote.amountUSD.toFixed(
+                          {paymentModalPost.fanPrice?.toFixed(
                             2,
                           )}{" "}
-                          USD
+                          {
+                            paymentModalPost.fanCurrency
+                          }
                         </span>
                       </p>
                       <p className="text-xl font-bold text-emerald-400">
@@ -1623,7 +1786,13 @@ const FanFeed =
                 >
                   {processingId ===
                   paymentModalPost._id ? (
-                    <span className="animate-pulse">
+                    <span className="animate-pulse flex items-center gap-2">
+                      <Loader2
+                        size={
+                          18
+                        }
+                        className="animate-spin"
+                      />{" "}
                       Processing...
                     </span>
                   ) : (

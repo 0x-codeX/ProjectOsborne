@@ -11,6 +11,7 @@ const Wallet = require("../models/Wallet");
 const Notification = require("../models/Notification");
 const {
   convertAndRoundPrice,
+  getExchangeRates,
 } = require("../utils/currencyConversion");
 
 const {
@@ -59,8 +60,12 @@ exports.verifyPayment =
         purchaseType,
         messageId,
         subscriptionTier,
-        baseGiftAmountNGN, // <-- ADDED: For Live Gifts
-        streamId, // <-- ADDED: To target the specific live stream room
+        streamId,
+        // THE FIX: The Dual Ledger Payload
+        chargeAmount,
+        chargeCurrency,
+        rawAmount,
+        rawCurrency,
       } =
         req.body;
 
@@ -68,11 +73,6 @@ exports.verifyPayment =
         req
           .user
           ._id;
-      const userCountry =
-        req
-          .user
-          ?.country ||
-        "United States";
       const normalizedPurchaseType =
         purchaseType
           ? purchaseType
@@ -134,14 +134,14 @@ exports.verifyPayment =
           );
       }
 
-      // 2. Branch Logic: Fetch Creator & Determine Expected BASE Price (NGN)
+      // 2. SECURITY CHECK: Fetch DB Truth for Base Price
       let creator =
         await User.findById(
           creatorId,
         );
       let content =
         null;
-      let expectedBasePriceNGN = 0;
+      let dbBasePrice = 0; // The true, untampered base price from the database
 
       if (
         normalizedPurchaseType ===
@@ -160,10 +160,6 @@ exports.verifyPayment =
                   "creatorId is required.",
               },
             );
-        creator =
-          await User.findById(
-            creatorId,
-          );
         if (
           !creator
         )
@@ -182,7 +178,7 @@ exports.verifyPayment =
           subscriptionTier ===
           "Weekly"
         ) {
-          expectedBasePriceNGN =
+          dbBasePrice =
             creator
               .monetizationSettings
               ?.weeklySubscription ||
@@ -191,7 +187,7 @@ exports.verifyPayment =
           subscriptionTier ===
           "Monthly"
         ) {
-          expectedBasePriceNGN =
+          dbBasePrice =
             creator
               .monetizationSettings
               ?.monthlySubscription ||
@@ -202,21 +198,15 @@ exports.verifyPayment =
             "Bundle",
           )
         ) {
-          expectedBasePriceNGN =
+          dbBasePrice =
             creator
               .monetizationSettings
               ?.multiMonthPrice ||
             0;
-        } else {
-          expectedBasePriceNGN =
-            creator
-              .monetizationSettings
-              ?.monthlySubscription ||
-            0;
         }
 
         if (
-          expectedBasePriceNGN ===
+          dbBasePrice <=
           0
         )
           return res
@@ -246,10 +236,6 @@ exports.verifyPayment =
                   "creatorId is required.",
               },
             );
-        creator =
-          await User.findById(
-            creatorId,
-          );
         if (
           !creator
         )
@@ -264,13 +250,30 @@ exports.verifyPayment =
               },
             );
 
-        expectedBasePriceNGN =
+        // If bundle logic sends multiplied rawAmount, we must account for bundle quantity
+        const bundleQuantity =
+          req
+            .body
+            .bubbles
+            ? req
+                .body
+                .bubbles /
+              (creator
+                .monetizationSettings
+                ?.messageBundleSize ||
+                5)
+            : 1;
+        const baseBundlePrice =
           creator
             .monetizationSettings
             ?.messageBundlePrice ||
           0;
+        dbBasePrice =
+          baseBundlePrice *
+          bundleQuantity;
+
         if (
-          expectedBasePriceNGN ===
+          dbBasePrice <=
           0
         )
           return res
@@ -322,17 +325,16 @@ exports.verifyPayment =
 
         creator =
           content.creator;
-        expectedBasePriceNGN =
-          content.price !=
-          null
+        // Bulletproof raw price extraction (checking old and new fields)
+        dbBasePrice =
+          content.price !==
+          undefined
             ? content.price
-            : content.priceInUSDT !=
-                null
-              ? content.priceInUSDT
-              : creator
-                  .monetizationSettings
-                  ?.defaultPPVPrice ||
-                0;
+            : content.priceInUSDT ||
+              creator
+                .monetizationSettings
+                ?.defaultPPVPrice ||
+              0;
       } else if (
         normalizedPurchaseType ===
         "DM_UNLOCK"
@@ -372,14 +374,9 @@ exports.verifyPayment =
 
         creator =
           content.sender;
-        expectedBasePriceNGN =
-          content.price !=
-          null
-            ? content.price
-            : content.priceInUSDT ||
-              0;
-
-        // --- ADDED: LIVE GIFT LOGIC ---
+        dbBasePrice =
+          content.price ||
+          0;
       } else if (
         normalizedPurchaseType ===
         "LIVE_GIFT"
@@ -397,10 +394,6 @@ exports.verifyPayment =
                   "creatorId is required for gifts.",
               },
             );
-        creator =
-          await User.findById(
-            creatorId,
-          );
         if (
           !creator
         )
@@ -414,14 +407,13 @@ exports.verifyPayment =
                   "Creator not found.",
               },
             );
-
-        expectedBasePriceNGN =
+        dbBasePrice =
           Number(
-            baseGiftAmountNGN,
+            rawAmount,
           ) ||
           0;
         if (
-          expectedBasePriceNGN <=
+          dbBasePrice <=
           0
         )
           return res
@@ -436,17 +428,30 @@ exports.verifyPayment =
             );
       }
 
-      // 3. DYNAMIC PRICING EVALUATION
-      const expectedPricing =
-        await convertAndRoundPrice(
-          expectedBasePriceNGN,
-          userCountry,
-        );
-      let actualAmount = 0;
+      // FRAUD CHECK: Ensure the rawAmount provided by the frontend matches the actual DB base price
+      // We allow a tiny 2% margin of error for floating point calculations.
+      if (
+        Number(
+          rawAmount,
+        ) <
+        dbBasePrice *
+          0.98
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Fraud detected: Base price mismatch.",
+            },
+          );
+      }
 
-      // ==========================================
-      // 4. WEB2.5 BRANCHING: FIAT VS CRYPTO
-      // ==========================================
+      // 3. WEB2 / WEB3 GATEWAY VERIFICATION
+      let actualPaidAmount = 0;
+
       if (
         paymentMethod ===
         "FIAT"
@@ -482,15 +487,19 @@ exports.verifyPayment =
             );
         }
 
-        const paystackAmountNGN =
+        const paystackAmount =
           paymentData.amount /
-          100;
+          100; // Paystack returns subunits
 
-        // 5% Slippage tolerance
+        // Ensure Paystack charged the expected fan currency and amount
         if (
-          paystackAmountNGN <
-          expectedPricing.paystackNGNAmount *
-            0.95
+          paystackAmount <
+            Number(
+              chargeAmount,
+            ) *
+              0.95 ||
+          paymentData.currency !==
+            chargeCurrency
         ) {
           return res
             .status(
@@ -499,13 +508,13 @@ exports.verifyPayment =
             .json(
               {
                 message:
-                  "Fraud: Insufficient payment amount detected.",
+                  "Fraud: Insufficient payment amount or currency mismatch.",
               },
             );
         }
 
-        actualAmount =
-          expectedPricing.displayPrice;
+        actualPaidAmount =
+          paystackAmount;
       } else {
         // --- WEB3 (POLYGON) VERIFICATION ---
         if (
@@ -538,6 +547,7 @@ exports.verifyPayment =
         let receipt =
           null;
 
+        // Retry mechanism for RPC indexing delays
         for (
           let i = 0;
           i <
@@ -614,7 +624,7 @@ exports.verifyPayment =
         if (
           tx.to.toLowerCase() !==
           GATEWAY_ADDRESS
-        )
+        ) {
           return res
             .status(
               400,
@@ -625,6 +635,7 @@ exports.verifyPayment =
                   "Fraud: Transaction was not sent to Gateway contract.",
               },
             );
+        }
 
         const iface =
           new ethers.Interface(
@@ -658,7 +669,7 @@ exports.verifyPayment =
           decoded.args[0].toLowerCase();
         const actualRecipient =
           decoded.args[1].toLowerCase();
-        actualAmount =
+        const transferredUSDT =
           Number(
             ethers.formatUnits(
               decoded
@@ -695,23 +706,29 @@ exports.verifyPayment =
                   "Fraud: Wallet mismatch.",
               },
             );
+
+        // Because USDT is pegged to USD, the transferred amount MUST cover the base dbBasePrice at minimum.
         if (
-          actualAmount <
-          expectedPricing.displayPrice
-        )
+          transferredUSDT <
+          dbBasePrice *
+            0.95
+        ) {
           return res
             .status(
               400,
             )
             .json(
               {
-                message:
-                  "Fraud: Insufficient payment.",
+                message: `Fraud: Insufficient payment. Transferred ${transferredUSDT} USDT, base price is ${dbBasePrice}.`,
               },
             );
+        }
+
+        actualPaidAmount =
+          transferredUSDT;
       }
 
-      // 5. CREATE PURCHASE RECORD WITH DYNAMIC EXPIRATION & PRICING AUDIT
+      // 4. CREATE DUAL-LEDGER PURCHASE RECORD
       let expiresAt =
         null;
       if (
@@ -776,17 +793,18 @@ exports.verifyPayment =
           creator:
             creator._id ||
             creator,
+
+          // Dual Ledger Save
           amountPaid:
-            Number(
-              actualAmount,
-            ),
+            actualPaidAmount, // Exact amount Fan Paid
           currency:
-            expectedPricing.displayCurrency,
+            paymentMethod ===
+            "CRYPTO"
+              ? "USDT"
+              : chargeCurrency,
           basePriceNGN:
-            expectedPricing.basePriceNGN,
-          platformMarginNGN:
-            expectedPricing.paystackNGNAmount -
-            expectedPricing.basePriceNGN,
+            rawAmount, // Saving the Creator's Raw DB Base price here for historical split reference
+
           purchaseType:
             normalizedPurchaseType,
           expiresAt,
@@ -819,9 +837,6 @@ exports.verifyPayment =
           dbError.code ===
           11000
         ) {
-          console.log(
-            `[i] Race condition handled safely: Transaction already indexed by background listener.`,
-          );
           purchase =
             await Purchase.findOne(
               {
@@ -852,7 +867,7 @@ exports.verifyPayment =
         throw dbError;
       }
 
-      // 6. FULFILLMENT: UNLOCK CONTENT/MESSAGE
+      // 5. FULFILLMENT: UNLOCK CONTENT/MESSAGE
       const fanUser =
         await User.findById(
           buyerId,
@@ -905,18 +920,19 @@ exports.verifyPayment =
         const bundleSize =
           creator
             .monetizationSettings
-            .messageBundleSize ||
+            ?.messageBundleSize ||
           5;
-        const bundlesPurchased =
-          Math.floor(
-            Number(
-              actualAmount,
-            ) /
-              expectedPricing.displayPrice,
-          );
+        const bundleQuantity =
+          req
+            .body
+            .bubbles
+            ? req
+                .body
+                .bubbles /
+              bundleSize
+            : 1;
         const bubblesToCredit =
-          (bundlesPurchased ||
-            1) *
+          bundleQuantity *
           bundleSize;
 
         await Conversation.findOneAndUpdate(
@@ -931,9 +947,7 @@ exports.verifyPayment =
               bubblesLeft:
                 bubblesToCredit,
               lifetimeValue:
-                Number(
-                  actualAmount,
-                ),
+                actualPaidAmount,
             },
             $setOnInsert:
               {
@@ -953,13 +967,14 @@ exports.verifyPayment =
         );
       }
 
-      // 7. CREATOR WALLET SPLIT
+      // 6. CREATOR WALLET SPLIT (THE SKIM ARCHITECTURE)
+      // The creator gets exactly 80% of their BASE PRICE (rawAmount), regardless of how bloated the fan price was.
       const PLATFORM_FEE = 0.2;
       const creatorEarnings =
         Number(
           (
             Number(
-              actualAmount,
+              rawAmount,
             ) *
             (1 -
               PLATFORM_FEE)
@@ -989,7 +1004,7 @@ exports.verifyPayment =
         },
       );
 
-      // 8. DUAL NOTIFICATION DISPATCHER & SOCKET EVENT
+      // 7. NOTIFICATIONS
       try {
         const creatorIdStr =
           creator._id
@@ -1006,12 +1021,12 @@ exports.verifyPayment =
           "PAYMENT_SUCCESS";
         let fanNotifTitle =
           "Purchase Successful";
-        let fanNotifMessage = `Your payment of ${expectedPricing.displayCurrency} ${Number(actualAmount)} was successful.`;
+        let fanNotifMessage = `Your payment of ${chargeCurrency} ${Number(chargeAmount).toFixed(2)} was successful.`;
         let fanActionUrl = `/creator/${creatorIdStr}`;
 
         let creatorNotifTitle =
           "New Sale!";
-        let creatorNotifMessage = `${fanName} purchased your content for ${expectedPricing.displayCurrency} ${Number(actualAmount)}!`;
+        let creatorNotifMessage = `${fanName} purchased your content.`;
         let creatorActionUrl =
           "/fan/dashboard";
 
@@ -1035,12 +1050,11 @@ exports.verifyPayment =
             "GIFT_SENT";
           fanNotifTitle =
             "Gift Sent!";
-          fanNotifMessage = `You successfully gifted ${creatorName} ${expectedPricing.displayCurrency} ${Number(actualAmount)}.`;
+          fanNotifMessage = `You successfully gifted ${creatorName} ${chargeCurrency} ${Number(chargeAmount).toFixed(2)}.`;
           creatorNotifTitle =
             "New Live Gift! 🎁";
-          creatorNotifMessage = `${fanName} just gifted you ${expectedPricing.displayCurrency} ${Number(actualAmount)}!`;
+          creatorNotifMessage = `${fanName} just sent you a gift!`;
 
-          // --- ADDED: REAL-TIME SOCKET.IO TRIGGER FOR LIVE CHAT ---
           if (
             req.io
           ) {
@@ -1056,11 +1070,11 @@ exports.verifyPayment =
                   fanName,
                 amount:
                   Number(
-                    actualAmount,
+                    chargeAmount,
                   ),
                 currency:
-                  expectedPricing.displayCurrency,
-                message: `🔥 ${fanName} just gifted ${expectedPricing.displayCurrency} ${Number(actualAmount)}!`,
+                  chargeCurrency,
+                message: `🔥 ${fanName} just sent a gift!`,
               },
             );
           }
@@ -1153,7 +1167,6 @@ exports.getFanDashboard =
         req
           .user
           ._id;
-
       const page =
         parseInt(
           req
@@ -1278,7 +1291,6 @@ exports.getFanDashboard =
                     .fileKey
                 )
                   return p;
-
                 const command =
                   new GetObjectCommand(
                     {
@@ -1291,7 +1303,6 @@ exports.getFanDashboard =
                         .fileKey,
                     },
                   );
-
                 const secureUrl =
                   await getSignedUrl(
                     s3,
@@ -1300,7 +1311,6 @@ exports.getFanDashboard =
                       expiresIn: 3600,
                     },
                   );
-
                 return {
                   ...p,
                   content:
@@ -1416,7 +1426,6 @@ exports.getCryptoQuote =
             await axios.get(
               "https://api.bybit.com/v5/market/tickers?category=spot&symbol=USDTUSD",
             );
-
           if (
             response.data &&
             response
@@ -1429,7 +1438,7 @@ exports.getCryptoQuote =
               .length >
               0
           ) {
-            const lastPrice =
+            cachedUsdtRate =
               parseFloat(
                 response
                   .data
@@ -1437,8 +1446,6 @@ exports.getCryptoQuote =
                   .list[0]
                   .lastPrice,
               );
-            cachedUsdtRate =
-              lastPrice;
             rateTimestamp =
               now;
           } else {
@@ -1504,3 +1511,15 @@ exports.getCryptoQuote =
         );
     }
   };
+
+// GET /api/exchange-rates
+exports.getLiveExchangeRates = async (req, res) => {
+  try {
+    const rates = await getExchangeRates();
+    res.status(200).json(rates);
+  } catch (error) {
+    console.error("Failed to fetch rates:", error);
+    // Ultimate backend fallback
+    res.status(500).json({ USD: 1, NGN: 1500, EUR: 0.92, GBP: 0.79 }); 
+  }
+};

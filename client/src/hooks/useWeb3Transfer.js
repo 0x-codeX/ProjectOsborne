@@ -9,7 +9,7 @@ const POLYGON_CHAIN_ID =
 const USDT_CONTRACT_ADDRESS =
   "0x3A08E5dC512f099648e491bA38D0c7E2efFbb7DB";
 const GATEWAY_ADDRESS =
-  "0xdb9Ea8BCd26aC0c99AE0518187D2082646e42461";
+  "0x87ee106bd7Fa3DA44B6FaA432c3f3FfA4DB2A72E";
 
 // Minimal Fan-Facing ABIs
 const USDT_ABI =
@@ -18,10 +18,11 @@ const USDT_ABI =
     "function balanceOf(address account) view returns (uint256)",
   ];
 
+// THE FIX: Updated ABI to match the Smart Contract
 const GATEWAY_ABI =
   [
-    "function purchaseWithERC20(address token, address creator, bytes32 contentId, uint256 price) external",
-    "function purchaseWithNative(address payable creator, bytes32 contentId) external payable",
+    "function purchaseWithERC20(address token, address creator, bytes32 contentId, uint256 rawBasePrice, uint256 chargeAmount) external",
+    "function purchaseWithNative(address payable creator, bytes32 contentId, uint256 rawBasePrice) external payable",
   ];
 
 export const useWeb3Transfer =
@@ -112,10 +113,12 @@ export const useWeb3Transfer =
         }
       };
 
+    // THE FIX: Accepts both chargeAmount (what fan pays) and rawAmount (creator's base price)
     const transferUSDT =
       async (
         creatorAddress,
-        priceAmount,
+        chargeAmount,
+        rawAmount,
         contentId = null,
       ) => {
         setIsProcessingTx(
@@ -156,9 +159,15 @@ export const useWeb3Transfer =
               signer,
             );
 
-          const amountParsed =
+          // Parse both amounts into 6 decimals for USDT
+          const chargeAmountParsed =
             ethers.parseUnits(
-              priceAmount.toString(),
+              chargeAmount.toString(),
+              6,
+            );
+          const rawAmountParsed =
+            ethers.parseUnits(
+              rawAmount.toString(),
               6,
             );
 
@@ -189,7 +198,7 @@ export const useWeb3Transfer =
           const approveTx =
             await usdtContract.approve(
               GATEWAY_ADDRESS,
-              amountParsed,
+              chargeAmountParsed,
             );
 
           // IRONCLAD UPGRADE: Catch flaky RPC rate limits on approval
@@ -216,12 +225,14 @@ export const useWeb3Transfer =
           console.log(
             "2. Approval assumed complete. Executing Gateway Purchase...",
           );
+          // THE FIX: Pass both rawAmountParsed and chargeAmountParsed to the smart contract
           const purchaseTx =
             await gatewayContract.purchaseWithERC20(
               USDT_CONTRACT_ADDRESS,
               creatorAddress,
               bytes32ContentId,
-              amountParsed,
+              rawAmountParsed,
+              chargeAmountParsed,
             );
 
           // IRONCLAD UPGRADE: If wait() fails due to a network 400 error, we still return the hash

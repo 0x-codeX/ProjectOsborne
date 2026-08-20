@@ -11,23 +11,9 @@ import {
   Edit3,
   MessageSquare,
   Globe,
+  Lock,
+  AlertTriangle,
 } from "lucide-react";
-
-const COUNTRY_TO_CURRENCY =
-  {
-    Nigeria:
-      "NGN",
-    "United States":
-      "USD",
-    "United Kingdom":
-      "GBP",
-    Kenya:
-      "KES",
-    Ghana:
-      "GHS",
-    default:
-      "USD",
-  };
 
 const MonetizationSettings =
   () => {
@@ -37,7 +23,7 @@ const MonetizationSettings =
     ] =
       useState(
         {
-          baseCurrency:
+          priceCurrency:
             "USD",
           defaultPPVPrice: 0,
           weeklySubscription: 0,
@@ -70,9 +56,11 @@ const MonetizationSettings =
       useState(
         false,
       );
+
+    // NEW: State to trigger the migration alert
     const [
-      userCountry,
-      setUserCountry,
+      migrationAlert,
+      setMigrationAlert,
     ] =
       useState(
         "",
@@ -89,20 +77,11 @@ const MonetizationSettings =
                 ) ||
                   "{}",
               );
+            // What they WANT their currency to be (from Creator Settings)
+            const universalCurrencyPref =
+              storedUser.preferredCurrency ||
+              "USD";
 
-            const country =
-              storedUser.country ||
-              "United States";
-            setUserCountry(
-              country,
-            );
-            const autoCurrency =
-              COUNTRY_TO_CURRENCY[
-                country
-              ] ||
-              COUNTRY_TO_CURRENCY.default;
-
-            // IRONCLAD FIX: Clean API call using the global interceptor
             const res =
               await api.get(
                 "/users/settings/monetization",
@@ -111,74 +90,110 @@ const MonetizationSettings =
             if (
               res.data
             ) {
-              setSettings(
-                {
-                  baseCurrency:
-                    res
-                      .data
-                      .baseCurrency ||
-                    autoCurrency,
-                  defaultPPVPrice:
-                    res
-                      .data
-                      .defaultPPVPrice ||
-                    0,
-                  weeklySubscription:
-                    res
-                      .data
-                      .weeklySubscription ||
-                    0,
-                  monthlySubscription:
-                    res
-                      .data
-                      .monthlySubscription ||
-                    0,
-                  multiMonthDuration:
-                    res
-                      .data
-                      .multiMonthDuration ||
-                    3,
-                  multiMonthPrice:
-                    res
-                      .data
-                      .multiMonthPrice ||
-                    0,
-                  messageBundleSize:
-                    res
-                      .data
-                      .messageBundleSize ||
-                    5,
-                  messageBundlePrice:
-                    res
-                      .data
-                      .messageBundlePrice ||
-                    0,
-                },
-              );
+              // What their currency CURRENTLY IS in the active database
+              const activeDBPricingCurrency =
+                res
+                  .data
+                  .priceCurrency ||
+                "USD";
 
-              const hasSetupTiers =
-                Object.keys(
-                  res.data,
-                ).some(
-                  (
-                    key,
-                  ) =>
-                    key.includes(
-                      "Price",
-                    ) ||
-                    key.includes(
-                      "Subscription",
-                    )
-                      ? res
-                          .data[
-                          key
-                        ] >
-                        0
-                      : false,
+              // THE TRAP: Did they just change their currency in profile settings?
+              if (
+                universalCurrencyPref !==
+                activeDBPricingCurrency
+              ) {
+                // 1. Wipe the form to 0
+                setSettings(
+                  {
+                    priceCurrency:
+                      universalCurrencyPref,
+                    defaultPPVPrice: 0,
+                    weeklySubscription: 0,
+                    monthlySubscription: 0,
+                    multiMonthDuration: 3,
+                    multiMonthPrice: 0,
+                    messageBundleSize: 5,
+                    messageBundlePrice: 0,
+                  },
                 );
-              setIsEditing(
-                !hasSetupTiers,
-              );
+
+                // 2. Force the edit window open and lock it
+                setIsEditing(
+                  true,
+                );
+
+                // 3. Display the warning
+                setMigrationAlert(
+                  `You updated your profile currency to ${universalCurrencyPref}. Your old ${activeDBPricingCurrency} prices are still live for your fans. You must enter your new ${universalCurrencyPref} prices below and click Save to complete the transition.`,
+                );
+              } else {
+                // Currencies match. Load normally.
+                setSettings(
+                  {
+                    priceCurrency:
+                      activeDBPricingCurrency,
+                    defaultPPVPrice:
+                      res
+                        .data
+                        .defaultPPVPrice ||
+                      0,
+                    weeklySubscription:
+                      res
+                        .data
+                        .weeklySubscription ||
+                      0,
+                    monthlySubscription:
+                      res
+                        .data
+                        .monthlySubscription ||
+                      0,
+                    multiMonthDuration:
+                      res
+                        .data
+                        .multiMonthDuration ||
+                      3,
+                    multiMonthPrice:
+                      res
+                        .data
+                        .multiMonthPrice ||
+                      0,
+                    messageBundleSize:
+                      res
+                        .data
+                        .messageBundleSize ||
+                      5,
+                    messageBundlePrice:
+                      res
+                        .data
+                        .messageBundlePrice ||
+                      0,
+                  },
+                );
+
+                const hasSetupTiers =
+                  Object.keys(
+                    res.data,
+                  ).some(
+                    (
+                      key,
+                    ) =>
+                      key.includes(
+                        "Price",
+                      ) ||
+                      key.includes(
+                        "Subscription",
+                      )
+                        ? res
+                            .data[
+                            key
+                          ] >
+                          0
+                        : false,
+                  );
+                setIsEditing(
+                  !hasSetupTiers,
+                );
+              }
             }
             setStatus(
               "idle",
@@ -215,15 +230,12 @@ const MonetizationSettings =
           ) => ({
             ...prev,
             [name]:
-              name ===
-              "baseCurrency"
-                ? value
-                : value ===
-                    ""
-                  ? ""
-                  : Number(
-                      value,
-                    ),
+              value ===
+              ""
+                ? ""
+                : Number(
+                    value,
+                  ),
           }),
         );
       };
@@ -256,8 +268,8 @@ const MonetizationSettings =
           return;
         }
 
-        // IRONCLAD FIX: Force rounding up to 0.50 increment on every price field before sending
-        const roundPrice =
+        // Keep the exact price the creator entered. No rounding here!
+        const exactPrice =
           (
             price,
           ) => {
@@ -270,11 +282,7 @@ const MonetizationSettings =
             ) &&
               raw >
                 0
-              ? Math.ceil(
-                  raw *
-                    2,
-                ) /
-                  2
+              ? raw
               : 0;
           };
 
@@ -282,34 +290,32 @@ const MonetizationSettings =
           {
             ...settings,
             defaultPPVPrice:
-              roundPrice(
+              exactPrice(
                 settings.defaultPPVPrice,
               ),
             weeklySubscription:
-              roundPrice(
+              exactPrice(
                 settings.weeklySubscription,
               ),
             monthlySubscription:
-              roundPrice(
+              exactPrice(
                 settings.monthlySubscription,
               ),
             multiMonthPrice:
-              roundPrice(
+              exactPrice(
                 settings.multiMonthPrice,
               ),
             messageBundlePrice:
-              roundPrice(
+              exactPrice(
                 settings.messageBundlePrice,
               ),
           };
 
         try {
-          // IRONCLAD FIX: Clean API call using the global interceptor
           await api.put(
             "/users/settings/monetization",
             sanitizedPayload,
           );
-
           setSettings(
             sanitizedPayload,
           );
@@ -318,6 +324,9 @@ const MonetizationSettings =
           );
           setIsEditing(
             false,
+          );
+          setMigrationAlert(
+            "",
           );
         } catch (error) {
           setStatus(
@@ -346,7 +355,6 @@ const MonetizationSettings =
 
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-xl">
-        {/* CENTERED HEADER */}
         <div className="flex flex-col items-center justify-center mb-8 border-b border-slate-800 pb-6 relative">
           <div className="bg-slate-800 p-3 rounded-xl mb-3 shadow-lg">
             <Settings className="w-8 h-8 text-[#FF5757]" />
@@ -371,34 +379,74 @@ const MonetizationSettings =
             local
             fiat.
           </p>
-
-          {!isEditing && (
-            <button
-              onClick={() =>
-                setIsEditing(
-                  true,
-                )
-              }
-              className="mt-4 flex items-center text-sm bg-slate-800 hover:bg-slate-700 text-white py-2 px-4 rounded-lg transition-colors shadow-md"
-            >
-              <Edit3 className="w-4 h-4 mr-2" />{" "}
-              Edit
-              Prices
-            </button>
+          {/* MIGRATION WARNING BANNER */}
+          {migrationAlert && (
+            <div className="mb-8 p-6 bg-amber-500/10 border-2 border-amber-500/50 rounded-xl flex flex-col items-center text-center animate-in fade-in slide-in-from-top-4">
+              <div className="w-12 h-12 bg-amber-500/20 rounded-full flex items-center justify-center mb-4">
+                <AlertCircle className="w-6 h-6 text-amber-500" />
+              </div>
+              <h3 className="text-lg font-bold text-amber-400 mb-2">
+                Currency
+                Update
+                Pending
+              </h3>
+              <p className="text-amber-200/80 text-sm max-w-xl leading-relaxed">
+                {
+                  migrationAlert
+                }
+              </p>
+            </div>
           )}
+
+          {!isEditing &&
+            !migrationAlert && (
+              <button
+                onClick={() =>
+                  setIsEditing(
+                    true,
+                  )
+                }
+                className="mt-4 flex items-center text-sm bg-slate-800 hover:bg-slate-700 text-white py-2 px-4 rounded-lg transition-colors shadow-md"
+              >
+                <Edit3 className="w-4 h-4 mr-2" />{" "}
+                Edit
+                Prices
+              </button>
+            )}
         </div>
 
         {status ===
-          "error" && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-center text-center text-red-400">
-            <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0" />
-            {
-              message
-            }
+          "error" &&
+          !migrationAlert && (
+            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-center text-center text-red-400">
+              <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0" />
+              {
+                message
+              }
+            </div>
+          )}
+
+        {/* THE FIX: MIGRATION WARNING BANNER */}
+        {migrationAlert && (
+          <div className="mb-8 p-6 bg-amber-500/10 border-2 border-amber-500/50 rounded-xl flex flex-col items-center text-center animate-in fade-in slide-in-from-top-4">
+            <div className="w-12 h-12 bg-amber-500/20 rounded-full flex items-center justify-center mb-4">
+              <AlertTriangle className="w-6 h-6 text-amber-500" />
+            </div>
+            <h3 className="text-lg font-bold text-amber-400 mb-2">
+              Currency
+              Update
+              Pending
+            </h3>
+            <p className="text-amber-200/80 text-sm max-w-xl leading-relaxed">
+              {
+                migrationAlert
+              }
+            </p>
           </div>
         )}
 
-        {!isEditing ? (
+        {!isEditing &&
+        !migrationAlert ? (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center flex flex-col justify-center">
               <p className="text-sm text-slate-400 mb-1 text-center">
@@ -408,7 +456,7 @@ const MonetizationSettings =
               <p className="text-xl font-bold text-white text-center">
                 {settings.defaultPPVPrice >
                 0
-                  ? `${settings.defaultPPVPrice.toFixed(2)} ${settings.baseCurrency}`
+                  ? `${settings.defaultPPVPrice.toFixed(2)} ${settings.priceCurrency}`
                   : "Free"}
               </p>
             </div>
@@ -420,7 +468,7 @@ const MonetizationSettings =
               <p className="text-xl font-bold text-white text-center">
                 {settings.weeklySubscription >
                 0
-                  ? `${settings.weeklySubscription.toFixed(2)} ${settings.baseCurrency}`
+                  ? `${settings.weeklySubscription.toFixed(2)} ${settings.priceCurrency}`
                   : "Disabled"}
               </p>
             </div>
@@ -432,7 +480,7 @@ const MonetizationSettings =
               <p className="text-xl font-bold text-white text-center">
                 {settings.monthlySubscription >
                 0
-                  ? `${settings.monthlySubscription.toFixed(2)} ${settings.baseCurrency}`
+                  ? `${settings.monthlySubscription.toFixed(2)} ${settings.priceCurrency}`
                   : "Disabled"}
               </p>
             </div>
@@ -447,7 +495,7 @@ const MonetizationSettings =
               <p className="text-xl font-bold text-white text-center">
                 {settings.multiMonthPrice >
                 0
-                  ? `${settings.multiMonthPrice.toFixed(2)} ${settings.baseCurrency}`
+                  ? `${settings.multiMonthPrice.toFixed(2)} ${settings.priceCurrency}`
                   : "Disabled"}
               </p>
             </div>
@@ -466,7 +514,7 @@ const MonetizationSettings =
               <p className="text-xl font-bold text-white text-center">
                 {settings.messageBundlePrice >
                 0
-                  ? `${settings.messageBundlePrice.toFixed(2)} ${settings.baseCurrency}`
+                  ? `${settings.messageBundlePrice.toFixed(2)} ${settings.priceCurrency}`
                   : "Disabled"}
               </p>
               <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider font-bold text-center">
@@ -485,86 +533,39 @@ const MonetizationSettings =
             }
             className="space-y-8"
           >
-            <div className="bg-blue-500/10 border border-blue-500/20 p-6 rounded-xl flex flex-col items-center text-center gap-4">
-              <Globe className="w-8 h-8 text-blue-400 flex-shrink-0" />
+            <div
+              className={`border p-6 rounded-xl flex flex-col items-center text-center gap-4 ${migrationAlert ? "bg-amber-500/5 border-amber-500/20" : "bg-blue-500/10 border-blue-500/20"}`}
+            >
+              <Globe
+                className={`w-8 h-8 flex-shrink-0 ${migrationAlert ? "text-amber-500" : "text-blue-400"}`}
+              />
               <div className="w-full flex flex-col items-center">
-                <label className="block text-lg font-bold text-blue-400 mb-2 text-center">
+                <label
+                  className={`block text-lg font-bold mb-2 text-center ${migrationAlert ? "text-amber-500" : "text-blue-400"}`}
+                >
                   Your
                   Base
+                  Pricing
                   Currency
                 </label>
-                <p className="text-xs text-blue-300/70 mb-4 max-w-sm text-center">
-                  Based
-                  on
-                  your
-                  profile
-                  country
-                  (
-                  {
-                    userCountry
-                  }
-                  ),
-                  we
-                  recommend{" "}
-                  {COUNTRY_TO_CURRENCY[
-                    userCountry
-                  ] ||
-                    "USD"}
-                  .
-                  Set
-                  your
-                  prices
-                  in
-                  this
-                  currency.
-                  Fans
-                  will
-                  see
-                  these
-                  prices
-                  converted
-                  to
-                  their
-                  local
-                  currency
-                  automatically.
-                </p>
-                <select
-                  name="baseCurrency"
-                  value={
-                    settings.baseCurrency
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  className="bg-slate-950 border border-blue-500/30 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 w-full max-w-xs font-bold text-center"
+                <p
+                  className={`text-xs mb-4 max-w-md text-center ${migrationAlert ? "text-amber-200/70" : "text-blue-300/70"}`}
                 >
-                  <option value="NGN">
-                    NGN
-                    (Nigerian
-                    Naira)
-                  </option>
-                  <option value="USD">
-                    USD
-                    (US
-                    Dollar)
-                  </option>
-                  <option value="GBP">
-                    GBP
-                    (British
-                    Pound)
-                  </option>
-                  <option value="KES">
-                    KES
-                    (Kenyan
-                    Shilling)
-                  </option>
-                  <option value="GHS">
-                    GHS
-                    (Ghanaian
-                    Cedi)
-                  </option>
-                </select>
+                  {migrationAlert
+                    ? "Set your brand new prices based on the currency you just selected."
+                    : "Your content prices are firmly tied to your main profile settings. Whenever fans browse your content, they will automatically see real-time conversions."}
+                </p>
+
+                <div
+                  className={`bg-slate-950 border rounded-lg px-8 py-3 text-white font-bold text-xl flex items-center justify-center gap-3 ${migrationAlert ? "border-amber-500/30" : "border-blue-500/30"}`}
+                >
+                  <Lock
+                    className={`w-5 h-5 ${migrationAlert ? "text-amber-500" : "text-blue-400"}`}
+                  />
+                  {
+                    settings.priceCurrency
+                  }
+                </div>
               </div>
             </div>
 
@@ -575,15 +576,17 @@ const MonetizationSettings =
                 Prices
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div
+                  className={`bg-slate-950 p-4 rounded-xl border ${migrationAlert ? "border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]" : "border-slate-800"}`}
+                >
                   <label className="block text-sm font-medium text-slate-300 mb-2 text-center">
                     Default
                     PPV
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm font-bold">
                       {
-                        settings.baseCurrency
+                        settings.priceCurrency
                       }
                     </span>
                     <input
@@ -597,19 +600,21 @@ const MonetizationSettings =
                       onChange={
                         handleChange
                       }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-14 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
                     />
                   </div>
                 </div>
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div
+                  className={`bg-slate-950 p-4 rounded-xl border ${migrationAlert ? "border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]" : "border-slate-800"}`}
+                >
                   <label className="block text-sm font-medium text-slate-300 mb-2 text-center">
                     Weekly
                     Sub
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm font-bold">
                       {
-                        settings.baseCurrency
+                        settings.priceCurrency
                       }
                     </span>
                     <input
@@ -623,19 +628,21 @@ const MonetizationSettings =
                       onChange={
                         handleChange
                       }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-14 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
                     />
                   </div>
                 </div>
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div
+                  className={`bg-slate-950 p-4 rounded-xl border ${migrationAlert ? "border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]" : "border-slate-800"}`}
+                >
                   <label className="block text-sm font-medium text-slate-300 mb-2 text-center">
                     Monthly
                     Sub
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm font-bold">
                       {
-                        settings.baseCurrency
+                        settings.priceCurrency
                       }
                     </span>
                     <input
@@ -649,11 +656,13 @@ const MonetizationSettings =
                       onChange={
                         handleChange
                       }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-14 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
                     />
                   </div>
                 </div>
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative flex flex-col justify-center items-center">
+                <div
+                  className={`bg-slate-950 p-4 rounded-xl border relative flex flex-col justify-center items-center ${migrationAlert ? "border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]" : "border-slate-800"}`}
+                >
                   <select
                     name="multiMonthDuration"
                     value={
@@ -684,9 +693,9 @@ const MonetizationSettings =
                     </option>
                   </select>
                   <div className="relative w-full">
-                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm font-bold">
                       {
-                        settings.baseCurrency
+                        settings.priceCurrency
                       }
                     </span>
                     <input
@@ -700,7 +709,7 @@ const MonetizationSettings =
                       onChange={
                         handleChange
                       }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-14 pr-4 py-2 text-white focus:outline-none focus:border-[#FF5757]"
                     />
                   </div>
                 </div>
@@ -713,8 +722,12 @@ const MonetizationSettings =
                 Messaging
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 flex flex-col items-center">
-                  <label className="block text-sm font-medium text-emerald-400 mb-2 text-center">
+                <div
+                  className={`bg-slate-950 p-4 rounded-xl flex flex-col items-center border ${migrationAlert ? "border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]" : "border-emerald-500/30"}`}
+                >
+                  <label
+                    className={`block text-sm font-medium mb-2 text-center ${migrationAlert ? "text-amber-400" : "text-emerald-400"}`}
+                  >
                     Bundle
                     Size
                     (Multiples
@@ -732,7 +745,7 @@ const MonetizationSettings =
                     onChange={
                       handleChange
                     }
-                    className="w-full max-w-[200px] bg-slate-900 border border-emerald-500/50 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-lg text-center"
+                    className={`w-full max-w-[200px] bg-slate-900 rounded-lg px-4 py-2 text-white focus:outline-none font-bold text-lg text-center border ${migrationAlert ? "border-amber-500/50 focus:border-amber-500" : "border-emerald-500/50 focus:border-emerald-500"}`}
                   />
                   <p className="text-[10px] text-slate-500 mt-2 text-center">
                     Base
@@ -750,16 +763,20 @@ const MonetizationSettings =
                   </p>
                 </div>
 
-                <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 flex flex-col items-center">
-                  <label className="block text-sm font-medium text-emerald-400 mb-2 text-center">
+                <div
+                  className={`bg-slate-950 p-4 rounded-xl flex flex-col items-center border ${migrationAlert ? "border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]" : "border-emerald-500/30"}`}
+                >
+                  <label
+                    className={`block text-sm font-medium mb-2 text-center ${migrationAlert ? "text-amber-400" : "text-emerald-400"}`}
+                  >
                     Price
                     Per
                     Bundle
                   </label>
                   <div className="relative w-full max-w-[200px]">
-                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-lg">
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-lg font-bold">
                       {
-                        settings.baseCurrency
+                        settings.priceCurrency
                       }
                     </span>
                     <input
@@ -773,7 +790,7 @@ const MonetizationSettings =
                       onChange={
                         handleChange
                       }
-                      className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg pl-12 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-lg"
+                      className={`w-full bg-slate-900 rounded-lg pl-14 pr-4 py-2 text-white focus:outline-none font-bold text-lg border ${migrationAlert ? "border-amber-500/50 focus:border-amber-500" : "border-emerald-500/50 focus:border-emerald-500"}`}
                     />
                   </div>
                   <p className="text-[10px] text-slate-500 mt-2 text-center">
@@ -795,7 +812,7 @@ const MonetizationSettings =
                   status ===
                   "saving"
                 }
-                className="px-10 py-3 bg-[#FF5757] hover:bg-rose-600 text-white font-bold rounded-lg transition-colors flex items-center justify-center disabled:opacity-70 shadow-lg"
+                className={`px-10 py-3 text-white font-bold rounded-lg transition-colors flex items-center justify-center disabled:opacity-70 shadow-lg ${migrationAlert ? "bg-amber-600 hover:bg-amber-500" : "bg-[#FF5757] hover:bg-rose-600"}`}
               >
                 {status ===
                 "saving" ? (
@@ -812,17 +829,21 @@ const MonetizationSettings =
                   </>
                 )}
               </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setIsEditing(
-                    false,
-                  )
-                }
-                className="px-10 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
+
+              {/* Hide cancel button if they are forced into migration */}
+              {!migrationAlert && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setIsEditing(
+                      false,
+                    )
+                  }
+                  className="px-10 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           </form>
         )}

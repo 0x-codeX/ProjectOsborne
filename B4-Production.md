@@ -20,3 +20,5 @@ Block the attach media contents via chats for now.
 what is your architectural plan for handling fiat chargebacks on Paystack if a malicious fan uses a stolen credit card, buys a PPV, and the bank forces a reversal after the creator has already withdrawn the funds?
 
 We are going to look at the web live and ensure MTN is th cause by deploying the site.
+
+In live stream if two creators are live at thesame time ensure fan A gift does not go to creator B

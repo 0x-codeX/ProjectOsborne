@@ -23,6 +23,7 @@ import {
   Landmark,
   CreditCard,
   FileCheck,
+  Globe, // <-- Added Globe icon for currency
 } from "lucide-react";
 import { ethers } from "ethers";
 
@@ -227,6 +228,9 @@ const CreatorSettings =
             country:
               userData.country ||
               "",
+            preferredCurrency:
+              userData.preferredCurrency ||
+              "USD", // <-- ADDED PREFERRED CURRENCY
             willingNsfw:
               userData.willingNsfw ||
               false,
@@ -254,7 +258,7 @@ const CreatorSettings =
               "",
             bankCode:
               userData.bankCode ||
-              "", // CRITICAL: Added Bank Code
+              "",
             accountNumber:
               userData.accountNumber ||
               "",
@@ -296,7 +300,6 @@ const CreatorSettings =
         );
       };
 
-    // NEW: Handle simultaneous Bank Name & Bank Code selection
     const handleBankChange =
       (
         e,
@@ -371,7 +374,6 @@ const CreatorSettings =
         }
       };
 
-    // IRONCLAD NAME MATCHING ALGORITHM
     const validateNameMatch =
       (
         legalName,
@@ -478,7 +480,6 @@ const CreatorSettings =
         );
       };
 
-    // STEP 1: Intercept the Save Click
     const handleInitialSaveClick =
       (
         e,
@@ -491,7 +492,6 @@ const CreatorSettings =
           "",
         );
 
-        // ENFORCE KYC NAME MATCHING FOR WEB2 PAYOUTS
         if (
           user.kycStatus ===
             "verified" &&
@@ -531,7 +531,6 @@ const CreatorSettings =
             .length >
             0;
 
-        // Strict checks for ANY financial detail changes
         const payoutChanged =
           formData.payoutMethod !==
             (user.payoutMethod ||
@@ -545,7 +544,7 @@ const CreatorSettings =
               "") ||
           formData.bankCode !==
             (user.bankCode ||
-              "") || // Added Bank Code check
+              "") ||
           formData.accountNumber !==
             (user.accountNumber ||
               "") ||
@@ -584,7 +583,6 @@ const CreatorSettings =
         }
       };
 
-    // STEP 2: Handle the Security Popup Confirmation
     const handleSecureConfirm =
       async () => {
         setError(
@@ -652,9 +650,7 @@ const CreatorSettings =
                 `set a new backup password`,
               );
 
-            const message = `CONFIRM_ACCOUNT_UPDATE: I authorize changing my ${changesText.join(
-              " and ",
-            )}.`;
+            const message = `CONFIRM_ACCOUNT_UPDATE: I authorize changing my ${changesText.join(" and ")}.`;
             const securitySignature =
               await signer.signMessage(
                 message,
@@ -708,7 +704,6 @@ const CreatorSettings =
         }
       };
 
-    // STEP 3: API Call to Save
     const executeSave =
       async (
         authPayload,
@@ -719,6 +714,12 @@ const CreatorSettings =
         setError(
           "",
         );
+
+        // Track if the currency is being changed right now
+        const currencyChanged =
+          formData.preferredCurrency !==
+          (user.preferredCurrency ||
+            "USD");
 
         try {
           const token =
@@ -775,9 +776,6 @@ const CreatorSettings =
               updatedUser,
             ),
           );
-          setSuccessMsg(
-            "Settings updated successfully.",
-          );
 
           setFormData(
             (
@@ -795,6 +793,26 @@ const CreatorSettings =
               password: false,
             },
           );
+
+          // THE FIX: If currency changed, redirect immediately.
+          if (
+            currencyChanged
+          ) {
+            // UPDATE THIS PATH to match your exact React Router path for monetization settings
+            navigate(
+              "/creator/monetization",
+              {
+                state:
+                  {
+                    currencyChanged: true,
+                  },
+              },
+            );
+          } else {
+            setSuccessMsg(
+              "Settings updated successfully.",
+            );
+          }
         } catch (err) {
           setError(
             err.message,
@@ -808,7 +826,159 @@ const CreatorSettings =
 
     const handleDeleteAccount =
       async () => {
-        // ... [Your existing logic remains unchanged here]
+        setError(
+          "",
+        );
+
+        let authPayload =
+          {};
+
+        try {
+          if (
+            user.walletAddress
+          ) {
+            // --- WEB3 FLOW: Require MetaMask Signature ---
+            if (
+              !window.ethereum
+            )
+              throw new Error(
+                "MetaMask wallet is required to confirm deletion.",
+              );
+
+            let targetProvider =
+              window.ethereum;
+            if (
+              window
+                .ethereum
+                .providers
+                ?.length
+            ) {
+              targetProvider =
+                window.ethereum.providers.find(
+                  (
+                    p,
+                  ) =>
+                    p.isMetaMask,
+                ) ||
+                window
+                  .ethereum
+                  .providers[0];
+            }
+
+            const provider =
+              new ethers.BrowserProvider(
+                targetProvider,
+              );
+            const signer =
+              await provider.getSigner();
+
+            // Exact string match required by backend
+            const expectedMessage = `CONFIRM_ACCOUNT_DELETION: I confirm that I want to permanently delete my Nippy account (${user.walletAddress.toLowerCase()}).`;
+            const signature =
+              await signer.signMessage(
+                expectedMessage,
+              );
+
+            authPayload =
+              {
+                signature,
+              };
+          } else {
+            // --- WEB2 FLOW: Require Password ---
+            if (
+              !deletePassword
+            ) {
+              setError(
+                "Password is required to delete your account.",
+              );
+              return;
+            }
+            authPayload =
+              {
+                password:
+                  deletePassword,
+              };
+          }
+
+          setIsSaving(
+            true,
+          );
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            ) ||
+            localStorage.getItem(
+              "token",
+            );
+
+          // --- EXECUTE DELETION ---
+          const response =
+            await fetch(
+              "http://localhost:5000/api/users/profile",
+              {
+                method:
+                  "DELETE",
+                headers:
+                  {
+                    "Content-Type":
+                      "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                body: JSON.stringify(
+                  authPayload,
+                ),
+              },
+            );
+
+          const data =
+            await response.json();
+
+          if (
+            !response.ok
+          ) {
+            throw new Error(
+              data.message ||
+                "Failed to delete account.",
+            );
+          }
+
+          // --- WIPE LOCAL STATE & REDIRECT ---
+          localStorage.removeItem(
+            "nippy_user",
+          );
+          localStorage.removeItem(
+            "nippy_token",
+          );
+          localStorage.removeItem(
+            "token",
+          );
+
+          navigate(
+            "/auth/login",
+          );
+        } catch (err) {
+          console.error(
+            "Deletion Error:",
+            err,
+          );
+          if (
+            err.code ===
+            "ACTION_REJECTED"
+          ) {
+            setError(
+              "Signature request rejected. Account deletion cancelled.",
+            );
+          } else {
+            setError(
+              err.message ||
+                "An error occurred during account deletion.",
+            );
+          }
+        } finally {
+          setIsSaving(
+            false,
+          );
+        }
       };
 
     if (
@@ -818,7 +988,7 @@ const CreatorSettings =
 
     return (
       <div className="min-h-screen bg-slate-950 p-6 md:p-12 text-slate-200 font-sans relative">
-        {/* UNIFIED SECURITY POPUP OVERLAY */}
+        {/* SECURITY OVERLAY */}
         {showSecurityConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-slate-900 border border-amber-500/30 p-8 rounded-3xl w-full max-w-md shadow-2xl relative">
@@ -962,7 +1132,7 @@ const CreatorSettings =
             </button>
           </div>
 
-          {/* ERROR / SUCCESS ALERTS */}
+          {/* ALERTS */}
           {error && (
             <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-xl flex items-center text-red-500 text-sm font-medium">
               <AlertCircle className="w-5 h-5 mr-3 flex-shrink-0" />
@@ -1022,7 +1192,6 @@ const CreatorSettings =
               </div>
 
               <div className="flex-grow space-y-4">
-                {/* Username */}
                 <div>
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">
                     Username
@@ -1043,7 +1212,6 @@ const CreatorSettings =
                   </div>
                 </div>
 
-                {/* LEGAL NAME FIELD */}
                 <div>
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                     Legal
@@ -1112,12 +1280,11 @@ const CreatorSettings =
               </div>
             </div>
 
-            {/* Phone & Country */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* GRID: Phone, Country, & Currency */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">
                   Phone
-                  Number
                 </label>
                 <div className="relative">
                   <Phone className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-500" />
@@ -1138,7 +1305,6 @@ const CreatorSettings =
               <div>
                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">
                   Location
-                  (Country)
                 </label>
                 <div className="relative">
                   <MapPin className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-500" />
@@ -1153,6 +1319,55 @@ const CreatorSettings =
                     }
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-12 pr-4 text-white focus:outline-none focus:border-amber-500 transition-colors"
                   />
+                </div>
+              </div>
+
+              {/* THE FIX: PREFERRED CURRENCY SELECTOR */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
+                  <Globe className="w-3 h-3 text-amber-500" />{" "}
+                  Preferred
+                  Currency
+                </label>
+                <div className="relative">
+                  <select
+                    name="preferredCurrency"
+                    value={
+                      formData.preferredCurrency
+                    }
+                    onChange={
+                      handleChange
+                    }
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-amber-500 transition-colors appearance-none font-medium"
+                  >
+                    <option value="USD">
+                      USD
+                      -
+                      US
+                      Dollar
+                    </option>
+                    <option value="NGN">
+                      NGN
+                      -
+                      Nigerian
+                      Naira
+                    </option>
+                    <option value="GHS">
+                      GHS
+                      -
+                      Ghanaian
+                      Cedi
+                    </option>
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
+                    <svg
+                      className="fill-current h-4 w-4"
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                    >
+                      <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
+                    </svg>
+                  </div>
                 </div>
               </div>
             </div>

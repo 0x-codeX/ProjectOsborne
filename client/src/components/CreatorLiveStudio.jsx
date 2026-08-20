@@ -21,6 +21,7 @@ import {
   Camera,
   Monitor,
   Copy,
+  Crown,
 } from "lucide-react";
 import api from "../utils/api";
 
@@ -89,8 +90,6 @@ const CreatorLiveStudio =
       useState(
         false,
       );
-
-    // THE NEW DYNAMIC STATE
     const [
       isLive,
       setIsLive,
@@ -114,6 +113,15 @@ const CreatorLiveStudio =
         "",
       );
 
+    // WHALE LEADERBOARD STATE
+    const [
+      pinnedGifts,
+      setPinnedGifts,
+    ] =
+      useState(
+        [],
+      );
+
     useEffect(() => {
       const fetchStream =
         async () => {
@@ -133,7 +141,7 @@ const CreatorLiveStudio =
                 .stream
                 .isLive ||
                 false,
-            ); // Set initial DB state
+            );
           } catch (err) {
             setError(
               err
@@ -196,32 +204,90 @@ const CreatorLiveStudio =
           (
             giftData,
           ) => {
-            setMessages(
-              (
-                prev,
-              ) => [
-                ...prev,
+            if (
+              giftData.streamId ===
+              stream._id
+            ) {
+              const giftId =
+                Date.now();
+              const newGift =
                 {
                   isGift: true,
                   text: giftData.message,
                   amount:
                     giftData.amount,
-                  id: Date.now(),
+                  fanName:
+                    giftData.fanName ||
+                    "A Fan",
+                  id: giftId,
+                };
+
+              // 1. Add to main chat
+              setMessages(
+                (
+                  prev,
+                ) => [
+                  ...prev,
+                  newGift,
+                ],
+              );
+              setSessionEarnings(
+                (
+                  prev,
+                ) =>
+                  prev +
+                  (giftData.amount ||
+                    0),
+              );
+
+              // 2. Pin to Top Leaderboard (Sort top 3)
+              setPinnedGifts(
+                (
+                  prev,
+                ) => {
+                  const updated =
+                    [
+                      ...prev,
+                      newGift,
+                    ]
+                      .sort(
+                        (
+                          a,
+                          b,
+                        ) =>
+                          b.amount -
+                          a.amount,
+                      )
+                      .slice(
+                        0,
+                        3,
+                      );
+                  return updated;
                 },
-              ],
-            );
-            setSessionEarnings(
-              (
-                prev,
-              ) =>
-                prev +
-                (giftData.amount ||
-                  0),
-            );
+              );
+
+              // 3. Remove pin after 10 seconds
+              setTimeout(
+                () => {
+                  setPinnedGifts(
+                    (
+                      prev,
+                    ) =>
+                      prev.filter(
+                        (
+                          g,
+                        ) =>
+                          g.id !==
+                          giftId,
+                      ),
+                  );
+                },
+                10000,
+              );
+            }
           },
         );
 
-        // THE NERVOUS SYSTEM LISTENER: Hears the ping from Node.js
         socketRef.current.on(
           "live_stream_started",
           (
@@ -269,6 +335,7 @@ const CreatorLiveStudio =
       );
     }, [
       messages,
+      pinnedGifts,
     ]);
 
     const startOBSPreview =
@@ -315,9 +382,8 @@ const CreatorLiveStudio =
       if (
         broadcastMode ===
         "OBS"
-      ) {
+      )
         startOBSPreview();
-      }
     }, [
       broadcastMode,
     ]);
@@ -347,18 +413,15 @@ const CreatorLiveStudio =
             senderName:
               user.username ||
               "Creator",
-            isCreator: true,
+            isCreator: true, // FLAG FOR STYLING
             text: chatInput,
             id: Date.now(),
           };
 
-        // Send to backend for the fans
         socketRef.current.emit(
           "send_live_message",
           newMessage,
         );
-
-        // OPTIMISTIC UPDATE: Instantly show it on your own screen!
         setMessages(
           (
             prev,
@@ -367,7 +430,6 @@ const CreatorLiveStudio =
             newMessage,
           ],
         );
-
         setChatInput(
           "",
         );
@@ -377,11 +439,10 @@ const CreatorLiveStudio =
       async () => {
         if (
           !window.confirm(
-            "Are you sure you want to end this live stream? This will disconnect all fans.",
+            "Are you sure you want to end this live stream?",
           )
         )
           return;
-
         setIsEnding(
           true,
         );
@@ -404,7 +465,7 @@ const CreatorLiveStudio =
           );
         } catch (err) {
           alert(
-            "Failed to end stream. Please try again.",
+            "Failed to end stream.",
           );
           setIsEnding(
             false,
@@ -454,7 +515,6 @@ const CreatorLiveStudio =
           <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-2xl">
             <div>
               <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                {/* THE DYNAMIC DOT */}
                 <span
                   className={`w-3 h-3 rounded-full transition-all duration-500 ${isLive ? "bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]" : "bg-slate-600"}`}
                 ></span>
@@ -521,14 +581,6 @@ const CreatorLiveStudio =
                       Browser
                       Camera
                     </h3>
-                    <p className="text-sm text-slate-400 mt-2">
-                      Go
-                      live
-                      instantly.
-                      No
-                      software
-                      required.
-                    </p>
                   </div>
                 </button>
                 <button
@@ -553,16 +605,6 @@ const CreatorLiveStudio =
                       Software
                       (OBS)
                     </h3>
-                    <p className="text-sm text-slate-400 mt-2">
-                      Use
-                      OBS
-                      Studio
-                      or
-                      vMix
-                      for
-                      multi-cam
-                      streams.
-                    </p>
                   </div>
                 </button>
               </div>
@@ -588,32 +630,13 @@ const CreatorLiveStudio =
                     className="w-full h-full object-contain"
                   />
                 )}
-
-                {/* THE LIVE BADGE */}
                 {isLive && (
-                  <div className="absolute top-4 right-4 bg-red-600 text-white px-4 py-1.5 rounded-lg font-black tracking-widest text-xs animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.6)] z-10 pointer-events-none">
+                  <div className="absolute top-4 right-4 bg-red-600 text-white px-4 py-1.5 rounded-lg font-black tracking-widest text-xs animate-pulse z-10 pointer-events-none">
                     YOU
                     ARE
                     LIVE
                   </div>
                 )}
-
-                {broadcastMode ===
-                  "OBS" &&
-                  !isLive && (
-                    <div className="absolute top-4 left-4 bg-black/60 backdrop-blur px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-2 text-xs font-bold text-slate-300 z-10">
-                      <Activity
-                        size={
-                          14
-                        }
-                        className="text-slate-500"
-                      />
-                      Waiting
-                      for
-                      OBS
-                      Connection...
-                    </div>
-                  )}
               </div>
 
               {broadcastMode ===
@@ -651,8 +674,6 @@ const CreatorLiveStudio =
                     <label className="text-xs text-slate-500 uppercase font-bold">
                       Stream
                       Key
-                      (Keep
-                      Secret)
                     </label>
                     <div className="flex mt-1">
                       <input
@@ -684,36 +705,6 @@ const CreatorLiveStudio =
               )}
 
               <div className="bg-red-950/20 border border-red-500/30 p-6 rounded-2xl mt-auto">
-                <h3 className="text-red-400 font-bold mb-2 flex items-center gap-2">
-                  <AlertCircle
-                    size={
-                      18
-                    }
-                  />{" "}
-                  Danger
-                  Zone
-                </h3>
-                <p className="text-sm text-slate-400 mb-4">
-                  When
-                  you
-                  are
-                  finished
-                  broadcasting,
-                  you
-                  MUST
-                  click
-                  this
-                  button
-                  to
-                  kill
-                  the
-                  stream
-                  and
-                  update
-                  your
-                  fans'
-                  feeds.
-                </p>
                 <button
                   onClick={
                     handleEndStream
@@ -748,8 +739,8 @@ const CreatorLiveStudio =
           )}
         </div>
 
-        <div className="w-full lg:w-96 bg-slate-900 border-l border-slate-800 flex flex-col h-[50vh] lg:h-full flex-shrink-0">
-          <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center z-10">
+        <div className="w-full lg:w-96 bg-slate-900 border-l border-slate-800 flex flex-col h-[50vh] lg:h-full flex-shrink-0 relative">
+          <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center z-30 relative">
             <h3 className="text-white font-bold flex items-center gap-2">
               <MessageSquare
                 size={
@@ -761,15 +752,49 @@ const CreatorLiveStudio =
               Chat
             </h3>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+          {/* PINNED WHALE GIFTS BANNER */}
+          {pinnedGifts.length >
+            0 && (
+            <div className="absolute top-[60px] left-0 w-full z-20 flex flex-col gap-1 p-3 pointer-events-none">
+              {pinnedGifts.map(
+                (
+                  gift,
+                ) => (
+                  <div
+                    key={
+                      gift.id
+                    }
+                    className="bg-gradient-to-r from-yellow-600 to-purple-700 border border-yellow-400 p-2.5 rounded-xl shadow-[0_0_15px_rgba(234,179,8,0.4)] animate-pulse flex justify-between items-center backdrop-blur-md"
+                  >
+                    <span className="font-bold text-white text-xs flex items-center gap-1">
+                      <Crown
+                        size={
+                          14
+                        }
+                        className="text-yellow-300"
+                      />{" "}
+                      {
+                        gift.fanName
+                      }
+                    </span>
+                    <span className="font-black text-yellow-200 text-sm tracking-wider">
+                      ₦
+                      {gift.amount?.toLocaleString()}
+                    </span>
+                  </div>
+                ),
+              )}
+            </div>
+          )}
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 z-10 relative">
             {messages.length ===
               0 && (
               <p className="text-center text-slate-500 text-sm mt-10">
                 Chat
                 is
                 quiet...
-                start
-                talking!
               </p>
             )}
             {messages.map(
@@ -781,24 +806,38 @@ const CreatorLiveStudio =
                   key={
                     idx
                   }
-                  className={`text-sm ${msg.isGift ? "bg-gradient-to-r from-emerald-900/40 to-emerald-800/40 border border-emerald-500/30 p-3 rounded-xl" : msg.isCreator ? "bg-slate-800 p-2 rounded-lg border border-slate-700" : ""}`}
+                  className={`w-full flex ${msg.isCreator ? "justify-end" : "justify-start"}`}
                 >
                   {msg.isGift ? (
-                    <span className="font-bold text-emerald-400 flex items-center gap-2">
-                      <Gift
-                        size={
-                          16
+                    <div className="bg-gradient-to-r from-emerald-900/60 to-emerald-800/60 border border-emerald-500/50 p-3 rounded-2xl w-[85%]">
+                      <span className="font-bold text-emerald-400 flex items-center gap-2 text-sm">
+                        <Gift
+                          size={
+                            16
+                          }
+                        />{" "}
+                        {
+                          msg.text
                         }
-                      />{" "}
-                      {
-                        msg.text
-                      }
-                    </span>
+                      </span>
+                    </div>
+                  ) : msg.isCreator ? (
+                    <div className="max-w-[85%] bg-emerald-900/40 border border-emerald-500/50 p-3 rounded-2xl rounded-tr-sm text-right shadow-lg">
+                      <div className="text-xs font-black text-emerald-400 mb-1 animate-[pulse_1s_ease-in-out_2]">
+                        {
+                          msg.senderName
+                        }{" "}
+                        (Creator)
+                      </div>
+                      <div className="text-white text-sm">
+                        {
+                          msg.text
+                        }
+                      </div>
+                    </div>
                   ) : (
-                    <p>
-                      <span
-                        className={`font-bold mr-2 ${msg.isCreator ? "text-emerald-500" : "text-slate-400"}`}
-                      >
+                    <div className="max-w-[85%] text-sm">
+                      <span className="font-bold text-slate-400 mr-2">
                         {
                           msg.senderName
                         }
@@ -809,7 +848,7 @@ const CreatorLiveStudio =
                           msg.text
                         }
                       </span>
-                    </p>
+                    </div>
                   )}
                 </div>
               ),
@@ -820,15 +859,19 @@ const CreatorLiveStudio =
               }
             />
           </div>
+
           <form
             onSubmit={
               handleSendMessage
             }
-            className="p-4 border-t border-slate-800 bg-slate-950"
+            className="p-4 border-t border-slate-800 bg-slate-950 z-30"
           >
-            <div className="flex gap-2">
+            <div className="flex gap-2 relative">
               <input
                 type="text"
+                maxLength={
+                  140
+                }
                 value={
                   chatInput
                 }
@@ -841,16 +884,25 @@ const CreatorLiveStudio =
                       .value,
                   )
                 }
-                placeholder="Talk to your fans..."
-                className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500 text-sm"
+                placeholder="Message..."
+                className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 pr-12 focus:outline-none focus:border-emerald-500 text-sm"
                 disabled={
                   !broadcastMode
                 }
               />
+              <span
+                className={`absolute right-14 top-2.5 text-xs ${chatInput.length >= 140 ? "text-red-400" : "text-slate-500"}`}
+              >
+                {
+                  chatInput.length
+                }
+                /140
+              </span>
               <button
                 type="submit"
                 disabled={
-                  !broadcastMode
+                  !broadcastMode ||
+                  !chatInput.trim()
                 }
                 className="bg-emerald-500 hover:bg-emerald-600 text-white p-2 rounded-xl transition-colors disabled:opacity-50"
               >

@@ -8,8 +8,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title NippyPaymentGateway
- * @notice A stateless multi-currency payment router enforcing an 80/20 revenue split.
- * @dev Supports fallback routing to Treasury if creator has no Web3 wallet address.
+ * @notice A stateless multi-currency payment router enforcing The Profit Skim split.
  */
 contract NippyPaymentGateway is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -17,11 +16,10 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
     address public treasury;
 
     struct TokenConfig {
-        bool isEnabled; // True = active, False = paused/unsupported
-        uint256 minAmount; // The absolute minimum purchase amount in token base units (wei)
+        bool isEnabled;
+        uint256 minAmount;
     }
 
-    // address(0) represents Native network coins (ETH/POL)
     mapping(address => TokenConfig) public supportedTokens;
 
     // Basis points precision (2000 = 20%)
@@ -29,13 +27,14 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public constant MAX_FEE_BPS = 3000; // 30% hard cap
 
-    // Events
+    // Events updated to track the Profit Spread
     event ContentPurchased(
         address indexed buyer,
         address indexed creator,
         bytes32 indexed contentId,
         address token,
-        uint256 price,
+        uint256 rawBasePrice,
+        uint256 chargeAmount,
         uint256 creatorCut,
         uint256 treasuryCut
     );
@@ -50,50 +49,49 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
         treasury = _treasury;
     }
 
-    /**
-     * @notice Configures token support status and minimum purchase amount.
-     */
     function setTokenConfig(address token, bool isEnabled, uint256 minAmount) external onlyOwner {
         if (token != address(0)) {
             require(token.code.length > 0, "Address is not a contract");
         }
         require(minAmount > 0, "Min amount must be greater than zero");
-
         supportedTokens[token] = TokenConfig({isEnabled: isEnabled, minAmount: minAmount});
         emit TokenConfigured(token, isEnabled, minAmount);
     }
 
-    /**
-     * @notice Emergency toggle to enable/disable a token.
-     */
     function setTokenStatus(address token, bool isEnabled) external onlyOwner {
         supportedTokens[token].isEnabled = isEnabled;
         emit TokenStatusUpdated(token, isEnabled);
     }
 
     /**
-     * @notice Executes purchase using a whitelisted ERC20 token (e.g., USDT, USDC).
-     * @dev If creator is address(0), 100% of funds route to Treasury for off-chain DB settlement.
+     * @notice THE FIX: Accepts both the creator's base price and the fan's padded charge amount.
      */
-    /// @param creator The creator's wallet address. Pass address(0) if the creator
-    ///                has no Web3 wallet; funds will route 100% to Treasury for
-    ///                off-chain DB settlement of the 80% creator share.
-    function purchaseWithERC20(address token, address creator, bytes32 contentId, uint256 price) external nonReentrant {
+    function purchaseWithERC20(
+        address token,
+        address creator,
+        bytes32 contentId,
+        uint256 rawBasePrice,
+        uint256 chargeAmount
+    ) external nonReentrant {
         require(token != address(0), "Use purchaseWithNative for ETH/POL");
         require(creator != msg.sender, "Creators cannot buy their own content");
         require(creator != treasury, "Creator cannot be treasury");
+        require(chargeAmount >= rawBasePrice, "Charge amount must cover base price");
 
         TokenConfig memory config = supportedTokens[token];
         require(config.isEnabled, "Token is unsupported or disabled");
-        require(price >= config.minAmount, "Price below token minimum threshold");
+        require(chargeAmount >= config.minAmount, "Price below token minimum threshold");
 
-        uint256 treasuryCut = (price * TREASURY_FEE_BPS) / BPS_DENOMINATOR;
-        uint256 creatorCut = price - treasuryCut;
+        // THE SKIM MATH:
+        // Creator strictly gets their 80% cut of the BASE price.
+        uint256 creatorCut = (rawBasePrice * (BPS_DENOMINATOR - TREASURY_FEE_BPS)) / BPS_DENOMINATOR;
+
+        // Treasury sweeps everything else (The 20% base fee + 100% of the padding spread)
+        uint256 treasuryCut = chargeAmount - creatorCut;
 
         if (creator == address(0)) {
-            // FALLBACK ROUTE: Creator has no crypto address set.
-            // Treasury collects 100% on-chain; backend credits creator's DB balance with 80%.
-            IERC20(token).safeTransferFrom(msg.sender, treasury, price);
+            // FALLBACK ROUTE: Creator has no crypto address set. 100% to treasury for DB settlement.
+            IERC20(token).safeTransferFrom(msg.sender, treasury, chargeAmount);
         } else {
             // DIRECT ROUTE: On-chain instant split
             if (treasuryCut > 0) {
@@ -104,43 +102,50 @@ contract NippyPaymentGateway is Ownable, ReentrancyGuard {
             }
         }
 
-        emit ContentPurchased(msg.sender, creator, contentId, token, price, creatorCut, treasuryCut);
+        emit ContentPurchased(
+            msg.sender, creator, contentId, token, rawBasePrice, chargeAmount, creatorCut, treasuryCut
+        );
     }
 
     /**
-     * @notice Executes purchase using native network tokens (ETH, POL).
-     * @dev If creator is address(0), 100% of funds route to Treasury for off-chain DB settlement.
+     * @notice THE FIX: Native execution mimicking the ERC20 skim split.
      */
-    function purchaseWithNative(address payable creator, bytes32 contentId) external payable nonReentrant {
+    function purchaseWithNative(address payable creator, bytes32 contentId, uint256 rawBasePrice)
+        external
+        payable
+        nonReentrant
+    {
         require(creator != msg.sender, "Creators cannot buy their own content");
         require(creator != treasury, "Creator cannot be treasury");
 
+        uint256 chargeAmount = msg.value;
+        require(chargeAmount >= rawBasePrice, "Msg.value must cover base price");
+
         TokenConfig memory config = supportedTokens[address(0)];
         require(config.isEnabled, "Native payments are unsupported or disabled");
-        require(msg.value >= config.minAmount, "Amount below native minimum threshold");
+        require(chargeAmount >= config.minAmount, "Amount below native minimum threshold");
 
-        uint256 price = msg.value;
-        uint256 treasuryCut = (price * TREASURY_FEE_BPS) / BPS_DENOMINATOR;
-        uint256 creatorCut = price - treasuryCut;
+        // THE SKIM MATH
+        uint256 creatorCut = (rawBasePrice * (BPS_DENOMINATOR - TREASURY_FEE_BPS)) / BPS_DENOMINATOR;
+        uint256 treasuryCut = chargeAmount - creatorCut;
 
         if (creator == address(0)) {
-            // FALLBACK ROUTE: Send 100% native coin to Treasury
-            (bool successTreasury,) = treasury.call{value: price}("");
+            (bool successTreasury,) = treasury.call{value: chargeAmount}("");
             require(successTreasury, "Treasury native transfer failed");
         } else {
-            // DIRECT ROUTE: On-chain instant split
             if (treasuryCut > 0) {
                 (bool successTreasury,) = treasury.call{value: treasuryCut}("");
                 require(successTreasury, "Treasury transfer failed");
             }
-
             if (creatorCut > 0) {
                 (bool successCreator,) = creator.call{value: creatorCut}("");
                 require(successCreator, "Creator transfer failed");
             }
         }
 
-        emit ContentPurchased(msg.sender, creator, contentId, address(0), price, creatorCut, treasuryCut);
+        emit ContentPurchased(
+            msg.sender, creator, contentId, address(0), rawBasePrice, chargeAmount, creatorCut, treasuryCut
+        );
     }
 
     function updateTreasury(address _newTreasury) external onlyOwner {

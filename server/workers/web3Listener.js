@@ -49,10 +49,10 @@ const GATEWAY_ADDRESS =
     .env
     .NIPPY_GATEWAY_ADDRESS;
 
-const GATEWAY_ABI =
-  [
-    "event ContentPurchased(address indexed buyer, address indexed creator, bytes32 indexed contentId, address token, uint256 price, uint256 creatorCut, uint256 treasuryCut)",
-  ];
+
+const GATEWAY_ABI = [
+  "event ContentPurchased(address indexed buyer, address indexed creator, bytes32 indexed contentId, address token, uint256 rawBasePrice, uint256 chargeAmount, uint256 creatorCut, uint256 treasuryCut)"
+];;
 
 /**
  * FULL Idempotent Fulfillment Engine

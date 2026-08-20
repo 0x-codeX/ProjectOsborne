@@ -22,7 +22,7 @@ import {
   Plus,
   Minus,
 } from "lucide-react";
-import api from "../utils/api"; // <-- YOUR NEW IRONCLAD INTERCEPTOR
+import api from "../utils/api";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import { io } from "socket.io-client";
 import { usePaystackPayment } from "react-paystack";

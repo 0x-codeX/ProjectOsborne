@@ -2,6 +2,8 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const ethers = require("ethers");
 const Ticket = require("../models/Ticket");
+// Import the new exchangeRates config to apply the Hybrid Strategy
+const exchangeConfig = require("../config/exchangeRates");
 
 // PUT /api/users/profile
 // Handles Bio Data Setup and Profile Updates
@@ -17,6 +19,7 @@ exports.submitBioData =
         phone,
         gender,
         country,
+        preferredCurrency, // <-- ADDED
         referredBy,
         willingNsfw,
         agreedTerms,
@@ -31,7 +34,6 @@ exports.submitBioData =
       } =
         req.body;
 
-      // THE FIX: Bulletproof ID extraction regardless of your middleware setup
       const userId =
         req
           .user
@@ -71,14 +73,11 @@ exports.submitBioData =
             },
           );
 
-      // --- UNIFIED SENSITIVE DATA SECURITY GATE START ---
+      // --- SENSITIVE DATA SECURITY GATE ---
       const currentPayout =
         user.payoutAddress ||
         user.walletAddress ||
         "";
-
-      // THE FIX: Only trigger the security lock if they ALREADY have an email in the DB
-      // and are trying to change it to a different one. First-time setup gets a free pass.
       const isPayoutChanged =
         payoutAddress &&
         user.payoutAddress &&
@@ -94,7 +93,6 @@ exports.submitBioData =
         isPayoutChanged ||
         isEmailChanged
       ) {
-        // 1. Web3 Wallet Verification
         if (
           user.walletAddress
         ) {
@@ -112,7 +110,6 @@ exports.submitBioData =
                 },
               );
           }
-
           let changesText =
             [];
           if (
@@ -127,9 +124,7 @@ exports.submitBioData =
             changesText.push(
               `payout address to ${payoutAddress}`,
             );
-
           const expectedMessage = `CONFIRM_ACCOUNT_UPDATE: I authorize changing my ${changesText.join(" and ")}.`;
-
           try {
             const recoveredAddress =
               ethers.verifyMessage(
@@ -163,9 +158,7 @@ exports.submitBioData =
                 },
               );
           }
-        }
-        // 2. Standard Email/Password Verification
-        else if (
+        } else if (
           user.password
         ) {
           if (
@@ -203,9 +196,7 @@ exports.submitBioData =
           }
         }
       }
-      // --- PAYOUT ADDRESS SECURITY GATE END ---
 
-      // 1. Stress-Test: Enforce legal compliance at the server level
       if (
         !agreedTerms ||
         !confirmedAge
@@ -222,7 +213,6 @@ exports.submitBioData =
           );
       }
 
-      // 2. Prevent Username Hijacking
       if (
         username
       ) {
@@ -232,12 +222,12 @@ exports.submitBioData =
               username,
               _id: {
                 $ne: userId,
-              }, // Use safe userId
+              },
             },
           );
         if (
           existingUser
-        ) {
+        )
           return res
             .status(
               409,
@@ -245,13 +235,11 @@ exports.submitBioData =
             .json(
               {
                 message:
-                  "Username is already taken. Please choose another.",
+                  "Username is already taken.",
               },
             );
-        }
       }
 
-      // 3. Prevent Email Collisions (Crucial for Web3 users adding an email)
       if (
         email
       ) {
@@ -261,12 +249,12 @@ exports.submitBioData =
               email,
               _id: {
                 $ne: userId,
-              }, // Use safe userId
+              },
             },
           );
         if (
           existingEmail
-        ) {
+        )
           return res
             .status(
               409,
@@ -277,10 +265,37 @@ exports.submitBioData =
                   "Email is already in use by another account.",
               },
             );
-        }
       }
 
-      // 4. Safely update the database
+      // --- CURRENCY HYBRID STRATEGY LOGIC ---
+      let finalCurrency =
+        user.preferredCurrency;
+
+      // 1. Explicit selection overrides everything
+      if (
+        preferredCurrency &&
+        exchangeConfig.SUPPORTED_CURRENCIES.includes(
+          preferredCurrency,
+        )
+      ) {
+        finalCurrency =
+          preferredCurrency;
+      }
+      // 2. Auto-detect from Country if they don't have a specific preference yet
+      else if (
+        country &&
+        (!user.preferredCurrency ||
+          user.preferredCurrency ===
+            exchangeConfig.DEFAULT_CURRENCY)
+      ) {
+        finalCurrency =
+          exchangeConfig
+            .COUNTRY_TO_CURRENCY[
+            country
+          ] ||
+          exchangeConfig.DEFAULT_CURRENCY;
+      }
+
       const updatedUser =
         await User.findByIdAndUpdate(
           userId,
@@ -291,6 +306,8 @@ exports.submitBioData =
               phone,
               gender,
               country,
+              preferredCurrency:
+                finalCurrency, // <-- SAVED
               referredBy,
               willingNsfw,
               agreedTerms,
@@ -300,14 +317,13 @@ exports.submitBioData =
               hasCompletedBioData: true,
               profileImage,
               payoutAddress,
-              // Sync username to displayName automatically so their profile looks good immediately
               "creatorProfile.displayName":
                 username,
             },
           },
           {
             returnDocument:
-              "after", // Silences the Mongoose deprecation warning
+              "after",
             runValidators: true,
           },
         );
@@ -328,8 +344,6 @@ exports.submitBioData =
         "Error updating profile:",
         error,
       );
-
-      // Catch-all for MongoDB unique index (E11000) errors just in case race conditions occur
       if (
         error.code ===
         11000
@@ -348,7 +362,6 @@ exports.submitBioData =
             },
           );
       }
-
       res
         .status(
           500,
@@ -363,77 +376,224 @@ exports.submitBioData =
   };
 
 // DELETE /api/users/profile
-// Permanently deletes the user account and validates password if applicable
-exports.deleteProfile = async (req, res) => {
-  try {
-    const userId = req.user._id || req.user.id;
-    const { password, signature } = req.body;
+exports.deleteProfile =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const userId =
+        req
+          .user
+          ._id ||
+        req
+          .user
+          .id;
+      const {
+        password,
+        signature,
+      } =
+        req.body;
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
+      const user =
+        await User.findById(
+          userId,
+        );
+      if (
+        !user
+      )
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "User not found.",
+            },
+          );
+
+      if (
+        signature &&
+        user.walletAddress
+      ) {
+        const expectedMessage = `CONFIRM_ACCOUNT_DELETION: I confirm that I want to permanently delete my Nippy account (${user.walletAddress.toLowerCase()}).`;
+        const recoveredAddress =
+          ethers.verifyMessage(
+            expectedMessage,
+            signature,
+          );
+        if (
+          recoveredAddress.toLowerCase() !==
+          user.walletAddress.toLowerCase()
+        ) {
+          return res
+            .status(
+              401,
+            )
+            .json(
+              {
+                message:
+                  "Signature verification failed. Account not deleted.",
+              },
+            );
+        }
+      } else if (
+        user.password
+      ) {
+        if (
+          !password
+        )
+          return res
+            .status(
+              400,
+            )
+            .json(
+              {
+                message:
+                  "Password is required to delete account.",
+              },
+            );
+        const isMatch =
+          await bcrypt.compare(
+            password,
+            user.password,
+          );
+        if (
+          !isMatch
+        )
+          return res
+            .status(
+              401,
+            )
+            .json(
+              {
+                message:
+                  "Incorrect password.",
+              },
+            );
+      } else {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Proof of identity required to delete account.",
+            },
+          );
+      }
+
+      await User.findByIdAndDelete(
+        userId,
+      );
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            message:
+              "Account deleted successfully.",
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Delete account error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Server error during account deletion.",
+          },
+        );
     }
-
-    // CASE 1: Web3 Wallet Verification via Signature
-    if (signature && user.walletAddress) {
-      const expectedMessage = `CONFIRM_ACCOUNT_DELETION: I confirm that I want to permanently delete my Nippy account (${user.walletAddress.toLowerCase()}).`;
-      const recoveredAddress = ethers.verifyMessage(expectedMessage, signature);
-
-      if (recoveredAddress.toLowerCase() !== user.walletAddress.toLowerCase()) {
-        return res.status(401).json({ message: "Signature verification failed. Account not deleted." });
-      }
-    } 
-    // CASE 2: Traditional Email/Password Verification
-    else if (user.password) {
-      if (!password) {
-        return res.status(400).json({ message: "Password is required to delete account." });
-      }
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(401).json({ message: "Incorrect password." });
-      }
-    } 
-    else {
-      return res.status(400).json({ message: "Proof of identity required to delete account." });
-    }
-
-    // Proof verified -> Permanently wipe user
-    await User.findByIdAndDelete(userId);
-
-    res.status(200).json({ message: "Account deleted successfully." });
-  } catch (error) {
-    console.error("Delete account error:", error);
-    res.status(500).json({ message: "Server error during account deletion." });
-  }
-};
+  };
 
 // GET /api/users/settings/monetization
-exports.getMonetizationSettings = async (req, res) => {
-  try {
-    // THE FIX: Safely extract ID
-    const userId = req.user._id || req.user.id;
+exports.getMonetizationSettings =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const userId =
+        req
+          .user
+          ._id ||
+        req
+          .user
+          .id;
+      if (
+        !userId
+      )
+        return res
+          .status(
+            401,
+          )
+          .json(
+            {
+              message:
+                "Unauthorized: No user ID in token.",
+            },
+          );
 
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized: No user ID in token." });
+      const user =
+        await User.findById(
+          userId,
+        ).select(
+          "monetizationSettings",
+        );
+      if (
+        !user
+      )
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "User not found",
+            },
+          );
+
+      res
+        .status(
+          200,
+        )
+        .json(
+          user.monetizationSettings,
+        );
+    } catch (error) {
+      console.error(
+        "Error fetching settings:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Server error fetching monetization settings",
+          },
+        );
     }
-
-    const user = await User.findById(userId).select("monetizationSettings");
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    res.status(200).json(user.monetizationSettings);
-  } catch (error) {
-    console.error("Error fetching settings:", error);
-    res.status(500).json({ message: "Server error fetching monetization settings" });
-  }
-};
+  };
 
 // PUT /api/users/settings/monetization
 exports.updateMonetizationSettings = async (req, res) => {
   try {
     let {
+      priceCurrency, 
       defaultPPVPrice,
       weeklySubscription,
       monthlySubscription,
@@ -443,35 +603,35 @@ exports.updateMonetizationSettings = async (req, res) => {
       messageBundlePrice,
     } = req.body;
 
-    // THE FIX: Safely extract ID
     const userId = req.user._id || req.user.id;
+    if (!userId) return res.status(401).json({ message: "Unauthorized: No user ID in token." });
 
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized: No user ID in token." });
-    }
-
-    // IRONCLAD FIX: Establish the rounding rule
-    const roundPrice = (price) => {
+    // Ensure it is a valid positive number, but do NOT round it up
+    const exactPrice = (price) => {
       const raw = parseFloat(price || 0);
-      return (!isNaN(raw) && raw > 0) ? Math.ceil(raw * 2) / 2 : 0;
+      return !isNaN(raw) && raw > 0 ? raw : 0;
     };
 
-    // Apply the rule to every single pricing field before saving
-    defaultPPVPrice = roundPrice(defaultPPVPrice);
-    weeklySubscription = roundPrice(weeklySubscription);
-    monthlySubscription = roundPrice(monthlySubscription);
-    multiMonthPrice = roundPrice(multiMonthPrice);
-    messageBundlePrice = roundPrice(messageBundlePrice);
-    
-    // Ensure standard integers for duration/sizes
+    defaultPPVPrice = exactPrice(defaultPPVPrice);
+    weeklySubscription = exactPrice(weeklySubscription);
+    monthlySubscription = exactPrice(monthlySubscription);
+    multiMonthPrice = exactPrice(multiMonthPrice);
+    messageBundlePrice = exactPrice(messageBundlePrice);
+
     messageBundleSize = parseInt(messageBundleSize) || 5;
     multiMonthDuration = parseInt(multiMonthDuration) || 3;
+
+    // Validate Price Currency
+    const finalPriceCurrency = exchangeConfig.SUPPORTED_CURRENCIES.includes(priceCurrency)
+      ? priceCurrency
+      : "NGN"; // Default fallback
 
     const user = await User.findByIdAndUpdate(
       userId,
       {
         $set: {
           monetizationSettings: {
+            priceCurrency: finalPriceCurrency, 
             defaultPPVPrice,
             weeklySubscription,
             monthlySubscription,
@@ -482,15 +642,10 @@ exports.updateMonetizationSettings = async (req, res) => {
           },
         },
       },
-      {
-        returnDocument: "after", // THE FIX: Silences Mongoose deprecation warnings
-        runValidators: true,
-      }
+      { returnDocument: "after", runValidators: true }
     ).select("monetizationSettings");
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
-    }
+    if (!user) return res.status(404).json({ message: "User not found." });
 
     res.status(200).json({
       message: "Monetization tiers locked in.",
@@ -503,90 +658,262 @@ exports.updateMonetizationSettings = async (req, res) => {
 };
 
 // GET /api/users/profile
-exports.getProfile = async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select("-password").lean();
-    if (!user) return res.status(404).json({ message: "User not found" });
-    
-    res.status(200).json(user);
-  } catch (error) {
-    console.error("Profile fetch error:", error);
-    res.status(500).json({ message: "Server error fetching profile" });
-  }
-};
+exports.getProfile =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const user =
+        await User.findById(
+          req
+            .user
+            ._id,
+        )
+          .select(
+            "-password",
+          )
+          .lean();
+      if (
+        !user
+      )
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "User not found",
+            },
+          );
+      res
+        .status(
+          200,
+        )
+        .json(
+          user,
+        );
+    } catch (error) {
+      console.error(
+        "Profile fetch error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Server error fetching profile",
+          },
+        );
+    }
+  };
 
 // PUT /api/users/settings
-exports.updateSettings = async (req, res) => {
-  try {
-    const { currentPassword, newEmail, newPassword, newWalletAddress } = req.body;
+exports.updateSettings =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const {
+        currentPassword,
+        newEmail,
+        newPassword,
+        newWalletAddress,
+      } =
+        req.body;
+      const user =
+        await User.findById(
+          req
+            .user
+            ._id,
+        ).select(
+          "+password",
+        );
+      if (
+        !user
+      )
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "User not found",
+            },
+          );
 
-    // 1. Fetch user (explicitly selecting the password field if it's hidden by default)
-    const user = await User.findById(req.user._id).select("+password");
-    if (!user) return res.status(404).json({ message: "User not found" });
+      if (
+        !currentPassword
+      )
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Current password is required to change security settings.",
+            },
+          );
 
-    // 2. THE GATEKEEPER: Require current password for sensitive changes
-    if (!currentPassword) {
-      return res.status(400).json({ message: "Current password is required to change security settings." });
-    }
+      const isMatch =
+        await user.comparePassword(
+          currentPassword,
+        );
+      if (
+        !isMatch
+      )
+        return res
+          .status(
+            401,
+          )
+          .json(
+            {
+              message:
+                "Incorrect current password. Access denied.",
+            },
+          );
 
-    // Assuming you have a comparePassword method on your User model
-    const isMatch = await user.comparePassword(currentPassword);
-    if (!isMatch) {
-      return res.status(401).json({ message: "Incorrect current password. Access denied." });
-    }
-
-    // 3. Apply updates safely
-    if (newEmail) {
-      const emailExists = await User.findOne({ email: newEmail, _id: { $ne: req.user._id } });
-      if (emailExists) return res.status(400).json({ message: "Email is already in use by another account." });
-      user.email = newEmail;
-    }
-
-    if (newPassword) {
-      // Your Mongoose pre-save hook will hash this automatically
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "New password must be at least 6 characters." });
+      if (
+        newEmail
+      ) {
+        const emailExists =
+          await User.findOne(
+            {
+              email:
+                newEmail,
+              _id: {
+                $ne: req
+                  .user
+                  ._id,
+              },
+            },
+          );
+        if (
+          emailExists
+        )
+          return res
+            .status(
+              400,
+            )
+            .json(
+              {
+                message:
+                  "Email is already in use by another account.",
+              },
+            );
+        user.email =
+          newEmail;
       }
-      user.password = newPassword; 
+
+      if (
+        newPassword
+      ) {
+        if (
+          newPassword.length <
+          6
+        )
+          return res
+            .status(
+              400,
+            )
+            .json(
+              {
+                message:
+                  "New password must be at least 6 characters.",
+              },
+            );
+        user.password =
+          newPassword;
+      }
+
+      if (
+        newWalletAddress
+      ) {
+        const isAddress =
+          /^0x[a-fA-F0-9]{40}$/.test(
+            newWalletAddress,
+          );
+        if (
+          !isAddress
+        )
+          return res
+            .status(
+              400,
+            )
+            .json(
+              {
+                message:
+                  "Invalid Web3 wallet address format.",
+              },
+            );
+        user.walletAddress =
+          newWalletAddress;
+      }
+
+      await user.save();
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            message:
+              "Security settings updated successfully.",
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Settings update error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Server error updating security settings.",
+          },
+        );
     }
-
-    if (newWalletAddress) {
-      // Basic regex check for an Ethereum/Polygon address format
-      const isAddress = /^0x[a-fA-F0-9]{40}$/.test(newWalletAddress);
-      if (!isAddress) return res.status(400).json({ message: "Invalid Web3 wallet address format." });
-      user.walletAddress = newWalletAddress;
-    }
-
-    await user.save();
-
-    res.status(200).json({ message: "Security settings updated successfully." });
-  } catch (error) {
-    console.error("Settings update error:", error);
-    res.status(500).json({ message: "Server error updating security settings." });
-  }
-};
+  };
 
 // PUT /api/users/profile
 // Used for everyday profile edits, including optional password change
 exports.updateProfile = async (req, res) => {
   try {
-    const { username, profileImage, newPassword } = req.body;
+    const { username, profileImage, newPassword, preferredCurrency } = req.body;
 
-    // Check if username is taken by someone else
     if (username) {
-      const existingUser = await User.findOne({ username, _id: { $ne: req.user._id } });
-      if (existingUser) {
-        return res.status(400).json({ message: "Username is already taken" });
-      }
+      const existingUser = await User.findOne({
+        username,
+        _id: { $ne: req.user._id },
+      });
+      if (existingUser) return res.status(400).json({ message: "Username is already taken" });
     }
 
-    // Build the update payload
     const updates = {
       ...(username && { username }),
       ...(profileImage && { profileImage }),
     };
 
-    // Hash and include new password if provided
+    // Validate and save explicit currency preferences
+    if (preferredCurrency) {
+      if (exchangeConfig.SUPPORTED_CURRENCIES.includes(preferredCurrency)) {
+        updates.preferredCurrency = preferredCurrency;
+      } else {
+        return res.status(400).json({ message: "Invalid currency selection." });
+      }
+    }
+
     if (newPassword) {
       const salt = await bcrypt.genSalt(10);
       updates.passwordHash = await bcrypt.hash(newPassword, salt);
@@ -595,10 +922,13 @@ exports.updateProfile = async (req, res) => {
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
       { $set: updates },
-      { new: true }
+      { returnDocument: "after" } // <-- THE FIX: No more Mongoose warnings
     ).select("-password");
 
-    res.status(200).json({ message: "Profile updated successfully", user: updatedUser });
+    res.status(200).json({
+      message: "Profile updated successfully",
+      user: updatedUser,
+    });
   } catch (error) {
     console.error("Profile update error:", error);
     res.status(500).json({ message: "Server error updating profile" });
@@ -606,65 +936,214 @@ exports.updateProfile = async (req, res) => {
 };
 
 // POST /api/users/:id/follow
-// Toggles the follow state between the viewer and the target creator
-exports.toggleFollow = async (req, res) => {
-  try {
-    const targetUserId = req.params.id;
-    const viewerId = req.user._id || req.user.id;
+exports.toggleFollow =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const targetUserId =
+        req
+          .params
+          .id;
+      const viewerId =
+        req
+          .user
+          ._id ||
+        req
+          .user
+          .id;
 
-    // 1. Prevent users from following themselves
-    if (targetUserId.toString() === viewerId.toString()) {
-      return res.status(400).json({ message: "You cannot follow yourself." });
+      if (
+        targetUserId.toString() ===
+        viewerId.toString()
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "You cannot follow yourself.",
+            },
+          );
+      }
+
+      const viewer =
+        await User.findById(
+          viewerId,
+        );
+      if (
+        !viewer
+      )
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "Viewer not found.",
+            },
+          );
+
+      const isFollowing =
+        viewer.following.includes(
+          targetUserId,
+        );
+
+      if (
+        isFollowing
+      ) {
+        await User.findByIdAndUpdate(
+          viewerId,
+          {
+            $pull:
+              {
+                following:
+                  targetUserId,
+              },
+          },
+        );
+        await User.findByIdAndUpdate(
+          targetUserId,
+          {
+            $pull:
+              {
+                followers:
+                  viewerId,
+              },
+          },
+        );
+        return res
+          .status(
+            200,
+          )
+          .json(
+            {
+              message:
+                "Unfollowed successfully",
+              isFollowed: false,
+            },
+          );
+      } else {
+        await User.findByIdAndUpdate(
+          viewerId,
+          {
+            $addToSet:
+              {
+                following:
+                  targetUserId,
+              },
+          },
+        );
+        await User.findByIdAndUpdate(
+          targetUserId,
+          {
+            $addToSet:
+              {
+                followers:
+                  viewerId,
+              },
+          },
+        );
+        return res
+          .status(
+            200,
+          )
+          .json(
+            {
+              message:
+                "Followed successfully",
+              isFollowed: true,
+            },
+          );
+      }
+    } catch (error) {
+      console.error(
+        "Follow toggle error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Server error toggling follow status.",
+          },
+        );
     }
+  };
 
-    const viewer = await User.findById(viewerId);
-    if (!viewer) {
-      return res.status(404).json({ message: "Viewer not found." });
+// SUBMIT SUPPORT TICKET
+exports.submitSupportTicket =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const {
+        subject,
+        message,
+      } =
+        req.body;
+      if (
+        !subject ||
+        !message
+      )
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Subject and message are required.",
+            },
+          );
+
+      const newTicket =
+        new Ticket(
+          {
+            userId:
+              req
+                .user
+                ._id,
+            subject,
+            message,
+            status:
+              "OPEN",
+          },
+        );
+
+      await newTicket.save();
+      res
+        .status(
+          201,
+        )
+        .json(
+          {
+            message:
+              "Support ticket submitted successfully.",
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Error submitting ticket:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Failed to submit support ticket.",
+          },
+        );
     }
-
-    // 2. Check current state
-    const isFollowing = viewer.following.includes(targetUserId);
-
-    if (isFollowing) {
-      // UNFOLLOW: Remove from both arrays
-      await User.findByIdAndUpdate(viewerId, { $pull: { following: targetUserId } });
-      await User.findByIdAndUpdate(targetUserId, { $pull: { followers: viewerId } });
-      
-      return res.status(200).json({ message: "Unfollowed successfully", isFollowed: false });
-    } else {
-      // FOLLOW: Add to both arrays
-      await User.findByIdAndUpdate(viewerId, { $addToSet: { following: targetUserId } });
-      await User.findByIdAndUpdate(targetUserId, { $addToSet: { followers: viewerId } });
-      
-      return res.status(200).json({ message: "Followed successfully", isFollowed: true });
-    }
-  } catch (error) {
-    console.error("Follow toggle error:", error);
-    res.status(500).json({ message: "Server error toggling follow status." });
-  }
-};
-
-// SUBMIT SUPPORT TICKET (Used by both Fans and Creators)
-exports.submitSupportTicket = async (req, res) => {
-  try {
-    const { subject, message } = req.body;
-    
-    if (!subject || !message) {
-      return res.status(400).json({ message: 'Subject and message are required.' });
-    }
-
-    const newTicket = new Ticket({
-      userId: req.user._id, // Securely grabbed from the JWT token
-      subject,
-      message,
-      status: 'OPEN'
-    });
-
-    await newTicket.save();
-
-    res.status(201).json({ message: 'Support ticket submitted successfully.' });
-  } catch (error) {
-    console.error('Error submitting ticket:', error);
-    res.status(500).json({ message: 'Failed to submit support ticket.' });
-  }
-};
+  };

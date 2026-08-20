@@ -8,6 +8,7 @@ const {
   verifyPayment,
   getFanDashboard,
   getCryptoQuote,
+  getLiveExchangeRates,
 } = require("../controllers/purchaseController");
 
 // POST /api/purchases/verify
@@ -25,6 +26,11 @@ router.post(
 
 // GET /api/purchases/dashboard
 router.get("/dashboard", requireAuth, getFanDashboard);
+
+router.get(
+  "/exchange-rates",
+  getLiveExchangeRates,
+);
 
 module.exports =
   router;

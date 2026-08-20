@@ -24,6 +24,9 @@ const notificationSchema =
           "WELCOME_MESSAGE",
           "PPV_UNLOCK",
           "NIPPY_OFFER",
+          "GIFT_SENT", // <-- ADDED
+          "LIVE_GIFT", // <-- ADDED
+          "FOLLOW", // <-- ADDED to prevent follow crashes!
         ],
         required: true,
       },

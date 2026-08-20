@@ -9,14 +9,13 @@ const userSchema =
         {
           type: String,
           unique: true,
-          sparse: true, // CRITICAL: Allows Web3 users to exist without an email initially
+          sparse: true,
           trim: true,
           lowercase: true,
         },
       passwordHash:
         {
           type: String,
-          // REMOVED the buggy required function. Enforce password checks in the auth controller.
         },
       googleId:
         {
@@ -61,6 +60,20 @@ const userSchema =
           default:
             "Nigeria",
         },
+
+      // THE FIX: Universal Display Currency
+      preferredCurrency:
+        {
+          type: String,
+          enum: [
+            "NGN",
+            "GHS",
+            "USD",
+          ],
+          default:
+            "USD",
+        },
+
       referredBy:
         {
           type: String,
@@ -82,13 +95,11 @@ const userSchema =
         },
       isAgeVerified:
         {
-          // ADDED: Your frontend routing strictly relies on this
           type: Boolean,
           default: false,
         },
       isEmailVerified:
         {
-          // ADDED: The Google Auth route needs this
           type: Boolean,
           default: false,
         },
@@ -105,7 +116,6 @@ const userSchema =
         },
       hasCompletedBioData:
         {
-          // Cleaned up the duplicate
           type: Boolean,
           default: false,
         },
@@ -115,7 +125,7 @@ const userSchema =
         {
           type: String,
           unique: true,
-          sparse: true, // Will safely ignore undefined values
+          sparse: true,
           lowercase: true,
           trim: true,
         },
@@ -148,19 +158,19 @@ const userSchema =
           legalName:
             {
               type: String,
-            }, // Full concatenated name
+            },
           firstName:
             {
               type: String,
-            }, // NEW: Strict breakdown
+            },
           middleName:
             {
               type: String,
-            }, // NEW: Strict breakdown
+            },
           lastName:
             {
               type: String,
-            }, // NEW: Strict breakdown
+            },
           dateOfBirth:
             {
               type: Date,
@@ -193,12 +203,24 @@ const userSchema =
             {
               type: Number,
               default: 0.0,
-            }, // in USDT
+            },
         },
 
       // --- MONETIZATION SETTINGS ---
       monetizationSettings:
         {
+          // THE FIX: Creator's Input Currency
+          priceCurrency:
+            {
+              type: String,
+              enum: [
+                "NGN",
+                "GHS",
+                "USD",
+              ],
+              default:
+                "NGN", // Keeps legacy NGN prices safe
+            },
           defaultPPVPrice:
             {
               type: Number,
@@ -226,7 +248,6 @@ const userSchema =
                 "Price cannot be negative",
               ],
             },
-          // Dynamic Multi-Month Tier
           multiMonthDuration:
             {
               type: Number,
@@ -245,8 +266,6 @@ const userSchema =
                 "Price cannot be negative",
               ],
             },
-
-          // Message Bundle Settings
           messageBundleSize:
             {
               type: Number,
@@ -295,6 +314,8 @@ const userSchema =
             index: true,
           },
         ],
+
+      // Payout fields...
       payoutMethod:
         {
           type: String,
@@ -308,7 +329,7 @@ const userSchema =
         },
       accountName:
         {
-          type: String, // NEW: The exact name on the bank account
+          type: String,
           default:
             "",
         },
@@ -320,7 +341,7 @@ const userSchema =
         },
       bankCode:
         {
-          type: String, // NEW: CRITICAL FOR PAYSTACK (e.g., "058")
+          type: String,
           default:
             "",
         },
@@ -334,7 +355,7 @@ const userSchema =
         {
           type: String,
           default:
-            "NGN",
+            "NGN", // Legacy field, keeping it safe for now
         },
       paypalEmail:
         {

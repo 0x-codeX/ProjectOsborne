@@ -22,8 +22,6 @@ import {
   Check,
 } from "lucide-react";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
-
-// 1. IMPORT YOUR NEW INTERCEPTOR (No more raw axios)
 import api from "../utils/api";
 
 const CreatorPublicProfile =
@@ -52,6 +50,22 @@ const CreatorPublicProfile =
     const [
       processingId,
       setProcessingId,
+    ] =
+      useState(
+        null,
+      );
+
+    // --- DYNAMIC PRICING ENGINE STATES ---
+    const [
+      fanCurrency,
+      setFanCurrency,
+    ] =
+      useState(
+        "USD",
+      );
+    const [
+      exchangeRates,
+      setExchangeRates,
     ] =
       useState(
         null,
@@ -96,7 +110,7 @@ const CreatorPublicProfile =
         null,
       );
 
-    // DYNAMIC CRYPTO QUOTE STATES
+    // Crypto Quote States
     const [
       cryptoQuote,
       setCryptoQuote,
@@ -118,27 +132,70 @@ const CreatorPublicProfile =
       useWeb3Transfer();
 
     useEffect(() => {
-      fetchProfile();
+      fetchProfileAndRates();
     }, [
       id,
     ]);
 
-    const fetchProfile =
+    const FALLBACK_RATES =
+      {
+        USD: 1,
+        NGN: 1500,
+        EUR: 0.92,
+        GBP: 0.79,
+        GHS: 14.5,
+      };
+
+    const fetchProfileAndRates =
       async () => {
         try {
-          // THE FIX: Clean, one-line GET request. Headers and Base URL handled globally.
-          const {
-            data,
-          } =
-            await api.get(
-              `/content/creator/${id}`,
+          // 1. Get the Fan's local currency preference
+          const storedUser =
+            JSON.parse(
+              localStorage.getItem(
+                "nippy_user",
+              ) ||
+                "{}",
             );
+          setFanCurrency(
+            storedUser.preferredCurrency ||
+              "USD",
+          );
+
+          // 2. Fetch Creator Profile & Live Rates concurrently for speed
+          const [
+            profileRes,
+            ratesRes,
+          ] =
+            await Promise.all(
+              [
+                api.get(
+                  `/content/creator/${id}`,
+                ),
+                // THE FIX: Intercept failed network requests with the robust fallback
+                api
+                  .get(
+                    "/exchange-rates",
+                  )
+                  .catch(
+                    () => ({
+                      data: FALLBACK_RATES,
+                    }),
+                  ),
+              ],
+            );
+
           setProfileData(
-            data,
+            profileRes.data,
+          );
+          // THE FIX: Ensure fallback is applied if data comes back empty
+          setExchangeRates(
+            ratesRes.data ||
+              FALLBACK_RATES,
           );
         } catch (error) {
           console.error(
-            "Failed to load creator",
+            "Failed to load vault data",
             error,
           );
         } finally {
@@ -148,11 +205,70 @@ const CreatorPublicProfile =
         }
       };
 
+    // --- THE PROFIT ENGINE ---
+    // Converts creator's base price to Fan's currency and skims the decimals
+    const getFanPrice =
+      (
+        creatorPrice,
+        creatorCurrency = "USD",
+      ) => {
+        if (
+          !creatorPrice ||
+          creatorPrice <=
+            0 ||
+          !exchangeRates
+        ) {
+          return {
+            price: 0,
+            currency:
+              fanCurrency,
+            raw: 0,
+            rawCurrency:
+              creatorCurrency,
+          };
+        }
+
+        const toUSD =
+          exchangeRates[
+            creatorCurrency
+          ] ||
+          1;
+        const toFan =
+          exchangeRates[
+            fanCurrency
+          ] ||
+          1;
+
+        const exactUSD =
+          creatorPrice /
+          toUSD;
+        const exactFanPrice =
+          exactUSD *
+          toFan;
+
+        // The Skim: Round UP to the nearest 0.50 interval
+        const roundedPrice =
+          Math.ceil(
+            exactFanPrice *
+              2,
+          ) /
+          2;
+
+        return {
+          price:
+            roundedPrice,
+          currency:
+            fanCurrency,
+          raw: creatorPrice,
+          rawCurrency:
+            creatorCurrency,
+        };
+      };
+
     const handleFollowToggle =
       async () => {
         const previousState =
           profileData.isFollowed;
-        // Optimistic UI Update
         setProfileData(
           (
             prev,
@@ -164,16 +280,10 @@ const CreatorPublicProfile =
         );
 
         try {
-          // THE FIX: Clean POST request
           await api.post(
             `/users/${id}/follow`,
           );
         } catch (error) {
-          console.error(
-            "Failed to sync follow state",
-            error,
-          );
-          // Revert on failure
           setProfileData(
             (
               prev,
@@ -222,11 +332,17 @@ const CreatorPublicProfile =
         );
 
         try {
-          const baseAmountUSD =
-            checkoutData.amount ||
-            0;
+          // Reverse calculate the Fan's bloated price back into exact USD for the Crypto Gateway
+          const toFanRate =
+            exchangeRates[
+              checkoutData
+                .currency
+            ] ||
+            1;
+          const fanPriceInUSD =
+            checkoutData.amount /
+            toFanRate;
 
-          // THE FIX: Pass payload directly. Axios handles JSON stringification automatically.
           const {
             data,
           } =
@@ -234,7 +350,7 @@ const CreatorPublicProfile =
               "/purchases/crypto-quote",
               {
                 amountUSD:
-                  baseAmountUSD,
+                  fanPriceInUSD,
               },
             );
 
@@ -242,10 +358,6 @@ const CreatorPublicProfile =
             data,
           );
         } catch (error) {
-          console.error(
-            "Quote error:",
-            error,
-          );
           alert(
             "Failed to get live crypto rates. Please try again.",
           );
@@ -271,12 +383,11 @@ const CreatorPublicProfile =
           paymentMethod ===
           "CARD"
         ) {
-          // --- WEB2 (PAYSTACK) EXECUTION ---
-          const exchangeRate = 1500; // Define or fetch your live NGN rate
-          const amountInKobo =
+          // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
+          // Multiply Fan's exact display price into subunits (e.g. kobo/cents)
+          const amountInSubunits =
             Math.round(
               checkoutData.amount *
-                exchangeRate *
                 100,
             );
 
@@ -289,9 +400,11 @@ const CreatorPublicProfile =
                       .getTime()
                       .toString(),
                   email:
-                    "fan@nippy.com", // Replace with your currentUser?.email if available in state
+                    "fan@nippy.com",
                   amount:
-                    amountInKobo,
+                    amountInSubunits,
+                  currency:
+                    checkoutData.currency, // Force Paystack to process in the Fan's local currency
                 },
               onSuccess:
                 async (
@@ -305,12 +418,12 @@ const CreatorPublicProfile =
                       : checkoutData.type,
                   );
                   try {
-                    // THE FIX: Clean POST request for Fiat verification
+                    // SEND BOTH PRICES TO THE LEDGER
                     await api.post(
                       "/purchases/verify",
                       {
                         reference:
-                          reference.reference, // Paystack ref
+                          reference.reference,
                         paymentMethod:
                           "FIAT",
                         creatorId:
@@ -326,17 +439,20 @@ const CreatorPublicProfile =
                         subscriptionTier:
                           checkoutData.tier ||
                           null,
+                        chargeAmount:
+                          checkoutData.amount, // Paid by Fan
+                        chargeCurrency:
+                          checkoutData.currency,
+                        rawAmount:
+                          checkoutData.raw, // Credited to Creator
+                        rawCurrency:
+                          checkoutData.rawCurrency,
                       },
                     );
 
-                    await fetchProfile();
+                    await fetchProfileAndRates();
                     closeCheckoutModal();
                   } catch (error) {
-                    console.error(
-                      "Verification Error:",
-                      error,
-                    );
-                    // Axios places backend error messages inside error.response.data
                     alert(
                       "Verification failed: " +
                         (error
@@ -352,17 +468,16 @@ const CreatorPublicProfile =
                   }
                 },
               onClose:
-                () => {
+                () =>
                   alert(
                     "Payment window closed by user.",
-                  );
-                },
+                  ),
             },
           );
           return;
         }
 
-        // --- WEB3 (CRYPTO) EXECUTION ---
+        // --- WEB3 EXECUTION ---
         try {
           setProcessingId(
             checkoutData.post
@@ -376,27 +491,23 @@ const CreatorPublicProfile =
             !profileData
               ?.creator
               ?.walletAddress
-          ) {
+          )
             throw new Error(
-              "This creator has not set up their Web3 wallet address yet!",
+              "Creator missing Web3 wallet.",
             );
-          }
-
           if (
-            !cryptoQuote ||
-            !cryptoQuote.requiredUSDT
-          ) {
+            !cryptoQuote?.requiredUSDT
+          )
             throw new Error(
-              "Missing crypto quote. Please re-select the payment method.",
+              "Missing crypto quote.",
             );
-          }
-
           const txHash =
             await transferUSDT(
               profileData
                 .creator
                 .walletAddress,
               cryptoQuote.requiredUSDT,
+              checkoutData.raw,
               checkoutData.post
                 ? checkoutData
                     .post
@@ -411,7 +522,7 @@ const CreatorPublicProfile =
               "Transaction completed but no hash was returned.",
             );
 
-          // THE FIX: Clean POST request for Crypto verification
+          // SEND BOTH PRICES TO THE LEDGER
           await api.post(
             "/purchases/verify",
             {
@@ -432,23 +543,27 @@ const CreatorPublicProfile =
               subscriptionTier:
                 checkoutData.tier ||
                 null,
+              chargeAmount:
+                checkoutData.amount, // Paid by Fan
+              chargeCurrency:
+                checkoutData.currency,
+              rawAmount:
+                checkoutData.raw, // Credited to Creator
+              rawCurrency:
+                checkoutData.rawCurrency,
             },
           );
 
-          await fetchProfile();
+          await fetchProfileAndRates();
           closeCheckoutModal();
         } catch (error) {
-          console.error(
-            "Transaction Error Trace:",
-            error,
-          );
           alert(
             error
               .response
               ?.data
               ?.message ||
               error.message ||
-              "Transaction failed. Check browser console for details.",
+              "Transaction failed.",
           );
         } finally {
           setProcessingId(
@@ -458,8 +573,9 @@ const CreatorPublicProfile =
       };
 
     if (
-      loading
-    )
+      loading ||
+      !exchangeRates
+    ) {
       return (
         <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse">
           Loading
@@ -467,10 +583,10 @@ const CreatorPublicProfile =
           vault...
         </div>
       );
-
+    }
     if (
       !profileData
-    )
+    ) {
       return (
         <div className="text-center text-gray-500 mt-20">
           Creator
@@ -478,6 +594,7 @@ const CreatorPublicProfile =
           found.
         </div>
       );
+    }
 
     const {
       creator,
@@ -489,11 +606,15 @@ const CreatorPublicProfile =
     const settings =
       creator.monetizationSettings ||
       {};
+    const creatorCurrency =
+      settings.priceCurrency ||
+      "USD";
     const hasActiveChat =
       profileData.chatBubblesLeft >
         0 ||
       profileData.hasActiveChat;
 
+    // Process subscription tiers through the pricing engine
     const availableTiers =
       [];
     if (
@@ -504,8 +625,10 @@ const CreatorPublicProfile =
         {
           label:
             "Weekly",
-          price:
+          ...getFanPrice(
             settings.weeklySubscription,
+            creatorCurrency,
+          ),
         },
       );
     if (
@@ -516,8 +639,10 @@ const CreatorPublicProfile =
         {
           label:
             "Monthly",
-          price:
+          ...getFanPrice(
             settings.monthlySubscription,
+            creatorCurrency,
+          ),
         },
       );
     if (
@@ -527,9 +652,18 @@ const CreatorPublicProfile =
       availableTiers.push(
         {
           label: `${settings.multiMonthDuration || 3}-Month Bundle`,
-          price:
+          ...getFanPrice(
             settings.multiMonthPrice,
+            creatorCurrency,
+          ),
         },
+      );
+
+    // Process chat bundle through the pricing engine
+    const chatBundle =
+      getFanPrice(
+        settings.messageBundlePrice,
+        creatorCurrency,
       );
 
     return (
@@ -702,98 +836,152 @@ const CreatorPublicProfile =
             {content.map(
               (
                 post,
-              ) => (
-                <div
-                  key={
-                    post._id
-                  }
-                  className="relative group rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex flex-col"
-                >
-                  {post.isPaywalled && (
-                    <div className="absolute top-2 right-2 bg-slate-950/80 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white border border-slate-700 z-20">
-                      {
-                        post.displayCurrency
-                      }{" "}
-                      {post.displayPrice?.toFixed(
-                        2,
+              ) => {
+                // Extract the raw price from our new backend structure
+                const rawPostPrice =
+                  post.actualPrice !==
+                  undefined
+                    ? post.actualPrice
+                    : post.price ||
+                      0;
+                const rawPostCurrency =
+                  post.priceCurrency ||
+                  creatorCurrency;
+
+                const isFreeContent =
+                  rawPostPrice <=
+                  0;
+                const ppvPriceData =
+                  getFanPrice(
+                    rawPostPrice,
+                    rawPostCurrency,
+                  );
+
+                return (
+                  <div
+                    key={
+                      post._id
+                    }
+                    className="relative group rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex flex-col"
+                  >
+                    {/* PPV Badge */}
+                    {post.isPaywalled &&
+                      !isFreeContent && (
+                        <div className="absolute top-2 right-2 bg-slate-950/80 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white border border-slate-700 z-20">
+                          {
+                            ppvPriceData.currency
+                          }{" "}
+                          {ppvPriceData.price.toFixed(
+                            2,
+                          )}
+                        </div>
+                      )}
+
+                    <div className="bg-black aspect-square relative flex items-center justify-center border-b border-gray-800/50 overflow-hidden">
+                      {/* THE FIX: Bypass the blur if the content is free */}
+                      {post.isLocked &&
+                      !isFreeContent ? (
+                        <>
+                          <video
+                            src={
+                              post.teaserUrl
+                            }
+                            autoPlay
+                            loop
+                            muted
+                            playsInline
+                            className="w-full h-full object-cover blur-2xl scale-110 opacity-50 pointer-events-none select-none"
+                          />
+                          {/* THE FIX: Bypass the lock overlay if the content is free */}
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm p-4 text-center z-10">
+                            <Lock
+                              size={
+                                32
+                              }
+                              className="text-gray-300 mb-2 shadow-sm"
+                            />
+                            <p className="text-white font-bold mb-3 shadow-md">
+                              Locked
+                              Content
+                            </p>
+                            <button
+                              onClick={() => {
+                                setCheckoutData(
+                                  {
+                                    type: "PPV",
+                                    post,
+                                    amount:
+                                      ppvPriceData.price,
+                                    currency:
+                                      ppvPriceData.currency,
+                                    raw: ppvPriceData.raw,
+                                    rawCurrency:
+                                      ppvPriceData.rawCurrency,
+                                  },
+                                );
+                                setPaymentMethod(
+                                  null,
+                                );
+                              }}
+                              className="bg-white hover:bg-gray-200 text-black font-bold py-2 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg"
+                            >
+                              Unlock
+                              for{" "}
+                              {
+                                ppvPriceData.currency
+                              }{" "}
+                              {ppvPriceData.price.toFixed(
+                                2,
+                              )}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="w-full h-full relative group">
+                          {post.mediaUrl
+                            ?.toLowerCase()
+                            .match(
+                              /\.(jpg|jpeg|png|gif|webp)/i,
+                            ) ||
+                          post.fileType?.includes(
+                            "image",
+                          ) ? (
+                            <img
+                              src={
+                                post.mediaUrl
+                              }
+                              alt={
+                                post.title
+                              }
+                              className="w-full h-full object-cover select-none"
+                            />
+                          ) : (
+                            <video
+                              controls
+                              src={
+                                post.mediaUrl
+                              }
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                  <div className="bg-black aspect-square relative flex items-center justify-center border-b border-gray-800/50 overflow-hidden">
-                    {post.isLocked ? (
-                      <>
-                        <video
-                          src={
-                            post.teaserUrl
-                          }
-                          autoPlay
-                          loop
-                          muted
-                          playsInline
-                          className="w-full h-full object-cover blur-2xl scale-110 opacity-50 pointer-events-none select-none"
-                        />
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm p-4 text-center z-10">
-                          <Lock
-                            size={
-                              32
-                            }
-                            className="text-gray-300 mb-2 shadow-sm"
-                          />
-                          <p className="text-white font-bold mb-3 shadow-md">
-                            Locked
-                            Content
-                          </p>
-                          <button
-                            onClick={() => {
-                              setCheckoutData(
-                                {
-                                  type: "PPV",
-                                  post,
-                                  amount:
-                                    post.actualPrice,
-                                },
-                              );
-                              setPaymentMethod(
-                                null,
-                              );
-                            }}
-                            className="bg-white hover:bg-gray-200 text-black font-bold py-2 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg"
-                          >
-                            Unlock
-                            for
-                            $
-                            {
-                              post.actualPrice
-                            }
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="w-full h-full relative group">
-                        <video
-                          controls
-                          src={
-                            post.mediaUrl
-                          }
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                    )}
+                    <div className="p-4">
+                      <h3 className="font-bold text-slate-200 line-clamp-1">
+                        {
+                          post.title
+                        }
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {new Date(
+                          post.createdAt,
+                        ).toLocaleDateString()}
+                      </p>
+                    </div>
                   </div>
-                  <div className="p-4">
-                    <h3 className="font-bold text-slate-200 line-clamp-1">
-                      {
-                        post.title
-                      }
-                    </h3>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {new Date(
-                        post.createdAt,
-                      ).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-              ),
+                );
+              },
             )}
           </div>
           {content.length ===
@@ -809,6 +997,7 @@ const CreatorPublicProfile =
           )}
         </div>
 
+        {/* SUBSCRIPTION MODAL */}
         {showSubModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -870,6 +1059,11 @@ const CreatorPublicProfile =
                             post: null,
                             amount:
                               tier.price,
+                            currency:
+                              tier.currency,
+                            raw: tier.raw,
+                            rawCurrency:
+                              tier.rawCurrency,
                           },
                         );
                         setPaymentMethod(
@@ -890,10 +1084,12 @@ const CreatorPublicProfile =
                           }
                           className="text-gray-400 group-hover:text-emerald-500"
                         />
+                        {tier.price.toFixed(
+                          2,
+                        )}{" "}
                         {
-                          tier.price
-                        }{" "}
-                        USDT
+                          tier.currency
+                        }
                       </span>
                     </button>
                   ),
@@ -903,6 +1099,7 @@ const CreatorPublicProfile =
           </div>
         )}
 
+        {/* CHAT BUNDLE CONFIG MODAL */}
         {showBundleConfig && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -952,13 +1149,17 @@ const CreatorPublicProfile =
                   bundle
                   for{" "}
                   <span className="font-bold text-emerald-400">
-                    $
+                    {chatBundle.price.toFixed(
+                      2,
+                    )}{" "}
                     {
-                      settings.messageBundlePrice
+                      chatBundle.currency
                     }
                   </span>
+
                   .
                 </p>
+
                 <div className="flex items-center gap-6 mb-8 bg-slate-950 p-2 rounded-2xl border border-slate-800">
                   <button
                     onClick={() =>
@@ -1014,6 +1215,7 @@ const CreatorPublicProfile =
                     />
                   </button>
                 </div>
+
                 <div className="w-full bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex justify-between items-center mb-6">
                   <div>
                     <p className="text-xs text-emerald-500 font-bold uppercase">
@@ -1031,13 +1233,15 @@ const CreatorPublicProfile =
                       Cost
                     </p>
                     <p className="text-2xl font-black text-emerald-400">
-                      $
                       {(
                         bundleQuantity *
-                        settings.messageBundlePrice
+                        chatBundle.price
                       ).toFixed(
                         2,
-                      )}
+                      )}{" "}
+                      {
+                        chatBundle.currency
+                      }
                     </p>
                   </div>
                 </div>
@@ -1051,7 +1255,14 @@ const CreatorPublicProfile =
                         type: "CHAT_BUNDLE",
                         amount:
                           bundleQuantity *
-                          settings.messageBundlePrice,
+                          chatBundle.price,
+                        currency:
+                          chatBundle.currency,
+                        raw:
+                          bundleQuantity *
+                          chatBundle.raw,
+                        rawCurrency:
+                          chatBundle.rawCurrency,
                         bubbles:
                           bundleQuantity *
                           settings.messageBundleSize,
@@ -1072,7 +1283,7 @@ const CreatorPublicProfile =
           </div>
         )}
 
-        {/* Checkout Modal */}
+        {/* CHECKOUT MASTER MODAL */}
         {checkoutData && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
@@ -1116,10 +1327,12 @@ const CreatorPublicProfile =
                   </span>{" "}
                   for{" "}
                   <span className="text-emerald-500 font-bold">
+                    {checkoutData.amount.toFixed(
+                      2,
+                    )}{" "}
                     {
-                      checkoutData.amount
-                    }{" "}
-                    USD
+                      checkoutData.currency
+                    }
                   </span>
                 </p>
 
@@ -1179,7 +1392,6 @@ const CreatorPublicProfile =
                   </button>
                 </div>
 
-                {/* DYNAMIC CRYPTO QUOTE DISPLAY */}
                 {paymentMethod ===
                   "CRYPTO" &&
                   fetchingQuote && (
@@ -1190,6 +1402,7 @@ const CreatorPublicProfile =
                       rates...
                     </div>
                   )}
+
                 {paymentMethod ===
                   "CRYPTO" &&
                   cryptoQuote && (

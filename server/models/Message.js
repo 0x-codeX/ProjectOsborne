@@ -63,7 +63,7 @@ const messageSchema =
         ],
 
       // Monetization Engine
-      priceInUSDT:
+      price:
         {
           type: Number,
           min: 0,

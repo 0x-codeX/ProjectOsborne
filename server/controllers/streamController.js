@@ -77,9 +77,19 @@ exports.createStream = async (req, res) => {
 // @access  Private
 exports.getStream = async (req, res) => {
   try {
-    const stream = await Stream.findById(req.params.id)
-      .select("+streamKey")
-      .populate("creatorId", "username creatorProfile monetizationSettings subscribers"); // Added 'subscribers' to populate
+    const stream =
+      await Stream.findById(
+        req
+          .params
+          .id,
+      )
+        .select(
+          "+streamKey",
+        )
+        .populate(
+          "creatorId",
+          "username creatorProfile monetizationSettings subscribers walletAddress",
+        );
 
     if (!stream) {
       return res.status(404).json({ message: "Stream not found." });

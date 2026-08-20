@@ -43,7 +43,7 @@ const contentSchema =
           type: String,
           maxLength: 500,
         },
-      priceInUSDT:
+      price:
         {
           type: Number,
           required: true,

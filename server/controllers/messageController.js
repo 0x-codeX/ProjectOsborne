@@ -10,8 +10,6 @@ const {
   convertAndRoundPrice,
 } = require("../utils/currencyConversion");
 
-
-
 const {
   S3Client,
   GetObjectCommand,
@@ -64,8 +62,6 @@ exports.sendMessage =
         req
           .user
           .id;
-
-      // NOTE: Because of FormData, boolean/numbers may arrive as strings.
       let {
         receiverId,
         text,
@@ -80,20 +76,19 @@ exports.sendMessage =
         req
           .body
           .fileType;
-      let priceInUSDT =
+      let price =
         Number(
           req
             .body
-            .priceInUSDT,
+            .price,
         ) ||
         0;
-
       let fileUrl =
-        null; // Will hold the R2 public URL if an audio file is uploaded
+        null;
 
       if (
         !receiverId
-      ) {
+      )
         return res
           .status(
             400,
@@ -104,14 +99,11 @@ exports.sendMessage =
                 "Receiver ID is required.",
             },
           );
-      }
-
-      // Must have text, a vault fileKey, OR an incoming audio file
       if (
         !text &&
         !fileKey &&
         !req.file
-      ) {
+      )
         return res
           .status(
             400,
@@ -122,7 +114,6 @@ exports.sendMessage =
                 "Message cannot be empty.",
             },
           );
-      }
 
       const sender =
         await User.findById(
@@ -132,11 +123,10 @@ exports.sendMessage =
         await User.findById(
           receiverId,
         );
-
       if (
         !sender ||
         !receiver
-      ) {
+      )
         return res
           .status(
             404,
@@ -147,12 +137,9 @@ exports.sendMessage =
                 "User not found.",
             },
           );
-      }
 
       let creatorId,
         fanId;
-
-      // Determine Roles
       if (
         sender.role ===
         "fan"
@@ -168,7 +155,6 @@ exports.sendMessage =
           receiverId;
       }
 
-      // 1. Find the Conversation First (Needed to check bubbles)
       let conversation =
         await Conversation.findOne(
           {
@@ -182,19 +168,16 @@ exports.sendMessage =
           },
         );
 
-      // ==========================================
       // --- THE GATEKEEPER: FAN BUSINESS RULES ---
-      // ==========================================
       if (
         sender.role ===
         "fan"
       ) {
-        // Rule A: 200 Character Limit
         if (
           text &&
           text.length >
             200
-        ) {
+        )
           return res
             .status(
               400,
@@ -205,14 +188,11 @@ exports.sendMessage =
                   "Fan messages are limited to 200 characters to prevent spam.",
               },
             );
-        }
-
-        // Rule B: Fans CANNOT send attachments, media files, or file uploads
         if (
           req.file ||
           fileKey ||
           fileType
-        ) {
+        )
           return res
             .status(
               400,
@@ -223,9 +203,7 @@ exports.sendMessage =
                   "Fans are restricted to text-only messages.",
               },
             );
-        }
 
-        // Rule C: Check Bubble Balance
         if (
           !conversation ||
           conversation.bubblesLeft <=
@@ -244,7 +222,6 @@ exports.sendMessage =
             );
         }
 
-        // Rule D: 24-hr PPV / Sub / Chat Bundle check
         const now =
           new Date();
         const twentyFourHoursAgo =
@@ -310,24 +287,19 @@ exports.sendMessage =
             );
         }
       }
-
-      // ==============================================
       // --- THE GATEKEEPER: CREATOR BUSINESS RULES ---
-      // ==============================================
       else if (
         sender.role ===
         "creator"
       ) {
-        // 1. Process Live Voice Note Upload (if exists)
         if (
           req.file
         ) {
-          // Enforce audio only for direct uploads
           if (
             !req.file.mimetype.includes(
               "audio",
             )
-          ) {
+          )
             return res
               .status(
                 403,
@@ -338,9 +310,7 @@ exports.sendMessage =
                     "Only voice notes can be uploaded directly.",
                 },
               );
-          }
 
-          // Upload to Cloudflare R2
           const randomName =
             crypto
               .randomBytes(
@@ -355,27 +325,23 @@ exports.sendMessage =
               .file
               .mimetype;
 
-          const uploadParams =
-            {
-              Bucket:
-                process
-                  .env
-                  .S3_BUCKET_NAME,
-              Key: fileKey,
-              Body: req
-                .file
-                .buffer,
-              ContentType:
-                fileType,
-            };
-
           await s3Client.send(
             new PutObjectCommand(
-              uploadParams,
+              {
+                Bucket:
+                  process
+                    .env
+                    .S3_BUCKET_NAME,
+                Key: fileKey,
+                Body: req
+                  .file
+                  .buffer,
+                ContentType:
+                  fileType,
+              },
             ),
           );
 
-          // IRONCLAD URL GENERATION: Ensure https:// is always present
           let domain =
             process
               .env
@@ -384,24 +350,21 @@ exports.sendMessage =
             !domain.startsWith(
               "http",
             )
-          ) {
+          )
             domain = `https://${domain}`;
-          }
           if (
             domain.endsWith(
               "/",
             )
-          ) {
+          )
             domain =
               domain.slice(
                 0,
                 -1,
               );
-          }
           fileUrl = `${domain}/${fileKey}`;
         }
 
-        // 2. Validate Vault Media & Attachment Restrictions
         if (
           fileKey
         ) {
@@ -433,11 +396,6 @@ exports.sendMessage =
         }
       }
 
-      // ==============================
-      // --- DATABASE OPERATIONS ---
-      // ==============================
-
-      // 2. Create the Conversation if it doesn't exist
       if (
         !conversation
       ) {
@@ -457,13 +415,11 @@ exports.sendMessage =
           );
       }
 
-      // 3. Create the Message
       const isLockedPPV =
         sender.role ===
           "creator" &&
-        priceInUSDT >
+        price >
           0;
-
       const message =
         await Message.create(
           {
@@ -485,15 +441,14 @@ exports.sendMessage =
             fileType:
               fileType ||
               null,
-            priceInUSDT:
+            price:
               isLockedPPV
-                ? priceInUSDT
+                ? price
                 : 0,
-            isRead: false, // Defaulting to unread
+            isRead: false,
           },
         );
 
-      // 4. Atomically Update Conversation Last Message & Deduct Bubble
       const updatePayload =
         {
           $set: {
@@ -513,17 +468,15 @@ exports.sendMessage =
           },
         };
 
-      // If a fan sends a message, deduct 1 bubble atomically
       if (
         sender.role ===
         "fan"
-      ) {
+      )
         updatePayload.$inc =
           {
             bubblesLeft:
               -1,
           };
-      }
 
       const updatedConversation =
         await Conversation.findByIdAndUpdate(
@@ -534,9 +487,6 @@ exports.sendMessage =
           },
         );
 
-      // ==============================
-      // --- SOCKET BROADCAST ---
-      // ==============================
       req.io
         .to(
           conversation._id.toString(),
@@ -600,7 +550,6 @@ exports.buyMessageBundle =
           .user
           .id;
 
-      // 1. Fetch Creator's monetization settings to know bundle size
       const creator =
         await User.findById(
           creatorId,
@@ -609,7 +558,7 @@ exports.buyMessageBundle =
         !creator ||
         creator.role !==
           "creator"
-      ) {
+      )
         return res
           .status(
             404,
@@ -620,16 +569,13 @@ exports.buyMessageBundle =
                 "Creator not found",
             },
           );
-      }
 
-      // Get the bundle size from settings, default to 5 if not set
       const bundleSize =
         creator
           .monetizationSettings
           ?.messageBundleSize ||
         5;
 
-      // 2. Record Purchase (Prevent Replay Attacks via unique txHash)
       const purchase =
         new Purchase(
           {
@@ -647,7 +593,6 @@ exports.buyMessageBundle =
 
       await purchase.save();
 
-      // 3. Find or Create Conversation & Credit Bubbles
       let conversation =
         await Conversation.findOne(
           {
@@ -656,7 +601,6 @@ exports.buyMessageBundle =
             fan: fanId,
           },
         );
-
       if (
         !conversation
       ) {
@@ -683,7 +627,6 @@ exports.buyMessageBundle =
         conversation.lifetimeValue +=
           amountPaid;
       }
-
       await conversation.save();
 
       return res
@@ -703,7 +646,7 @@ exports.buyMessageBundle =
       if (
         error.code ===
         11000
-      ) {
+      )
         return res
           .status(
             400,
@@ -714,12 +657,7 @@ exports.buyMessageBundle =
                 "Transaction hash already processed.",
             },
           );
-      }
-      console.error(
-        "Bundle Purchase Error:",
-        error,
-      );
-      return res
+      res
         .status(
           500,
         )
@@ -748,7 +686,6 @@ exports.getInbox =
           .user
           .id;
 
-      // Fetch all conversations, sorted by most recently updated
       const conversations =
         await Conversation.find(
           {
@@ -772,7 +709,6 @@ exports.getInbox =
           )
           .lean();
 
-      // IRONCLAD FIX: Loop through conversations and accurately count unread messages for the current user
       const inbox =
         await Promise.all(
           conversations.map(
@@ -786,8 +722,6 @@ exports.getInbox =
                 isCreator
                   ? conv.fan
                   : conv.creator;
-
-              // Count unread messages where THIS user is the RECEIVER
               const unreadCount =
                 await Message.countDocuments(
                   {
@@ -802,7 +736,7 @@ exports.getInbox =
               return {
                 ...conv,
                 otherUser,
-                unreadCount, // Injecting this specifically for the frontend notification badges
+                unreadCount,
               };
             },
           ),
@@ -816,10 +750,6 @@ exports.getInbox =
           inbox,
         );
     } catch (error) {
-      console.error(
-        "GetInbox Error:",
-        error,
-      );
       res
         .status(
           500,
@@ -835,62 +765,163 @@ exports.getInbox =
 
 // @desc    Get Messages for a specific Conversation
 // @route   GET /api/messages/:conversationId
-exports.getMessages = async (req, res) => {
-  try {
-    const userId = req.user._id || req.user.id;
-    const { conversationId } = req.params;
-    const userCountry = req.user?.country || "United States";
+exports.getMessages =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const userId =
+        req
+          .user
+          ._id ||
+        req
+          .user
+          .id;
+      const {
+        conversationId,
+      } =
+        req.params;
 
-    // 1. Fetch conversation AND populate the creator's details for the UI
-    const conversation = await Conversation.findById(conversationId)
-      .populate("creator", "username profileImage walletAddress monetizationSettings")
-      .lean();
+      // THE FIX: Enforce Hybrid Strategy for DM Quotes
+      const viewerCurrencyPref =
+        req
+          .user
+          ?.preferredCurrency ||
+        req
+          .user
+          ?.country ||
+        "USD";
 
-    if (!conversation) {
-      return res.status(404).json({ message: "Conversation not found." });
+      const conversation =
+        await Conversation.findById(
+          conversationId,
+        )
+          .populate(
+            "creator",
+            "username profileImage walletAddress monetizationSettings",
+          )
+          .lean();
+
+      if (
+        !conversation
+      )
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "Conversation not found.",
+            },
+          );
+
+      const isParticipant =
+        conversation.participants.some(
+          (
+            participant,
+          ) =>
+            participant.toString() ===
+            userId.toString(),
+        );
+      if (
+        !isParticipant
+      )
+        return res
+          .status(
+            403,
+          )
+          .json(
+            {
+              message:
+                "Unauthorized to view these messages.",
+            },
+          );
+
+      await Message.updateMany(
+        {
+          conversationId:
+            conversationId,
+          receiver:
+            userId,
+          isRead: false,
+        },
+        {
+          $set: {
+            isRead: true,
+          },
+        },
+      );
+
+      const messages =
+        await Message.find(
+          {
+            conversationId,
+          },
+        )
+          .sort(
+            {
+              createdAt: 1,
+            },
+          )
+          .lean();
+
+      const creatorSettings =
+        conversation
+          .creator
+          .monetizationSettings ||
+        {};
+      const baseBundlePriceNGN =
+        creatorSettings.messageBundlePrice ||
+        0;
+
+      // THE FIX: Cleanly convert and round using user preference
+      const bundlePricing =
+        await convertAndRoundPrice(
+          baseBundlePriceNGN,
+          viewerCurrencyPref,
+        );
+
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            conversation,
+            messages,
+            chatInfo:
+              {
+                bundleSize:
+                  creatorSettings.messageBundleSize ||
+                  5,
+                bundleDisplayPrice:
+                  bundlePricing.displayPrice,
+                bundleDisplayCurrency:
+                  bundlePricing.displayCurrency,
+                bundlePaystackNGN:
+                  bundlePricing.paystackNGNAmount,
+              },
+          },
+        );
+    } catch (error) {
+      console.error(
+        "GetMessages Error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Server error fetching messages.",
+          },
+        );
     }
-
-    // Security: Check if user is in the participants array.
-    const isParticipant = conversation.participants.some(
-      (participant) => participant.toString() === userId.toString()
-    );
-
-    if (!isParticipant) {
-      return res.status(403).json({ message: "Unauthorized to view these messages." });
-    }
-
-    // IRONCLAD FIX: The moment they open the chat, mark all pending messages directed to them as READ.
-    await Message.updateMany(
-      { conversationId: conversationId, receiver: userId, isRead: false },
-      { $set: { isRead: true } }
-    );
-
-    // 2. Fetch the messages in chronological order
-    const messages = await Message.find({ conversationId })
-      .sort({ createdAt: 1 })
-      .lean();
-
-    // 3. Dynamic Pricing for Chat Bundles
-    const creatorSettings = conversation.creator.monetizationSettings || {};
-    const baseBundlePriceNGN = creatorSettings.messageBundlePrice || 0;
-    const bundlePricing = await convertAndRoundPrice(baseBundlePriceNGN, userCountry);
-
-    // 4. Return BOTH the populated conversation, messages, AND dynamic chat info
-    res.status(200).json({
-      conversation,
-      messages,
-      chatInfo: {
-        bundleSize: creatorSettings.messageBundleSize || 5,
-        bundleDisplayPrice: bundlePricing.displayPrice,
-        bundleDisplayCurrency: bundlePricing.displayCurrency,
-        bundlePaystackNGN: bundlePricing.paystackNGNAmount,
-      }
-    });
-  } catch (error) {
-    console.error("GetMessages Error:", error);
-    res.status(500).json({ message: "Server error fetching messages." });
-  }
-};
+  };
 
 // @desc    Verify USDT payment for a locked DM and grant access
 // @route   POST /api/messages/unlock
@@ -913,7 +944,6 @@ exports.verifyMessagePayment =
           .user
           .id;
 
-      // 1. Replay Attack Check
       const existingPurchase =
         await Purchase.findOne(
           {
@@ -922,7 +952,7 @@ exports.verifyMessagePayment =
         );
       if (
         existingPurchase
-      ) {
+      )
         return res
           .status(
             400,
@@ -933,9 +963,7 @@ exports.verifyMessagePayment =
                 "Fraud detected: Transaction hash already used.",
             },
           );
-      }
 
-      // 2. Fetch the Message & Creator
       const message =
         await Message.findById(
           messageId,
@@ -944,7 +972,7 @@ exports.verifyMessagePayment =
         );
       if (
         !message
-      ) {
+      )
         return res
           .status(
             404,
@@ -955,11 +983,10 @@ exports.verifyMessagePayment =
                 "Message not found.",
             },
           );
-      }
       if (
-        message.priceInUSDT <=
+        message.price <=
         0
-      ) {
+      )
         return res
           .status(
             400,
@@ -970,18 +997,17 @@ exports.verifyMessagePayment =
                 "This message is already free.",
             },
           );
-      }
 
       const creator =
         message.sender;
       const expectedPrice =
-        message.priceInUSDT;
+        message.price;
       const expectedWallet =
         creator.walletAddress?.toLowerCase();
 
       if (
         !expectedWallet
-      ) {
+      )
         return res
           .status(
             400,
@@ -992,9 +1018,7 @@ exports.verifyMessagePayment =
                 "Creator payout address not configured.",
             },
           );
-      }
 
-      // 3. Connect to Polygon & Verify On-Chain
       const provider =
         new ethers.JsonRpcProvider(
           "https://polygon-rpc.com",
@@ -1013,7 +1037,7 @@ exports.verifyMessagePayment =
         !receipt ||
         receipt.status !==
           1
-      ) {
+      )
         return res
           .status(
             400,
@@ -1024,15 +1048,13 @@ exports.verifyMessagePayment =
                 "Transaction failed or not found on network.",
             },
           );
-      }
 
-      // 4. Verify USDT Contract & Decoding
       const USDT_ADDRESS =
         "0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase();
       if (
         tx.to.toLowerCase() !==
         USDT_ADDRESS
-      ) {
+      )
         return res
           .status(
             400,
@@ -1043,7 +1065,6 @@ exports.verifyMessagePayment =
                 "Fraud: Transaction was not sent to the USDT contract.",
             },
           );
-      }
 
       const iface =
         new ethers.Interface(
@@ -1065,12 +1086,12 @@ exports.verifyMessagePayment =
           decoded
             .args[1],
           6,
-        ); // 6 decimals for USDT
+        );
 
       if (
         actualRecipient !==
         expectedWallet
-      ) {
+      )
         return res
           .status(
             400,
@@ -1081,13 +1102,15 @@ exports.verifyMessagePayment =
                 "Fraud: Funds sent to wrong wallet.",
             },
           );
-      }
+
+      // We leave this expectedPrice check as-is for now, but note it might require an update
+      // once purchaseController.js is fully migrated to the new quote validation system.
       if (
         Number(
           actualAmount,
         ) <
         expectedPrice
-      ) {
+      )
         return res
           .status(
             400,
@@ -1098,9 +1121,7 @@ exports.verifyMessagePayment =
                 "Fraud: Insufficient funds sent.",
             },
           );
-      }
 
-      // 5. Save the Purchase Record
       const purchase =
         await Purchase.create(
           {
@@ -1108,7 +1129,7 @@ exports.verifyMessagePayment =
             creator:
               creator._id,
             message:
-              message._id, // LINKED TO THE MESSAGE!
+              message._id,
             txHash,
             amountPaid:
               Number(
@@ -1121,7 +1142,6 @@ exports.verifyMessagePayment =
           },
         );
 
-      // 6. Split Fee & Atomic Ledger Update (80% Creator / 20% Platform)
       const PLATFORM_FEE = 0.2;
       const creatorEarnings =
         Number(
@@ -1205,7 +1225,6 @@ exports.getSecureMessageMedia =
           .user
           .id;
 
-      // 1. Fetch Message
       const message =
         await Message.findById(
           messageId,
@@ -1213,7 +1232,7 @@ exports.getSecureMessageMedia =
       if (
         !message ||
         !message.fileKey
-      ) {
+      )
         return res
           .status(
             404,
@@ -1224,21 +1243,18 @@ exports.getSecureMessageMedia =
                 "Media not found.",
             },
           );
-      }
 
-      // 2. Zero-Trust Access Check
       const isCreator =
         message.sender.toString() ===
         userId.toString();
       const isFree =
-        message.priceInUSDT ===
+        message.price ===
         0;
 
       if (
         !isCreator &&
         !isFree
       ) {
-        // If it's a locked message and they aren't the creator, verify they bought it
         const validPurchase =
           await Purchase.findOne(
             {
@@ -1254,7 +1270,7 @@ exports.getSecureMessageMedia =
 
         if (
           !validPurchase
-        ) {
+        )
           return res
             .status(
               403,
@@ -1265,10 +1281,8 @@ exports.getSecureMessageMedia =
                   "Access denied. You must purchase this message to view the media.",
               },
             );
-        }
       }
 
-      // 3. Generate 15-Minute Self-Destructing Cloudflare URL
       const command =
         new GetObjectCommand(
           {
@@ -1279,7 +1293,6 @@ exports.getSecureMessageMedia =
             Key: message.fileKey,
           },
         );
-
       const signedUrl =
         await getSignedUrl(
           s3Client,
@@ -1321,19 +1334,50 @@ exports.getSecureMessageMedia =
 
 // @desc    Get total unread messages count for the layout badge
 // @route   GET /api/messages/unread-count
-exports.getUnreadCount = async (req, res) => {
-  try {
-    const userId = req.user._id || req.user.id;
-    
-    // Lightning fast query to get just the integer count
-    const unreadCount = await Message.countDocuments({
-      receiver: userId,
-      isRead: false,
-    });
-    
-    res.status(200).json({ unreadCount });
-  } catch (error) {
-    console.error("GetUnreadCount Error:", error);
-    res.status(500).json({ message: "Server error fetching unread count." });
-  }
-};
+exports.getUnreadCount =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const userId =
+        req
+          .user
+          ._id ||
+        req
+          .user
+          .id;
+      const unreadCount =
+        await Message.countDocuments(
+          {
+            receiver:
+              userId,
+            isRead: false,
+          },
+        );
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            unreadCount,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "GetUnreadCount Error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Server error fetching unread count.",
+          },
+        );
+    }
+  };

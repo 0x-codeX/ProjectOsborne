@@ -1,98 +1,137 @@
+// server/utils/currencyConversion.js
 const axios = require("axios");
 const {
   roundUpToNearestHalf,
 } = require("./priceRounding");
+const config = require("../config/exchangeRates");
 
-// In-memory exchange rate cache (1-hour TTL)
+// In-memory exchange rate cache
 let rateCache =
   {};
 let lastCacheTime = 0;
-const CACHE_TTL_MS =
-  60 *
-  60 *
-  1000;
-
-// Fallback rates if external exchange API is unreachable
-const FALLBACK_RATES_FROM_USD =
-  {
-    NGN: 1550,
-    EUR: 0.92,
-    GBP: 0.78,
-    CAD: 1.36,
-    KES: 129.5,
-    GHS: 15.5,
-    USD: 1.0,
-  };
-
-const COUNTRY_TO_CURRENCY =
-  {
-    Nigeria:
-      "NGN",
-    "United States":
-      "USD",
-    "United Kingdom":
-      "GBP",
-    Kenya:
-      "KES",
-    Ghana:
-      "GHS",
-    Canada:
-      "CAD",
-    Germany:
-      "EUR",
-    France:
-      "EUR",
-    default:
-      "USD",
-  };
 
 /**
- * Fetches USD-based exchange rates with caching.
+ * Fetches USD-based exchange rates using a 3-Tier Fallback Strategy.
  */
 async function getExchangeRates() {
   const now =
     Date.now();
+
+  // Return cached rates if they are fresh
   if (
-    rateCache &&
-    now -
-      lastCacheTime <
-      CACHE_TTL_MS &&
     Object.keys(
       rateCache,
     )
       .length >
-      0
+      0 &&
+    now -
+      lastCacheTime <
+      config.CACHE_TTL_MS
   ) {
     return rateCache;
   }
 
-  try {
-    const res =
-      await axios.get(
-        "https://open.er-api.com/v6/latest/USD",
-      );
-    if (
-      res.data &&
-      res
-        .data
-        .rates
-    ) {
-      rateCache =
+  // TIER 1: Primary API (ExchangeRate-API)
+  if (
+    process
+      .env
+      .EXCHANGE_RATE_API
+  ) {
+    try {
+      const url = `https://v6.exchangerate-api.com/v6/${process.env.EXCHANGE_RATE_API}/latest/USD`;
+      const res =
+        await axios.get(
+          url,
+          {
+            timeout: 5000,
+          },
+        ); // 5 second timeout
+      if (
+        res.data &&
         res
           .data
-          .rates;
-      lastCacheTime =
-        now;
-      return rateCache;
+          .conversion_rates
+      ) {
+        rateCache =
+          res
+            .data
+            .conversion_rates;
+        lastCacheTime =
+          now;
+        console.log(
+          "[i] Exchange rates updated via Primary API",
+        );
+        return rateCache;
+      }
+    } catch (err) {
+      console.warn(
+        "[-] Primary Exchange API failed:",
+        err.message,
+      );
     }
-  } catch (err) {
-    console.warn(
-      "[-] Exchange rate fetch failed. Using fallbacks.",
-      err.message,
-    );
   }
 
-  return FALLBACK_RATES_FROM_USD;
+  // TIER 2: Secondary API (CurrencyFreak)
+  if (
+    process
+      .env
+      .CURRENCYFREAK_API
+  ) {
+    try {
+      const url = `https://api.currencyfreak.com/v2.0/rates/latest?apikey=${process.env.CURRENCYFREAK_API}`;
+      const res =
+        await axios.get(
+          url,
+          {
+            timeout: 5000,
+          },
+        );
+      if (
+        res.data &&
+        res
+          .data
+          .rates
+      ) {
+        // CurrencyFreak returns strings for rates, we MUST parse them to floats
+        const parsedRates =
+          {};
+        for (const [
+          currency,
+          rate,
+        ] of Object.entries(
+          res
+            .data
+            .rates,
+        )) {
+          parsedRates[
+            currency
+          ] =
+            parseFloat(
+              rate,
+            );
+        }
+        rateCache =
+          parsedRates;
+        lastCacheTime =
+          now;
+        console.log(
+          "[i] Exchange rates updated via Secondary API (CurrencyFreak)",
+        );
+        return rateCache;
+      }
+    } catch (err) {
+      console.warn(
+        "[-] Secondary Exchange API failed:",
+        err.message,
+      );
+    }
+  }
+
+  // TIER 3: Hardcoded Fallback
+  console.warn(
+    "[!] All live Exchange APIs failed. Engaging hardcoded fallbacks.",
+  );
+  return config.FALLBACK_RATES_FROM_USD;
 }
 
 /**
@@ -113,19 +152,30 @@ async function convertAndRoundPrice(
       basePriceNGN: 0,
       displayPrice: 0,
       displayCurrency:
-        "NGN",
+        config.DEFAULT_CURRENCY,
       paystackNGNAmount: 0,
     };
   }
 
-  const targetCurrency =
-    COUNTRY_TO_CURRENCY[
+  // 1. Resolve the requested currency (map country name to currency if necessary)
+  let targetCurrency =
+    config
+      .COUNTRY_TO_CURRENCY[
       userCountryOrCurrency
     ] ||
-    userCountryOrCurrency ||
-    COUNTRY_TO_CURRENCY.default;
+    userCountryOrCurrency;
 
-  // If user is in Nigeria, return raw NGN without currency conversion
+  // 2. Enforce the strict 3-currency rule (fallback to USD if invalid)
+  if (
+    !config.SUPPORTED_CURRENCIES.includes(
+      targetCurrency,
+    )
+  ) {
+    targetCurrency =
+      config.DEFAULT_CURRENCY;
+  }
+
+  // No math needed if the target is NGN
   if (
     targetCurrency ===
     "NGN"
@@ -141,15 +191,22 @@ async function convertAndRoundPrice(
     };
   }
 
+  // Fetch rates
   const rates =
     await getExchangeRates();
   const usdRate =
     rates[
       "NGN"
     ] ||
-    FALLBACK_RATES_FROM_USD.NGN;
+    config
+      .FALLBACK_RATES_FROM_USD
+      .NGN;
   const targetRate =
     rates[
+      targetCurrency
+    ] ||
+    config
+      .FALLBACK_RATES_FROM_USD[
       targetCurrency
     ] ||
     1;
@@ -184,11 +241,14 @@ async function convertAndRoundPrice(
     displayCurrency:
       targetCurrency,
     paystackNGNAmount,
+    exchangeRateUsed:
+      targetRate /
+      usdRate, // Tracking this helps with audit logs
   };
 }
 
 module.exports =
   {
+    getExchangeRates,
     convertAndRoundPrice,
-    COUNTRY_TO_CURRENCY,
   };

@@ -1,7 +1,7 @@
 const Content = require("../models/Content");
 const User = require("../models/User");
 const Purchase = require("../models/Purchase");
-const Notification = require("../models/Notification"); // <-- IRONCLAD FIX: Added Notification Model
+const Notification = require("../models/Notification");
 const {
   deleteFromCloudflare,
 } = require("../utils/cloudflare");
@@ -23,7 +23,6 @@ const {
   convertAndRoundPrice,
 } = require("../utils/currencyConversion");
 
-// Initialize R2 Client
 const s3 =
   new S3Client(
     {
@@ -54,7 +53,7 @@ exports.createContentPost =
       const {
         title,
         description,
-        priceInUSDT,
+        price,
         isNsfw,
       } =
         req.body;
@@ -63,7 +62,7 @@ exports.createContentPost =
 
       if (
         !title ||
-        priceInUSDT ===
+        price ===
           undefined ||
         !file
       ) {
@@ -104,7 +103,6 @@ exports.createContentPost =
           __dirname,
           `../uploads/${teaserFileKey}`,
         );
-
       const isContentNsfw =
         isNsfw ===
           "true" ||
@@ -206,7 +204,6 @@ exports.createContentPost =
         isImage
           ? "image/jpeg"
           : "video/mp4";
-
       await s3.send(
         new PutObjectCommand(
           {
@@ -229,12 +226,9 @@ exports.createContentPost =
         req
           .user
           .id;
-
-      // FIX: Save exactly what the Creator typed (no rounding here).
-      // This ensures their Vault displays their raw expected payout.
       const rawPrice =
         parseFloat(
-          priceInUSDT ||
+          price ||
             0,
         );
       const savedPrice =
@@ -253,8 +247,8 @@ exports.createContentPost =
               creatorId,
             title,
             description,
-            priceInUSDT:
-              savedPrice,
+            price:
+              savedPrice, // Raw base price stored safely
             fileKey:
               originalFileKey,
             teaserKey:
@@ -304,7 +298,6 @@ exports.createContentPost =
             isImage
               ? "photo"
               : "video";
-
           const notifications =
             followers.map(
               (
@@ -325,7 +318,6 @@ exports.createContentPost =
                   newContent._id,
               }),
             );
-
           await Notification.insertMany(
             notifications,
           );
@@ -381,418 +373,157 @@ exports.createContentPost =
   };
 
 // GET /api/content/feed
-exports.getFeed =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const viewerId =
-        req
-          .user
-          ._id;
-      const viewerWallet =
-        req
-          .user
-          .walletAddress
-          ? req.user.walletAddress.toLowerCase()
-          : null;
-      const userCountry =
-        req
-          .user
-          ?.country ||
-        "United States";
+exports.getFeed = async (req, res) => {
+  try {
+    const viewerId = req.user._id;
+    const viewerWallet = req.user.walletAddress ? req.user.walletAddress.toLowerCase() : null;
 
-      // 1. Fetch Standard Posts
-      const posts =
-        await Content.find()
-          .populate(
-            "creator",
-            "username monetizationSettings profileImage walletAddress",
-          )
-          .populate(
-            "comments.user",
-            "username",
-          )
-          .sort(
-            {
-              createdAt:
-                -1,
-            },
-          )
-          .lean();
+    const posts = await Content.find()
+      .populate("creator", "username monetizationSettings profileImage walletAddress")
+      .populate("comments.user", "username")
+      .sort({ createdAt: -1 })
+      .lean();
 
-      // 2. Fetch Active Live Streams
-      // Make sure you have imported your Stream model at the top of this file!
-      const activeStreams =
-        await Stream.find(
-          {
-            status:
-              "ACTIVE",
-          },
-        )
-          .populate(
-            "creatorId",
-            "username profileImage walletAddress monetizationSettings",
-          )
-          .lean();
+    const activeStreams = await Stream.find({ status: "ACTIVE" })
+      .populate("creatorId", "username profileImage walletAddress monetizationSettings")
+      .lean();
 
-      // 3. Fetch User Data (Purchases & Profile)
-      const userPurchases =
-        await Purchase.find(
-          {
-            user: viewerId,
-          },
-        )
-          .select(
-            "content creator purchaseType createdAt",
-          )
-          .lean();
+    const userPurchases = await Purchase.find({ user: viewerId })
+      .select("content creator purchaseType createdAt")
+      .lean();
 
-      const viewer =
-        await User.findById(
-          viewerId,
-        )
-          .select(
-            "bookmarks following",
-          )
-          .lean();
+    const viewer = await User.findById(viewerId).select("bookmarks following").lean();
 
-      // 4. Build Access Maps
-      const unlockedContentMap =
-        new Map();
-      const subscribedCreatorMap =
-        new Map();
-      const bookmarkedSet =
-        new Set(
-          viewer?.bookmarks?.map(
-            (
-              id,
-            ) =>
-              id.toString(),
-          ) ||
-            [],
-        );
-      const followingSet =
-        new Set(
-          viewer?.following?.map(
-            (
-              id,
-            ) =>
-              id.toString(),
-          ) ||
-            [],
-        );
+    const unlockedContentMap = new Map();
+    const subscribedCreatorMap = new Map();
+    const bookmarkedSet = new Set(viewer?.bookmarks?.map((id) => id.toString()) || []);
+    const followingSet = new Set(viewer?.following?.map((id) => id.toString()) || []);
 
-      userPurchases.forEach(
-        (
-          p,
-        ) => {
-          if (
-            p.purchaseType ===
-              "PPV" &&
-            p.content
-          ) {
-            unlockedContentMap.set(
-              p.content.toString(),
-              new Date(
-                p.createdAt,
-              ).getTime(),
-            );
-          }
-          if (
-            p.purchaseType ===
-              "SUBSCRIPTION" &&
-            p.creator
-          ) {
-            subscribedCreatorMap.set(
-              p.creator.toString(),
-              new Date(
-                p.createdAt,
-              ).getTime(),
-            );
-          }
+    userPurchases.forEach((p) => {
+      if (p.purchaseType === "PPV" && p.content)
+        unlockedContentMap.set(p.content.toString(), new Date(p.createdAt).getTime());
+      if (p.purchaseType === "SUBSCRIPTION" && p.creator)
+        subscribedCreatorMap.set(p.creator.toString(), new Date(p.createdAt).getTime());
+    });
+
+    const secureFeed = [];
+
+    // --- ACTIVE STREAMS ---
+    for (const stream of activeStreams) {
+      const creatorIdStr = stream.creatorId?._id.toString();
+      const hasActiveSub = !!subscribedCreatorMap.get(creatorIdStr);
+      const isCreator = creatorIdStr === viewerId.toString();
+
+      secureFeed.push({
+        _id: stream._id,
+        type: "LIVE_STREAM",
+        title: stream.title,
+        status: stream.status,
+        createdAt: stream.createdAt,
+        creator: {
+          ...stream.creatorId,
+          isFollowed: followingSet.has(creatorIdStr),
         },
-      );
-
-      const secureFeed =
-        [];
-
-      // 5. INJECT ACTIVE STREAMS FIRST (Force to Top of Feed)
-      for (const stream of activeStreams) {
-        const creatorIdStr =
-          stream.creatorId?._id.toString();
-        const hasActiveSub =
-          !!subscribedCreatorMap.get(
-            creatorIdStr,
-          );
-        const isCreator =
-          creatorIdStr ===
-          viewerId.toString();
-
-        secureFeed.push(
-          {
-            _id: stream._id,
-            type: "LIVE_STREAM", // Crucial for the frontend conditional render
-            title:
-              stream.title,
-            status:
-              stream.status,
-            createdAt:
-              stream.createdAt,
-            creator:
-              {
-                ...stream.creatorId,
-                isFollowed:
-                  followingSet.has(
-                    creatorIdStr,
-                  ),
-              },
-            hasAccess:
-              hasActiveSub ||
-              isCreator,
-            subscriptionPriceNGN:
-              stream
-                .creatorId
-                ?.monetizationSettings
-                ?.monthlySubscription ||
-              0,
-            // Mock standard metrics so feed UI components don't crash if they assume a standard post
-            likesCount: 0,
-            commentsCount: 0,
-            isLiked: false,
-            isBookmarked: false,
-          },
-        );
-      }
-
-      // 6. Process Standard Content Posts
-      for (const post of posts) {
-        const globalPPV =
-          post
-            .creator
-            ?.monetizationSettings
-            ?.defaultPPVPrice ||
-          0;
-        const rawBasePrice =
-          post.price !=
-          null
-            ? post.price
-            : post.priceInUSDT !=
-                null
-              ? post.priceInUSDT
-              : globalPPV;
-
-        // PLATFORM MARKUP FIX: The fan feed dynamically intercepts the creator's raw price
-        // and rounds it up to the nearest 0.50 increment specifically for the fan's view.
-        const fanDisplayPrice =
-          rawBasePrice >
-          0
-            ? Math.ceil(
-                rawBasePrice *
-                  2,
-              ) /
-              2
-            : 0;
-        const pricing =
-          await convertAndRoundPrice(
-            fanDisplayPrice,
-            userCountry,
-          );
-
-        const isCreator =
-          post.creator?._id.toString() ===
-          viewerId.toString();
-        const isFree =
-          rawBasePrice ===
-          0;
-
-        const ppvDate =
-          unlockedContentMap.get(
-            post._id.toString(),
-          );
-        const subDate =
-          subscribedCreatorMap.get(
-            post.creator?._id.toString(),
-          );
-        const hasPurchasedFiatPPV =
-          !!ppvDate;
-        const hasActiveSub =
-          !!subDate;
-
-        let hasPurchasedCrypto = false;
-        if (
-          viewerWallet &&
-          post.unlockedFor &&
-          post
-            .unlockedFor
-            .length >
-            0
-        ) {
-          hasPurchasedCrypto =
-            post.unlockedFor.some(
-              (
-                address,
-              ) =>
-                address.toLowerCase() ===
-                viewerWallet,
-            );
-        }
-
-        const hasAccess =
-          isCreator ||
-          isFree ||
-          hasPurchasedFiatPPV ||
-          hasPurchasedCrypto ||
-          hasActiveSub;
-
-        if (
-          post.status ===
-          "sunset"
-        ) {
-          let isGrandfathered =
-            isCreator;
-          const sunsetTime =
-            new Date(
-              post.sunsetAt,
-            ).getTime();
-
-          if (
-            hasPurchasedFiatPPV &&
-            ppvDate <
-              sunsetTime
-          )
-            isGrandfathered = true;
-          if (
-            hasActiveSub &&
-            subDate <
-              sunsetTime
-          )
-            isGrandfathered = true;
-          if (
-            hasPurchasedCrypto
-          )
-            isGrandfathered = true;
-
-          if (
-            !isGrandfathered
-          )
-            continue;
-        }
-
-        post.teaserUrl =
-          post.teaserKey
-            ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
-            : "https://placehold.co/600x400/111111/555555?text=Locked";
-
-        if (
-          !hasAccess
-        ) {
-          delete post.fileKey;
-          post.mediaUrl =
-            null;
-          delete post.hiddenText;
-          post.isLocked = true;
-        } else {
-          try {
-            const command =
-              new GetObjectCommand(
-                {
-                  Bucket:
-                    process
-                      .env
-                      .S3_BUCKET_NAME,
-                  Key: post.fileKey,
-                },
-              );
-            post.mediaUrl =
-              await getSignedUrl(
-                s3,
-                command,
-                {
-                  expiresIn: 3600,
-                },
-              );
-            post.isLocked = false;
-          } catch (err) {
-            post.mediaUrl =
-              null;
-            post.isLocked = true;
-          }
-        }
-
-        const likesArray =
-          post.likes ||
-          [];
-
-        secureFeed.push(
-          {
-            ...post,
-            type: "POST", // Differentiates from LIVE_STREAM
-            creator:
-              {
-                ...post.creator,
-                isFollowed:
-                  followingSet.has(
-                    post.creator?._id.toString(),
-                  ),
-              },
-            actualPrice:
-              fanDisplayPrice, // Force the fan frontend to use the rounded price
-            displayPrice:
-              pricing.displayPrice,
-            displayCurrency:
-              pricing.displayCurrency,
-            paystackNGNAmount:
-              pricing.paystackNGNAmount,
-            isLiked:
-              likesArray.some(
-                (
-                  id,
-                ) =>
-                  id.toString() ===
-                  viewerId.toString(),
-              ),
-            isBookmarked:
-              bookmarkedSet.has(
-                post._id.toString(),
-              ),
-            likesCount:
-              likesArray.length,
-            commentsCount:
-              post.comments
-                ? post
-                    .comments
-                    .length
-                : 0,
-          },
-        );
-      }
-
-      res
-        .status(
-          200,
-        )
-        .json(
-          secureFeed,
-        );
-    } catch (error) {
-      console.error(
-        "Feed Error:",
-        error,
-      );
-      res
-        .status(
-          500,
-        )
-        .json(
-          {
-            message:
-              "Failed to load feed",
-          },
-        );
+        hasAccess: hasActiveSub || isCreator,
+        subscriptionPriceNGN: stream.creatorId?.monetizationSettings?.monthlySubscription || 0,
+        likesCount: 0,
+        commentsCount: 0,
+        isLiked: false,
+        isBookmarked: false,
+      });
     }
-  };
+
+    // --- STANDARD POSTS ---
+    for (const post of posts) {
+      const settings = post.creator?.monetizationSettings || {};
+      const globalPPV = settings.defaultPPVPrice || 0;
+      const creatorCurrency = settings.priceCurrency || settings.baseCurrency || "USD";
+
+      // THE FIX: Bulletproof Raw Price Extraction (Checks legacy keys)
+      let rawBasePrice = 0;
+      if (post.price !== undefined && post.price !== null) {
+        rawBasePrice = post.price;
+      } else if (post.priceInUSDT !== undefined && post.priceInUSDT !== null) {
+        rawBasePrice = post.priceInUSDT;
+      } else {
+        rawBasePrice = globalPPV; 
+      }
+
+      // THE FIX: Guaranteed Free Identification
+      const isFree = rawBasePrice <= 0;
+      const isCreator = post.creator?._id.toString() === viewerId.toString();
+
+      const ppvDate = unlockedContentMap.get(post._id.toString());
+      const subDate = subscribedCreatorMap.get(post.creator?._id.toString());
+      const hasPurchasedFiatPPV = !!ppvDate;
+      const hasActiveSub = !!subDate;
+
+      let hasPurchasedCrypto = false;
+      if (viewerWallet && post.unlockedFor && post.unlockedFor.length > 0) {
+        hasPurchasedCrypto = post.unlockedFor.some((address) => address.toLowerCase() === viewerWallet);
+      }
+
+      // THE FIX: If isFree is true, hasAccess becomes true automatically.
+      const hasAccess = isCreator || isFree || hasPurchasedFiatPPV || hasPurchasedCrypto || hasActiveSub;
+
+      if (post.status === "sunset") {
+        let isGrandfathered = isCreator;
+        const sunsetTime = new Date(post.sunsetAt).getTime();
+        if (hasPurchasedFiatPPV && ppvDate < sunsetTime) isGrandfathered = true;
+        if (hasActiveSub && subDate < sunsetTime) isGrandfathered = true;
+        if (hasPurchasedCrypto) isGrandfathered = true;
+        if (!isGrandfathered) continue;
+      }
+
+      post.teaserUrl = post.teaserKey
+        ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
+        : "https://placehold.co/600x400/111111/555555?text=Locked";
+
+      // Lock Enforcement
+      if (!hasAccess) {
+        delete post.fileKey;
+        post.mediaUrl = null;
+        delete post.hiddenText;
+        post.isLocked = true;
+      } else {
+        try {
+          const command = new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: post.fileKey,
+          });
+          post.mediaUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+          post.isLocked = false;
+        } catch (err) {
+          post.mediaUrl = null;
+          post.isLocked = true;
+        }
+      }
+
+      const likesArray = post.likes || [];
+      secureFeed.push({
+        ...post,
+        type: "POST",
+        creator: {
+          ...post.creator,
+          isFollowed: followingSet.has(post.creator?._id.toString()),
+        },
+        // Pass the RAW prices securely to the frontend pricing engine
+        actualPrice: rawBasePrice, 
+        priceCurrency: creatorCurrency,
+        isPaywalled: !isFree, 
+        isLiked: likesArray.some((id) => id.toString() === viewerId.toString()),
+        isBookmarked: bookmarkedSet.has(post._id.toString()),
+        likesCount: likesArray.length,
+        commentsCount: post.comments ? post.comments.length : 0,
+      });
+    }
+
+    res.status(200).json(secureFeed);
+  } catch (error) {
+    console.error("Feed Error:", error);
+    res.status(500).json({ message: "Failed to load feed" });
+  }
+};
 
 // GET /api/content/vault
 exports.getCreatorVault =
@@ -801,16 +532,13 @@ exports.getCreatorVault =
     res,
   ) => {
     try {
-      const creatorId =
-        req
-          .user
-          ._id;
-      // Vault returns the raw documents, maintaining the creator's exact typed price
       const vaultItems =
         await Content.find(
           {
             creator:
-              creatorId,
+              req
+                .user
+                ._id,
             status:
               {
                 $ne: "sunset",
@@ -859,7 +587,7 @@ exports.updateContentPost =
       const {
         title,
         description,
-        priceInUSDT,
+        price,
         isNsfw,
         isActive,
       } =
@@ -910,16 +638,15 @@ exports.updateContentPost =
         post.description =
           description;
 
-      // FIX: Save exactly what the creator types when they edit from the Vault.
       if (
-        priceInUSDT !==
+        price !==
         undefined
       ) {
         const parsed =
           parseFloat(
-            priceInUSDT,
+            price,
           );
-        post.priceInUSDT =
+        post.price =
           !isNaN(
             parsed,
           ) &&
@@ -1107,21 +834,16 @@ exports.recordView =
     res,
   ) => {
     try {
-      const contentId =
+      await Content.findByIdAndUpdate(
         req
           .params
-          .id;
-
-      // $inc is lightning fast and prevents race conditions
-      await Content.findByIdAndUpdate(
-        contentId,
+          .id,
         {
           $inc: {
             viewsCount: 1,
           },
         },
       );
-
       res
         .status(
           200,
@@ -1133,11 +855,6 @@ exports.recordView =
           },
         );
     } catch (error) {
-      console.error(
-        "View tracking error:",
-        error,
-      );
-      // We send a 200 even on fail so the frontend doesn't panic. Analytics shouldn't break the app.
       res
         .status(
           200,
@@ -1169,7 +886,6 @@ exports.toggleLike =
         req
           .user
           .id;
-
       const content =
         await Content.findById(
           contentId,
@@ -1192,11 +908,9 @@ exports.toggleLike =
         content.likes.includes(
           userId,
         );
-
       if (
         isLiked
       ) {
-        // Remove like
         await Content.findByIdAndUpdate(
           contentId,
           {
@@ -1219,7 +933,6 @@ exports.toggleLike =
             },
           );
       } else {
-        // Add like
         await Content.findByIdAndUpdate(
           contentId,
           {
@@ -1243,10 +956,6 @@ exports.toggleLike =
           );
       }
     } catch (error) {
-      console.error(
-        "Like error:",
-        error,
-      );
       res
         .status(
           500,
@@ -1278,18 +987,15 @@ exports.toggleBookmark =
         req
           .user
           .id;
-
       const user =
         await User.findById(
           userId,
         );
-      const isBookmarked =
-        user.bookmarks.includes(
-          contentId,
-        );
 
       if (
-        isBookmarked
+        user.bookmarks.includes(
+          contentId,
+        )
       ) {
         await User.findByIdAndUpdate(
           userId,
@@ -1336,10 +1042,6 @@ exports.toggleBookmark =
           );
       }
     } catch (error) {
-      console.error(
-        "Bookmark error:",
-        error,
-      );
       res
         .status(
           500,
@@ -1360,27 +1062,15 @@ exports.addComment =
     res,
   ) => {
     try {
-      const contentId =
-        req
-          .params
-          .id;
-      const userId =
-        req
-          .user
-          ._id ||
-        req
-          .user
-          .id;
       const {
         text,
       } =
         req.body;
-
       if (
         !text ||
         text.trim() ===
           ""
-      ) {
+      )
         return res
           .status(
             400,
@@ -1391,17 +1081,24 @@ exports.addComment =
                 "Comment text is required",
             },
           );
-      }
 
       const content =
         await Content.findByIdAndUpdate(
-          contentId,
+          req
+            .params
+            .id,
           {
             $push:
               {
                 comments:
                   {
-                    user: userId,
+                    user:
+                      req
+                        .user
+                        ._id ||
+                      req
+                        .user
+                        .id,
                     text: text.trim(),
                   },
               },
@@ -1428,15 +1125,6 @@ exports.addComment =
             },
           );
 
-      // Return the newly created comment
-      const newComment =
-        content
-          .comments[
-          content
-            .comments
-            .length -
-            1
-        ];
       res
         .status(
           201,
@@ -1446,14 +1134,16 @@ exports.addComment =
             message:
               "Comment added",
             comment:
-              newComment,
+              content
+                .comments[
+                content
+                  .comments
+                  .length -
+                  1
+              ],
           },
         );
     } catch (error) {
-      console.error(
-        "Comment error:",
-        error,
-      );
       res
         .status(
           500,
@@ -1468,714 +1158,262 @@ exports.addComment =
   };
 
 // GET /api/content/bookmarked
-exports.getBookmarks =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const viewerId =
-        req
-          .user
-          ._id;
-      const userCountry =
-        req
-          .user
-          ?.country ||
-        "United States";
-      const viewer =
-        await User.findById(
-          viewerId,
-        )
-          .select(
-            "bookmarks following",
-          )
-          .lean();
+exports.getBookmarks = async (req, res) => {
+  try {
+    const viewerId = req.user._id;
+    // Grab the viewer's wallet for Web3 crypto purchase validation
+    const viewerWallet = req.user.walletAddress ? req.user.walletAddress.toLowerCase() : null;
+    
+    const viewer = await User.findById(viewerId).select("bookmarks following").lean();
 
-      if (
-        !viewer ||
-        !viewer.bookmarks ||
-        viewer
-          .bookmarks
-          .length ===
-          0
-      )
-        return res
-          .status(
-            200,
-          )
-          .json(
-            [],
-          );
+    if (!viewer || !viewer.bookmarks || viewer.bookmarks.length === 0) {
+      return res.status(200).json([]);
+    }
 
-      const bookmarkedPosts =
-        await Content.find(
-          {
-            _id: {
-              $in: viewer.bookmarks,
-            },
-          },
-        )
-          .populate(
-            "creator",
-            "username monetizationSettings profileImage walletAddress",
-          )
-          .populate(
-            "comments.user",
-            "username",
-          )
-          .sort(
-            {
-              createdAt:
-                -1,
-            },
-          )
-          .lean();
+    const bookmarkedPosts = await Content.find({
+      _id: { $in: viewer.bookmarks },
+    })
+      .populate("creator", "username monetizationSettings profileImage walletAddress")
+      .populate("comments.user", "username")
+      .sort({ createdAt: -1 })
+      .lean();
 
-      const userPurchases =
-        await Purchase.find(
-          {
-            user: viewerId,
-          },
-        )
-          .select(
-            "content creator purchaseType createdAt",
-          )
-          .lean();
-      const unlockedContentMap =
-        new Map();
-      const subscribedCreatorMap =
-        new Map();
-      const followingSet =
-        new Set(
-          viewer.following?.map(
-            (
-              id,
-            ) =>
-              id.toString(),
-          ) ||
-            [],
-        );
+    const userPurchases = await Purchase.find({ user: viewerId })
+      .select("content creator purchaseType createdAt")
+      .lean();
+      
+    const unlockedContentMap = new Map();
+    const subscribedCreatorMap = new Map();
+    const followingSet = new Set(viewer.following?.map((id) => id.toString()) || []);
 
-      userPurchases.forEach(
-        (
-          p,
-        ) => {
-          if (
-            p.purchaseType ===
-              "PPV" &&
-            p.content
-          )
-            unlockedContentMap.set(
-              p.content.toString(),
-              new Date(
-                p.createdAt,
-              ).getTime(),
-            );
-          if (
-            p.purchaseType ===
-              "SUBSCRIPTION" &&
-            p.creator
-          )
-            subscribedCreatorMap.set(
-              p.creator.toString(),
-              new Date(
-                p.createdAt,
-              ).getTime(),
-            );
+    userPurchases.forEach((p) => {
+      if (p.purchaseType === "PPV" && p.content) {
+        unlockedContentMap.set(p.content.toString(), new Date(p.createdAt).getTime());
+      }
+      if (p.purchaseType === "SUBSCRIPTION" && p.creator) {
+        subscribedCreatorMap.set(p.creator.toString(), new Date(p.createdAt).getTime());
+      }
+    });
+
+    const secureBookmarks = [];
+
+    for (const post of bookmarkedPosts) {
+      const settings = post.creator?.monetizationSettings || {};
+      const globalPPV = settings.defaultPPVPrice || 0;
+      const creatorCurrency = settings.priceCurrency || settings.baseCurrency || "USD";
+
+      // THE FIX: Bulletproof Raw Price Extraction (Checks legacy keys)
+      let rawBasePrice = 0;
+      if (post.price !== undefined && post.price !== null) {
+        rawBasePrice = post.price;
+      } else if (post.priceInUSDT !== undefined && post.priceInUSDT !== null) {
+        rawBasePrice = post.priceInUSDT;
+      } else {
+        rawBasePrice = globalPPV;
+      }
+
+      // THE FIX: Guaranteed Free Identification
+      const isFree = rawBasePrice <= 0;
+      const isCreator = post.creator?._id.toString() === viewerId.toString();
+
+      const ppvDate = unlockedContentMap.get(post._id.toString());
+      const subDate = subscribedCreatorMap.get(post.creator?._id.toString());
+      const hasPurchasedPPV = !!ppvDate;
+      const hasActiveSub = !!subDate;
+      
+      // Enforce Web3 purchase access
+      let hasPurchasedCrypto = false;
+      if (viewerWallet && post.unlockedFor && post.unlockedFor.length > 0) {
+        hasPurchasedCrypto = post.unlockedFor.some((address) => address.toLowerCase() === viewerWallet);
+      }
+
+      // THE FIX: If isFree is true, hasAccess becomes true automatically.
+      const hasAccess = isCreator || isFree || hasPurchasedPPV || hasPurchasedCrypto || hasActiveSub;
+
+      if (post.status === "sunset") {
+        let isGrandfathered = false;
+        if (isCreator) {
+          isGrandfathered = true;
+        } else {
+          const sunsetTime = new Date(post.sunsetAt).getTime();
+          if (hasPurchasedPPV && ppvDate < sunsetTime) isGrandfathered = true;
+          else if (hasActiveSub && subDate < sunsetTime) isGrandfathered = true;
+          else if (hasPurchasedCrypto) isGrandfathered = true;
+        }
+        if (!isGrandfathered) continue;
+      }
+
+      post.teaserUrl = post.teaserKey
+        ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
+        : "https://placehold.co/600x400/111111/555555?text=Locked";
+
+      // Lock Enforcement
+      if (!hasAccess) {
+        delete post.fileKey;
+        post.mediaUrl = null;
+        post.isLocked = true;
+      } else {
+        try {
+          const command = new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: post.fileKey,
+          });
+          post.mediaUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+          post.isLocked = false;
+        } catch (err) {
+          post.mediaUrl = null;
+          post.isLocked = true;
+        }
+      }
+
+      const likesArray = post.likes || [];
+      secureBookmarks.push({
+        ...post,
+        creator: {
+          ...post.creator,
+          isFollowed: followingSet.has(post.creator?._id.toString()),
         },
-      );
+        // THE FIX: Pass the RAW prices securely to the frontend pricing engine
+        actualPrice: rawBasePrice,
+        priceCurrency: creatorCurrency,
+        isPaywalled: !isFree,
+        isLiked: likesArray.some((id) => id.toString() === viewerId.toString()),
+        isBookmarked: true,
+        likesCount: likesArray.length,
+        commentsCount: post.comments ? post.comments.length : 0,
+      });
+    }
+    
+    res.status(200).json(secureBookmarks);
+  } catch (error) {
+    console.error("Bookmarks Feed Error:", error);
+    res.status(500).json({ message: "Failed to load bookmarks" });
+  }
+};
 
-      const secureBookmarks =
-        [];
+// GET /api/content/creator/:id
+exports.getCreatorPublicProfile = async (req, res) => {
+  try {
+    const creatorId = req.params.id;
+    const viewerId = req.user._id;
+    const viewerWallet = req.user.walletAddress ? req.user.walletAddress.toLowerCase() : null;
 
-      for (const post of bookmarkedPosts) {
-        const globalPPV =
-          post
-            .creator
-            ?.monetizationSettings
-            ?.defaultPPVPrice ||
-          0;
-        const rawBasePrice =
-          post.price !=
-          null
-            ? post.price
-            : post.priceInUSDT !=
-                null
-              ? post.priceInUSDT
-              : globalPPV;
+    const creator = await User.findById(creatorId)
+      .select("username profileImage monetizationSettings walletAddress")
+      .lean();
 
-        // DYNAMIC ROUNDING
-        const fanDisplayPrice =
-          rawBasePrice >
-          0
-            ? Math.ceil(
-                rawBasePrice *
-                  2,
-              ) /
-              2
-            : 0;
-        const pricing =
-          await convertAndRoundPrice(
-            fanDisplayPrice,
-            userCountry,
-          );
+    if (!creator) return res.status(404).json({ message: "Creator not found" });
 
-        const isCreator =
-          post.creator?._id.toString() ===
-          viewerId.toString();
-        const isFree =
-          rawBasePrice ===
-          0;
+    const creatorContent = await Content.find({
+      creator: creatorId,
+      status: { $in: ["active", "sunset"] },
+    })
+      .populate("comments.user", "username")
+      .sort({ createdAt: -1 })
+      .lean();
 
-        const ppvDate =
-          unlockedContentMap.get(
-            post._id.toString(),
-          );
-        const subDate =
-          subscribedCreatorMap.get(
-            post.creator?._id.toString(),
-          );
-        const hasPurchasedPPV =
-          !!ppvDate;
-        const hasActiveSub =
-          !!subDate;
+    const viewer = await User.findById(viewerId).select("following").lean();
+    const viewerPurchases = await Purchase.find({
+      user: viewerId,
+      creator: creatorId,
+    }).lean();
+    
+    const isFollowed = viewer?.following?.map((id) => id.toString()).includes(creatorId.toString()) || false;
 
-        const hasAccess =
-          isCreator ||
-          isFree ||
-          hasPurchasedPPV ||
-          hasActiveSub;
+    let hasActiveSub = false;
+    const unlockedPPV = new Set();
+    const now = new Date().getTime();
 
-        if (
-          post.status ===
-          "sunset"
-        ) {
-          let isGrandfathered = false;
-          if (
-            isCreator
-          )
-            isGrandfathered = true;
-          else {
-            const sunsetTime =
-              new Date(
-                post.sunsetAt,
-              ).getTime();
-            if (
-              hasPurchasedPPV &&
-              ppvDate <
-                sunsetTime
-            )
-              isGrandfathered = true;
-            else if (
-              hasActiveSub &&
-              subDate <
-                sunsetTime
-            )
-              isGrandfathered = true;
-          }
-          if (
-            !isGrandfathered
-          )
-            continue;
+    viewerPurchases.forEach((p) => {
+      if (p.purchaseType === "SUBSCRIPTION" && p.status === "completed") {
+        const expirationTime = p.expiresAt ? new Date(p.expiresAt).getTime() : Infinity;
+        if (expirationTime > now) hasActiveSub = true;
+      }
+      if (p.purchaseType === "PPV" && p.content && p.status === "completed") {
+        unlockedPPV.add(p.content.toString());
+      }
+    });
+
+    const chatRecord = await Conversation.findOne({
+      fan: viewerId,
+      creator: creatorId,
+    }).select("bubblesLeft").lean();
+    
+    const chatBubblesLeft = chatRecord ? chatRecord.bubblesLeft : 0;
+    const hasActiveChat = chatBubblesLeft > 0;
+
+    const secureContent = await Promise.all(
+      creatorContent.map(async (post) => {
+        const settings = creator.monetizationSettings || {};
+        const globalPPV = settings.defaultPPVPrice || 0;
+        const creatorCurrency = settings.priceCurrency || settings.baseCurrency || "USD";
+
+        // THE FIX: Bulletproof Raw Price Extraction
+        let rawBasePrice = 0;
+        if (post.price !== undefined && post.price !== null) {
+          rawBasePrice = post.price;
+        } else if (post.priceInUSDT !== undefined && post.priceInUSDT !== null) {
+          rawBasePrice = post.priceInUSDT;
+        } else {
+          rawBasePrice = globalPPV;
         }
 
-        post.teaserUrl =
-          post.teaserKey
-            ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
-            : "https://placehold.co/600x400/111111/555555?text=Locked";
+        const isCreator = creatorId === viewerId.toString();
+        const isFree = rawBasePrice <= 0;
+        const hasPurchasedFiatPPV = unlockedPPV.has(post._id.toString());
 
-        if (
-          !hasAccess
-        ) {
+        let hasPurchasedCrypto = false;
+        if (viewerWallet && post.unlockedFor && post.unlockedFor.length > 0) {
+          hasPurchasedCrypto = post.unlockedFor.some((address) => address.toLowerCase() === viewerWallet);
+        }
+
+        // THE FIX: isFree strictly grants hasAccess
+        const hasAccess = isCreator || isFree || hasPurchasedFiatPPV || hasPurchasedCrypto || hasActiveSub;
+        
+        post.teaserUrl = post.teaserKey
+          ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
+          : "https://placehold.co/600x400/111111/555555?text=Locked";
+
+        if (!hasAccess) {
           delete post.fileKey;
-          post.mediaUrl =
-            null;
+          post.mediaUrl = null;
           post.isLocked = true;
         } else {
           try {
-            const command =
-              new GetObjectCommand(
-                {
-                  Bucket:
-                    process
-                      .env
-                      .S3_BUCKET_NAME,
-                  Key: post.fileKey,
-                },
-              );
-            post.mediaUrl =
-              await getSignedUrl(
-                s3,
-                command,
-                {
-                  expiresIn: 3600,
-                },
-              );
+            const command = new GetObjectCommand({
+              Bucket: process.env.S3_BUCKET_NAME,
+              Key: post.fileKey,
+            });
+            post.mediaUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
             post.isLocked = false;
           } catch (err) {
-            post.mediaUrl =
-              null;
+            post.mediaUrl = null;
             post.isLocked = true;
           }
         }
 
-        const likesArray =
-          post.likes ||
-          [];
-        secureBookmarks.push(
-          {
-            ...post,
-            creator:
-              {
-                ...post.creator,
-                isFollowed:
-                  followingSet.has(
-                    post.creator?._id.toString(),
-                  ),
-              },
-            actualPrice:
-              fanDisplayPrice, // DYNAMIC ROUNDING
-            displayPrice:
-              pricing.displayPrice,
-            displayCurrency:
-              pricing.displayCurrency,
-            paystackNGNAmount:
-              pricing.paystackNGNAmount,
-            isLiked:
-              likesArray.some(
-                (
-                  id,
-                ) =>
-                  id.toString() ===
-                  viewerId.toString(),
-              ),
-            isBookmarked: true,
-            likesCount:
-              likesArray.length,
-            commentsCount:
-              post.comments
-                ? post
-                    .comments
-                    .length
-                : 0,
-          },
-        );
-      }
-      res
-        .status(
-          200,
-        )
-        .json(
-          secureBookmarks,
-        );
-    } catch (error) {
-      res
-        .status(
-          500,
-        )
-        .json(
-          {
-            message:
-              "Failed to load bookmarks",
-          },
-        );
-    }
-  };
+        const likesArray = post.likes || [];
+        return {
+          ...post,
+          actualPrice: rawBasePrice, // Pass exact raw price
+          priceCurrency: creatorCurrency,
+          isPaywalled: !isFree, // Flag for the frontend
+          isLiked: likesArray.some((id) => id.toString() === viewerId.toString()),
+          likesCount: likesArray.length,
+          commentsCount: post.comments ? post.comments.length : 0,
+        };
+      })
+    );
 
-// GET /api/content/creator/:id
-exports.getCreatorPublicProfile =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const creatorId =
-        req
-          .params
-          .id;
-      const viewerId =
-        req
-          .user
-          ._id;
-      const viewerWallet =
-        req
-          .user
-          .walletAddress
-          ? req.user.walletAddress.toLowerCase()
-          : null;
-      const userCountry =
-        req
-          .user
-          ?.country ||
-        "United States";
-
-      const creator =
-        await User.findById(
-          creatorId,
-        )
-          .select(
-            "username profileImage monetizationSettings walletAddress",
-          )
-          .lean();
-      if (
-        !creator
-      )
-        return res
-          .status(
-            404,
-          )
-          .json(
-            {
-              message:
-                "Creator not found",
-            },
-          );
-
-      const creatorContent =
-        await Content.find(
-          {
-            creator:
-              creatorId,
-            status:
-              {
-                $in: [
-                  "active",
-                  "sunset",
-                ],
-              },
-          },
-        )
-          .populate(
-            "comments.user",
-            "username",
-          )
-          .sort(
-            {
-              createdAt:
-                -1,
-            },
-          )
-          .lean();
-
-      const viewer =
-        await User.findById(
-          viewerId,
-        )
-          .select(
-            "following",
-          )
-          .lean();
-      const viewerPurchases =
-        await Purchase.find(
-          {
-            user: viewerId,
-            creator:
-              creatorId,
-          },
-        ).lean();
-      const isFollowed =
-        viewer?.following
-          ?.map(
-            (
-              id,
-            ) =>
-              id.toString(),
-          )
-          .includes(
-            creatorId.toString(),
-          ) ||
-        false;
-
-      let hasActiveSub = false;
-      const unlockedPPV =
-        new Set();
-      const now =
-        new Date().getTime();
-
-      viewerPurchases.forEach(
-        (
-          p,
-        ) => {
-          // Strict Subscription Check: Must be completed and NOT expired
-          if (
-            p.purchaseType ===
-              "SUBSCRIPTION" &&
-            p.status ===
-              "completed"
-          ) {
-            const expirationTime =
-              p.expiresAt
-                ? new Date(
-                    p.expiresAt,
-                  ).getTime()
-                : Infinity;
-            if (
-              expirationTime >
-              now
-            ) {
-              hasActiveSub = true;
-            }
-          }
-
-          // Strict PPV Check: Must be completed
-          if (
-            p.purchaseType ===
-              "PPV" &&
-            p.content &&
-            p.status ===
-              "completed"
-          ) {
-            unlockedPPV.add(
-              p.content.toString(),
-            );
-          }
-        },
-      );
-
-      const chatRecord =
-        await Conversation.findOne(
-          {
-            fan: viewerId,
-            creator:
-              creatorId,
-          },
-        )
-          .select(
-            "bubblesLeft",
-          )
-          .lean();
-      const chatBubblesLeft =
-        chatRecord
-          ? chatRecord.bubblesLeft
-          : 0;
-      const hasActiveChat =
-        chatBubblesLeft >
-        0;
-
-      const secureContent =
-        await Promise.all(
-          creatorContent.map(
-            async (
-              post,
-            ) => {
-              const globalPPV =
-                creator
-                  .monetizationSettings
-                  ?.defaultPPVPrice ||
-                0;
-              const rawBasePrice =
-                post.price !=
-                null
-                  ? post.price
-                  : post.priceInUSDT !=
-                      null
-                    ? post.priceInUSDT
-                    : globalPPV;
-
-              // DYNAMIC ROUNDING
-              const fanDisplayPrice =
-                rawBasePrice >
-                0
-                  ? Math.ceil(
-                      rawBasePrice *
-                        2,
-                    ) /
-                    2
-                  : 0;
-              const pricing =
-                await convertAndRoundPrice(
-                  fanDisplayPrice,
-                  userCountry,
-                );
-
-              const isCreator =
-                creatorId ===
-                viewerId.toString();
-              const isFree =
-                rawBasePrice ===
-                0;
-
-              const hasPurchasedFiatPPV =
-                unlockedPPV.has(
-                  post._id.toString(),
-                );
-              let hasPurchasedCrypto = false;
-              if (
-                viewerWallet &&
-                post.unlockedFor &&
-                post
-                  .unlockedFor
-                  .length >
-                  0
-              ) {
-                hasPurchasedCrypto =
-                  post.unlockedFor.some(
-                    (
-                      address,
-                    ) =>
-                      address.toLowerCase() ===
-                      viewerWallet,
-                  );
-              }
-
-              const hasAccess =
-                isCreator ||
-                isFree ||
-                hasPurchasedFiatPPV ||
-                hasPurchasedCrypto ||
-                hasActiveSub;
-              post.teaserUrl =
-                post.teaserKey
-                  ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
-                  : "https://placehold.co/600x400/111111/555555?text=Locked";
-
-              if (
-                !hasAccess
-              ) {
-                delete post.fileKey;
-                post.mediaUrl =
-                  null;
-                post.isLocked = true;
-              } else {
-                try {
-                  const command =
-                    new GetObjectCommand(
-                      {
-                        Bucket:
-                          process
-                            .env
-                            .S3_BUCKET_NAME,
-                        Key: post.fileKey,
-                      },
-                    );
-                  post.mediaUrl =
-                    await getSignedUrl(
-                      s3,
-                      command,
-                      {
-                        expiresIn: 3600,
-                      },
-                    );
-                  post.isLocked = false;
-                } catch (err) {
-                  post.mediaUrl =
-                    null;
-                  post.isLocked = true;
-                }
-              }
-
-              const likesArray =
-                post.likes ||
-                [];
-              return {
-                ...post,
-                actualPrice:
-                  fanDisplayPrice, // DYNAMIC ROUNDING
-                displayPrice:
-                  pricing.displayPrice,
-                displayCurrency:
-                  pricing.displayCurrency,
-                paystackNGNAmount:
-                  pricing.paystackNGNAmount,
-                isLiked:
-                  likesArray.some(
-                    (
-                      id,
-                    ) =>
-                      id.toString() ===
-                      viewerId.toString(),
-                  ),
-                likesCount:
-                  likesArray.length,
-                commentsCount:
-                  post.comments
-                    ? post
-                        .comments
-                        .length
-                    : 0,
-              };
-            },
-          ),
-        );
-
-      res
-        .status(
-          200,
-        )
-        .json(
-          {
-            creator,
-            isSubscribed:
-              hasActiveSub,
-            chatBubblesLeft,
-            hasActiveChat,
-            isFollowed,
-            content:
-              secureContent,
-          },
-        );
-    } catch (error) {
-      res
-        .status(
-          500,
-        )
-        .json(
-          {
-            message:
-              "Failed to load creator profile",
-          },
-        );
-    }
-  };
-
-async function formatContentPricesForUser(
-  contentItems,
-  userCountry,
-) {
-  return await Promise.all(
-    contentItems.map(
-      async (
-        item,
-      ) => {
-        const contentObj =
-          item.toObject
-            ? item.toObject()
-            : {
-                ...item,
-              };
-
-        if (
-          contentObj.price &&
-          contentObj.price >
-            0
-        ) {
-          // DYNAMIC ROUNDING
-          const fanDisplayPrice =
-            Math.ceil(
-              contentObj.price *
-                2,
-            ) /
-            2;
-          const pricing =
-            await convertAndRoundPrice(
-              fanDisplayPrice,
-              userCountry,
-            );
-          contentObj.displayPrice =
-            pricing.displayPrice;
-          contentObj.displayCurrency =
-            pricing.displayCurrency;
-          contentObj.paystackNGNAmount =
-            pricing.paystackNGNAmount;
-        } else {
-          contentObj.displayPrice = 0;
-          contentObj.displayCurrency =
-            "NGN";
-          contentObj.paystackNGNAmount = 0;
-        }
-        return contentObj;
-      },
-    ),
-  );
-}
+    res.status(200).json({
+      creator,
+      isSubscribed: hasActiveSub,
+      chatBubblesLeft,
+      hasActiveChat,
+      isFollowed,
+      content: secureContent,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load creator profile" });
+  }
+};

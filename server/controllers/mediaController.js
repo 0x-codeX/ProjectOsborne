@@ -174,9 +174,9 @@ exports.getSecureStreamUrl = async (req, res) => {
           ?.defaultPPVPrice ||
         0;
       const actualPrice =
-        content.priceInUSDT !==
+        content.price !==
         null
-          ? content.priceInUSDT
+          ? content.price
           : globalPPV;
 
       const isCreator =

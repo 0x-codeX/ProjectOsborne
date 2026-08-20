@@ -40,6 +40,8 @@ import CreatorFeed from "./components/CreatorFeed";
 import CreatorMessages from "./components/CreatorMessages";
 import CreatorLiveSetup from "./components/CreatorLiveSetup";
 import CreatorLiveStudio from "./components/CreatorLiveStudio";
+import CreatorNotifications from "./components/CreatorNotifications";
+import MonetizationSettings from "./components/MonetizationSettings";
 
 // Dummy components to prevent white-screen crashes on new routes
 const Placeholder =
@@ -246,7 +248,13 @@ function App() {
               <Route
                 path="/creator/notifications"
                 element={
-                  <Placeholder title="Creator Alerts" />
+                  <CreatorNotifications />
+                }
+              />
+              <Route
+                path="/creator/monetization"
+                element={
+                  <MonetizationSettings />
                 }
               />
             </Route>

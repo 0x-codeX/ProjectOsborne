@@ -21,7 +21,7 @@ contract DeployNippyPaymentGateway is Script {
         // 3. Begin broadcasting transactions to the RPC
         vm.startBroadcast(deployerPrivateKey);
 
-        // 4. Deploy the contract (V5 constructor only takes the treasury)
+        // 4. Deploy the updated contract
         NippyPaymentGateway gateway = new NippyPaymentGateway(treasuryAddress);
         console.log("SUCCESS: NippyPaymentGateway deployed at:", address(gateway));
 
@@ -32,7 +32,7 @@ contract DeployNippyPaymentGateway is Script {
         console.log("Configured USDT at address:", usdtAddress);
         console.log("USDT Minimum Amount set to:", usdtMinAmount);
 
-        // Configure Native Token (ETH/POL) (Assuming 18 decimals -> e.g., 0.0001 Native = 10^14 wei)
+        // Configure Native Token (ETH/POL) (Assuming 18 decimals)
         uint256 nativeMinAmount = 100_000_000_000_000;
         gateway.setTokenConfig(address(0), true, nativeMinAmount);
         console.log("Configured Native Token (address(0))");

@@ -2684,6 +2684,121 @@ This section shows the complete data flow for different purchase scenarios:
 | FanLayout.jsx            | None direct                                                        | N/A                                      | N/A                             | N/A                                 |
 | CreatorLayout.jsx        | None direct                                                        | N/A                                      | N/A                             | N/A                                 |
 
+---
+
+## 17. Currency and price-rounding consolidation plan
+
+**Authority note:** This section supersedes the earlier Section 13 currency proposal where the two conflict. The current scope is `NGN`, `GHS`, and `USD`, with creator and fan preferences persisted independently.
+
+### Product intent
+
+The next currency task is to make the currency selected by each fan and creator visible and consistent throughout the website. For the first release, support exactly these currencies:
+
+- `NGN` - Nigerian naira
+- `GHS` - Ghanaian cedi. `GHS` is the ISO code; do not introduce `GHC` as a second code.
+- `USD` - United States dollar
+
+The implementation must leave a small, obvious extension point for adding currencies later. Currency labels, symbols, formatting, exchange rates, payment amounts, creator pricing, fan checkout, subscriptions, PPV, bundles, live gifts, withdrawals, dashboards, and notifications must use the same currency contract.
+
+### Recommended default and selection behavior
+
+Use both location and explicit preference, with explicit preference taking priority:
+
+1. On account creation or first settings load, derive a suggested currency from the user's country. Nigeria suggests `NGN`, Ghana suggests `GHS`, and every other country currently suggests `USD`.
+2. Show the suggestion in settings, but allow the user to select `NGN`, `GHS`, or `USD` manually.
+3. Persist the selected currency on the User document as `preferredCurrency`.
+4. Once the user has selected or confirmed a currency, never silently overwrite it because their location changes. Location is only a fallback/default suggestion.
+5. If no preference exists for an old account, migrate or resolve `fiatCurrency`, `baseCurrency`, and country-derived values into one `preferredCurrency` value using a documented precedence order.
+
+This gives users control and prevents surprising price changes while still making onboarding convenient. A creator's preferred currency is the currency in which they enter and manage their monetization prices. A fan's preferred currency is the currency used for all displayed prices and checkout quotes.
+
+### Price ownership and conversion rules
+
+Before changing code, choose and document one storage policy. The recommended policy is:
+
+- Store every creator price with an explicit `priceCurrency` and numeric `price` amount. Do not infer currency from a field name such as `priceInUSDT`.
+- For the initial rollout, keep legacy creator prices interpreted as `NGN` during migration, unless a verified existing setting explicitly says otherwise.
+- A creator entering `GHS 100` stores `100` with `priceCurrency: "GHS"`; a creator entering `USD 10` stores `10` with `priceCurrency: "USD"`.
+- Convert from the creator's price currency to the fan's preferred currency only when creating a quote or rendering a fan-facing price.
+- Never round the stored base amount. Round only the converted display/charge amount.
+- Store the exchange-rate snapshot, source currency, target currency, raw converted amount, rounded amount, and timestamp with the quote/purchase so old purchases remain auditable.
+- Creator earnings are calculated from the creator's original stored price, not from a later display conversion. The platform margin must be explicit rather than hidden in a silently different creator payout.
+
+### Rounding rule
+
+The existing intended rule is to round UP to the nearest `0.50` or `0.00` in the target currency:
+
+```javascript
+roundUpToNearestHalf(amount) {
+  return Math.ceil(amount * 2) / 2;
+}
+```
+
+Examples: `7.01 -> 7.50`, `7.49 -> 7.50`, `7.50 -> 7.50`, `7.51 -> 8.00`.
+
+This rule must exist in one shared utility and be tested once. Do not duplicate `Math.ceil(price * 2) / 2` in React components or controllers. The quote returned to the fan must be the same amount sent to Paystack or the Web3 payment flow. Do not use hardcoded rates such as `1500` in frontend checkout code.
+
+For currencies where a half-unit is not appropriate in the future, make the increment configurable per currency. For this first release, use `0.50` for all three supported currencies and keep the increment in the currency configuration rather than scattering it through the code.
+
+### Files an LM must inspect and likely change
+
+#### Shared backend currency contract
+
+- `server/utils/priceRounding.js` - keep the single round-up implementation; add validation and unit-testable behavior for zero, invalid, exact-half, and small values.
+- `server/utils/currencyConversion.js` - refactor country mapping into currency configuration; support only `NGN`, `GHS`, and `USD` initially; expose conversion, quote, rate snapshot, and reverse-conversion helpers.
+- `server/config/exchangeRates.js` - create or update the supported-currency list, symbols, decimal rules, rounding increment, provider configuration, cache TTL, and fallback policy.
+- `server/utils/currencyFormatting.js` (new, recommended) - centralize `Intl.NumberFormat` formatting so every UI/API response uses the same symbol and decimal behavior.
+
+#### User preference and creator pricing
+
+- `server/models/User.js` - add `preferredCurrency` with enum `NGN | GHS | USD`; decide how legacy `fiatCurrency` and `baseCurrency` are migrated; add `priceCurrency` to monetization settings or replace the ambiguous currency fields.
+- `server/controllers/userController.js` - validate and persist preferred currency; return the resolved currency in profile/settings responses; preserve it when biodata or country changes.
+- `server/routes/userRoutes.js` - verify the settings endpoint supports reading and updating currency independently from monetization prices.
+- `client/src/components/CreatorSettings.jsx` - replace the payout-only `fiatCurrency` behavior with the shared preferred-currency selector where appropriate.
+- `client/src/components/MonetizationSettings.jsx` - show the creator's selected input currency beside every price field; remove the local country-to-currency decision and local duplicate rounding.
+- `client/src/components/FanBiodata.jsx`, `client/src/components/BioDataSetup.jsx`, and `client/src/components/LandingPage.jsx` - inspect onboarding persistence and ensure the suggested currency is confirmed rather than silently forced.
+
+#### Fan-facing display and checkout
+
+- `client/src/context/` and/or `client/src/hooks/` - add one source for the authenticated user's preferred currency and refresh it after settings changes.
+- `client/src/utils/priceDisplay.js` (new, recommended) - format API quote objects; components should not calculate rates or round prices.
+- `client/src/components/FanFeed.jsx` and `client/src/components/BookmarksFeed.jsx` - render the server-provided quote currency/amount and pass that exact quote into checkout.
+- `client/src/components/FanChatWindow.jsx` - use the same quote contract for bundles and DM unlocks.
+- `client/src/components/CreatorPublicProfile.jsx`, `client/src/components/FeedPost.jsx`, `client/src/components/LivePlayer.jsx`, and `client/src/components/ChatWindow.jsx` - remove hardcoded exchange rates and use the shared quote/format response.
+- `client/src/hooks/useWeb3Transfer.js` - accept an immutable quote/rounded charge amount, send the exact amount, and avoid doing currency conversion or rounding in the wallet hook.
+- `client/src/components/MediaUploader.jsx`, `client/src/pages/CreatorVault.jsx`, and `client/src/components/CreatorMessages.jsx` - preserve the creator's input currency and show it clearly when creating or attaching paid content.
+
+#### Backend quote, purchase, and accounting flow
+
+- `server/controllers/contentController.js` - return a fan quote for feed/public-profile content; keep creator price and currency intact.
+- `server/controllers/messageController.js` - return quotes for message bundles and DM unlocks using the fan preference.
+- `server/controllers/purchaseController.js` - accept a quote ID or quote snapshot, recompute/validate it server-side, verify the actual Paystack/Web3 amount, and store the full currency audit trail. Never trust a frontend amount by itself.
+- `server/services/paystackService.js` - use the server quote's target currency and minor-unit conversion; ensure Paystack's supported-currency rules are respected.
+- `server/models/Content.js`, `server/models/Message.js`, and `server/models/Purchase.js` - add explicit source/target currency, raw amount, rounded amount, exchange rate, and rate timestamp fields where needed. Keep legacy fields during migration.
+- `server/controllers/earningsController.js`, `server/models/Wallet.js`, and `server/models/Withdrawal.js` - decide whether balances are stored in creator currency or one settlement currency, then convert only at reporting/withdrawal boundaries and show the currency on every amount.
+- `server/controllers/streamController.js` and `server/models/Stream.js` - inspect live-gift pricing because it currently has a separate `priceNGN` path.
+
+### Suggested implementation order
+
+1. Inventory all price fields and classify each as creator input, fan display, payment charge, or creator settlement. Resolve legacy `priceInUSDT`, `price`, `priceNGN`, `fiatCurrency`, and `baseCurrency` before adding more fields.
+2. Add the supported-currency configuration, `preferredCurrency`, country suggestion helper, conversion cache, quote shape, formatter, and one round-up utility.
+3. Add settings APIs and UI so a fan or creator can select and persist `NGN`, `GHS`, or `USD`.
+4. Convert feed, public profile, subscriptions, bundles, DM unlocks, streams, and vault surfaces to server-generated quotes.
+5. Make Paystack and Web3 consume the exact server quote, then make purchase verification recompute and audit it.
+6. Update earnings and withdrawals to show explicit settlement currency and platform margin.
+7. Add tests for all currency pairs, rounding boundaries, preference persistence, stale rates, payment mismatch rejection, and legacy-account migration.
+
+### Acceptance criteria
+
+- A user can select `NGN`, `GHS`, or `USD` in settings and sees that currency throughout the website after refresh and re-login.
+- Country only supplies the initial suggestion; it never overwrites a saved preference.
+- A creator can enter prices in their selected currency and sees that currency beside every input.
+- Fans see prices in their own selected currency across feed, profiles, subscriptions, messages, live features, bookmarks, and checkout.
+- The displayed rounded amount, Paystack charge, Web3 amount, backend verification amount, and purchase audit record agree.
+- Rounding is always upward to the nearest `0.50` or `0.00` for the initial three currencies and is covered by boundary tests.
+- No frontend file contains a hardcoded exchange rate or a second rounding implementation.
+- Adding a fourth currency requires changing configuration and provider/fallback data, not rewriting every component.
+
 
 
 

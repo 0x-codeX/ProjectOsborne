@@ -20,15 +20,17 @@ import {
   Loader2,
   Lock,
   Play,
+  Crown,
 } from "lucide-react";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
+import { usePaystackPayment } from "react-paystack";
 
 const LivePlayer =
   () => {
     const {
       id,
     } =
-      useParams(); // This is the STREAM ID
+      useParams();
     const navigate =
       useNavigate();
 
@@ -41,7 +43,6 @@ const LivePlayer =
         null,
       );
 
-    // --- STATE ---
     const [
       stream,
       setStream,
@@ -64,7 +65,6 @@ const LivePlayer =
         null,
       );
 
-    // Paywall State
     const [
       requiresSub,
       setRequiresSub,
@@ -85,9 +85,8 @@ const LivePlayer =
     ] =
       useState(
         null,
-      ); // Fixed the navigation bug!
+      );
 
-    // Chat State
     const [
       messages,
       setMessages,
@@ -102,8 +101,14 @@ const LivePlayer =
       useState(
         "",
       );
+    const [
+      pinnedGifts,
+      setPinnedGifts,
+    ] =
+      useState(
+        [],
+      );
 
-    // Gifting State
     const [
       isGiftDrawerOpen,
       setIsGiftDrawerOpen,
@@ -123,7 +128,7 @@ const LivePlayer =
       setPaymentMethod,
     ] =
       useState(
-        "CRYPTO",
+        null,
       );
     const [
       isProcessingGift,
@@ -140,12 +145,38 @@ const LivePlayer =
         "",
       );
 
+    // --- CRYPTO QUOTE STATE ---
+    const [
+      cryptoQuote,
+      setCryptoQuote,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      fetchingQuote,
+      setFetchingQuote,
+    ] =
+      useState(
+        false,
+      );
+
     const {
       transferUSDT,
     } =
       useWeb3Transfer();
 
-    // --- 1. INITIALIZE STREAM & SOCKET ---
+    const initializePayment =
+      usePaystackPayment(
+        {
+          publicKey:
+            import.meta
+              .env
+              .VITE_PAYSTACK_PUBLIC_KEY,
+        },
+      );
+
+    // Fetch Stream logic
     useEffect(() => {
       const fetchStream =
         async () => {
@@ -170,7 +201,6 @@ const LivePlayer =
                 ?.data
                 ?.requiresSubscription
             ) {
-              // THE FIX: Save the actual creator ID so the subscribe button routes correctly
               setRequiresSub(
                 true,
               );
@@ -201,14 +231,13 @@ const LivePlayer =
             );
           }
         };
-
       fetchStream();
     }, [
       id,
     ]);
 
+    // Sockets logic
     useEffect(() => {
-      // Setup Socket.IO for Chat & Gifts
       if (
         stream
       ) {
@@ -220,7 +249,6 @@ const LivePlayer =
             ) ||
               "http://localhost:5000",
           );
-
         socketRef.current.emit(
           "join_live_chat",
           {
@@ -228,12 +256,11 @@ const LivePlayer =
               stream._id,
           },
         );
-
         socketRef.current.on(
           "live_message",
           (
             msg,
-          ) => {
+          ) =>
             setMessages(
               (
                 prev,
@@ -241,8 +268,7 @@ const LivePlayer =
                 ...prev,
                 msg,
               ],
-            );
-          },
+            ),
         );
 
         socketRef.current.on(
@@ -250,22 +276,76 @@ const LivePlayer =
           (
             giftData,
           ) => {
-            setMessages(
-              (
-                prev,
-              ) => [
-                ...prev,
+            if (
+              giftData.streamId ===
+              stream._id
+            ) {
+              const giftId =
+                Date.now();
+              const newGift =
                 {
                   isGift: true,
                   text: giftData.message,
-                  id: Date.now(),
+                  amount:
+                    giftData.amount,
+                  fanName:
+                    giftData.fanName ||
+                    "A Fan",
+                  id: giftId,
+                };
+              setMessages(
+                (
+                  prev,
+                ) => [
+                  ...prev,
+                  newGift,
+                ],
+              );
+              setPinnedGifts(
+                (
+                  prev,
+                ) => {
+                  const updated =
+                    [
+                      ...prev,
+                      newGift,
+                    ]
+                      .sort(
+                        (
+                          a,
+                          b,
+                        ) =>
+                          b.amount -
+                          a.amount,
+                      )
+                      .slice(
+                        0,
+                        3,
+                      );
+                  return updated;
                 },
-              ],
-            );
+              );
+              setTimeout(
+                () => {
+                  setPinnedGifts(
+                    (
+                      prev,
+                    ) =>
+                      prev.filter(
+                        (
+                          g,
+                        ) =>
+                          g.id !==
+                          giftId,
+                      ),
+                  );
+                },
+                10000,
+              );
+            }
           },
         );
 
-        // Listen for the stream ending so we can boot the fan out
         socketRef.current.on(
           "live_stream_ended",
           (
@@ -274,11 +354,10 @@ const LivePlayer =
             if (
               data.streamId ===
               stream._id
-            ) {
+            )
               setError(
                 "This live stream has ended.",
               );
-            }
           },
         );
 
@@ -290,7 +369,6 @@ const LivePlayer =
       stream,
     ]);
 
-    // Auto-scroll chat to bottom
     useEffect(() => {
       chatEndRef.current?.scrollIntoView(
         {
@@ -300,9 +378,9 @@ const LivePlayer =
       );
     }, [
       messages,
+      pinnedGifts,
     ]);
 
-    // --- 2. CHAT HANDLER ---
     const handleSendMessage =
       (
         e,
@@ -328,6 +406,7 @@ const LivePlayer =
             senderName:
               user.username ||
               "Fan",
+            isCreator: false,
             text: chatInput,
             id: Date.now(),
           };
@@ -336,8 +415,6 @@ const LivePlayer =
           "send_live_message",
           msgPayload,
         );
-
-        // OPTIMISTIC UPDATE: Fan sees their own message instantly
         setMessages(
           (
             prev,
@@ -351,7 +428,71 @@ const LivePlayer =
         );
       };
 
-    // --- 3. GIFTING HANDLER (The Money Maker) ---
+    // --- NGN TO USD TO USDT CONVERSION ---
+    const fetchCryptoQuote =
+      async (
+        amountNGN,
+      ) => {
+        setFetchingQuote(
+          true,
+        );
+        setGiftError(
+          "",
+        );
+        try {
+          // Step 1: Convert to USD
+          const amountUSD =
+            amountNGN /
+            1500;
+          // Step 2: Ask backend for exact USDT
+          const quoteRes =
+            await api.post(
+              "/purchases/crypto-quote",
+              {
+                amountUSD,
+              },
+            );
+          setCryptoQuote(
+            quoteRes.data,
+          );
+        } catch (err) {
+          setGiftError(
+            "Failed to fetch live crypto rates from server.",
+          );
+        } finally {
+          setFetchingQuote(
+            false,
+          );
+        }
+      };
+
+    const handleAmountSelect =
+      (
+        amount,
+      ) => {
+        setGiftAmountNGN(
+          amount,
+        );
+        if (
+          paymentMethod ===
+          "CRYPTO"
+        ) {
+          fetchCryptoQuote(
+            amount,
+          );
+        }
+      };
+
+    const handleSelectCrypto =
+      () => {
+        setPaymentMethod(
+          "CRYPTO",
+        );
+        fetchCryptoQuote(
+          giftAmountNGN,
+        );
+      };
+
     const handleSendGift =
       async () => {
         setIsProcessingGift(
@@ -366,26 +507,30 @@ const LivePlayer =
             paymentMethod ===
             "CRYPTO"
           ) {
-            const quoteRes =
-              await api.post(
-                "/purchases/crypto-quote",
-                {
-                  amountUSD:
-                    giftAmountNGN /
-                    1500,
-                },
+            if (
+              !stream
+                .creator
+                ?.walletAddress
+            )
+              throw new Error(
+                "Creator missing Web3 wallet.",
+              );
+            if (
+              !cryptoQuote
+            )
+              throw new Error(
+                "Awaiting crypto rate conversion...",
               );
 
+            // We pass stream._id as the 3rd arg so contentId is not empty (0x000...)
             const txHash =
               await transferUSDT(
-                quoteRes
-                  .data
-                  .requiredUSDT,
                 stream
                   .creator
                   .walletAddress,
+                cryptoQuote.requiredUSDT,
+                stream._id,
               );
-
             if (
               !txHash
             )
@@ -393,6 +538,7 @@ const LivePlayer =
                 "Transaction failed or was rejected.",
               );
 
+            // Must match backend expected fields exactly
             await api.post(
               "/purchases/verify",
               {
@@ -406,10 +552,15 @@ const LivePlayer =
                   "LIVE_GIFT",
                 paymentMethod:
                   "CRYPTO",
-                txHash,
+                txHash:
+                  txHash,
                 baseGiftAmountNGN:
                   giftAmountNGN,
               },
+            );
+
+            setIsGiftDrawerOpen(
+              false,
             );
           } else {
             const user =
@@ -419,23 +570,29 @@ const LivePlayer =
                 ) ||
                   "{}",
               );
-            const handler =
-              window.PaystackPop.setup(
-                {
-                  key: import.meta
-                    .env
-                    .VITE_PAYSTACK_PUBLIC_KEY,
-                  email:
-                    user.email,
-                  amount:
-                    giftAmountNGN *
-                    100,
-                  currency:
-                    "NGN",
-                  callback:
-                    async (
-                      response,
-                    ) => {
+            initializePayment(
+              {
+                config:
+                  {
+                    reference:
+                      new Date()
+                        .getTime()
+                        .toString(),
+                    email:
+                      user?.email ||
+                      "fan@nippy.com",
+                    amount:
+                      giftAmountNGN *
+                      100, // Kobo
+                    currency:
+                      "NGN",
+                  },
+                onSuccess:
+                  async (
+                    reference,
+                  ) => {
+                    try {
+                      // Same payload structure for fiat
                       await api.post(
                         "/purchases/verify",
                         {
@@ -450,7 +607,7 @@ const LivePlayer =
                           paymentMethod:
                             "FIAT",
                           reference:
-                            response.reference,
+                            reference.reference,
                           baseGiftAmountNGN:
                             giftAmountNGN,
                         },
@@ -458,25 +615,25 @@ const LivePlayer =
                       setIsGiftDrawerOpen(
                         false,
                       );
-                    },
-                  onClose:
-                    () => {
+                    } catch (err) {
                       setGiftError(
-                        "Payment cancelled.",
+                        err
+                          .response
+                          ?.data
+                          ?.message ||
+                          "Verification failed on backend.",
                       );
-                      setIsProcessingGift(
-                        false,
-                      );
-                    },
-                },
-              );
-            handler.openIframe();
-            return;
+                    }
+                  },
+                onClose:
+                  () => {
+                    setGiftError(
+                      "Payment window closed.",
+                    );
+                  },
+              },
+            );
           }
-
-          setIsGiftDrawerOpen(
-            false,
-          );
         } catch (err) {
           setGiftError(
             err
@@ -493,11 +650,9 @@ const LivePlayer =
         }
       };
 
-    // --- RENDER BLOCKS ---
-
     if (
       loading
-    ) {
+    )
       return (
         <div className="h-screen w-full flex items-center justify-center bg-slate-950 text-emerald-500">
           <Loader2
@@ -508,17 +663,12 @@ const LivePlayer =
           />
         </div>
       );
-    }
-
-    // --- THE PAYWALL ---
     if (
       requiresSub
     ) {
       return (
         <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 p-6 relative overflow-hidden">
-          {/* Cinematic Blur Background */}
           <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1516280440502-a7f457788195?q=80&w=2000')] bg-cover bg-center opacity-10"></div>
-
           <div className="z-10 bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full text-center shadow-2xl">
             <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-500/20">
               <Lock
@@ -534,10 +684,6 @@ const LivePlayer =
             </h2>
             <p className="text-slate-400 mb-8 text-sm">
               You
-              are
-              missing
-              out!
-              You
               need
               an
               active
@@ -546,108 +692,58 @@ const LivePlayer =
               watch
               this
               live
-              stream
-              and
-              join
-              the
-              chat
-              room.
+              stream.
             </p>
-
-            {/* THE FIX: Routes securely to the Creator's profile using creatorIdToSub */}
             <button
               onClick={() =>
                 navigate(
                   `/creator/${creatorIdToSub}`,
                 )
               }
-              className="w-full bg-emerald-500 text-white font-bold py-4 rounded-xl hover:bg-emerald-600 transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:scale-105 flex items-center justify-center gap-2"
+              className="w-full bg-emerald-500 text-white font-bold py-4 rounded-xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-2"
             >
               <Play
                 size={
                   18
                 }
                 fill="currentColor"
-              />
+              />{" "}
               Subscribe
               for
               ₦
               {subPrice.toLocaleString()}
             </button>
-
-            <button
-              onClick={() =>
-                navigate(
-                  -1,
-                )
-              }
-              className="mt-4 text-slate-500 text-sm hover:text-white transition-colors"
-            >
-              Go
-              Back
-            </button>
           </div>
         </div>
       );
     }
-
     if (
       error
-    ) {
+    )
       return (
-        <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 p-6 text-center">
-          <AlertCircle
-            className="text-red-500 mb-4"
-            size={
-              48
-            }
-          />
-          <h2 className="text-xl font-bold text-white mb-2">
-            {
-              error
-            }
-          </h2>
-          <button
-            onClick={() =>
-              navigate(
-                "/feed",
-              )
-            }
-            className="mt-4 px-6 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700"
-          >
-            Return
-            to
-            Feed
-          </button>
+        <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 p-6 text-center text-white">
+          {
+            error
+          }
         </div>
       );
-    }
 
     return (
-      <div className="flex flex-col md:flex-row h-screen w-full bg-black relative overflow-hidden">
-        {/* --- VIDEO PANE --- */}
+      <div className="flex flex-col md:flex-row h-screen w-full bg-black relative overflow-hidden font-sans">
         <div className="flex-1 relative bg-black flex items-center justify-center">
-          {/* THE ENTERPRISE FIX: Livepeer's bulletproof playback iframe */}
           <iframe
             src={`https://lvpr.tv?v=${stream.playbackId}`}
             className="w-full h-full"
             allow="autoplay; fullscreen; picture-in-picture"
             frameBorder="0"
           />
-
-          <div className="absolute top-4 left-4 bg-red-600 text-white text-xs font-black tracking-widest px-3 py-1.5 rounded-md shadow-[0_0_15px_rgba(220,38,38,0.6)] animate-pulse pointer-events-none">
+          <div className="absolute top-4 left-4 bg-red-600 text-white text-xs font-black tracking-widest px-3 py-1.5 rounded-md animate-pulse">
             LIVE
-          </div>
-          <div className="absolute top-4 left-20 bg-slate-900/80 backdrop-blur border border-slate-700 text-white text-xs font-bold px-4 py-1.5 rounded-md pointer-events-none">
-            {
-              stream.title
-            }
           </div>
         </div>
 
-        {/* --- CHAT PANE --- */}
         <div className="w-full md:w-80 lg:w-96 bg-slate-900 border-l border-slate-800 flex flex-col h-1/2 md:h-full relative shrink-0">
-          <div className="p-4 border-b border-slate-800 bg-slate-900 flex justify-between items-center z-10">
+          <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center z-30 relative">
             <h3 className="text-white font-bold flex items-center gap-2">
               <MessageSquare
                 size={
@@ -664,7 +760,7 @@ const LivePlayer =
                   true,
                 )
               }
-              className="bg-gradient-to-r from-purple-500 to-pink-500 text-white p-2 rounded-full hover:scale-110 transition-transform shadow-[0_0_15px_rgba(168,85,247,0.4)]"
+              className="bg-gradient-to-r from-purple-500 to-pink-500 text-white p-2 rounded-full shadow-lg hover:scale-105"
             >
               <Gift
                 size={
@@ -674,22 +770,41 @@ const LivePlayer =
             </button>
           </div>
 
-          {/* Messages List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length ===
-              0 && (
-              <p className="text-center text-slate-500 text-sm mt-10">
-                Say
-                hi
-                to{" "}
-                {
-                  stream
-                    .creator
-                    .username
-                }
-                !
-              </p>
-            )}
+          {pinnedGifts.length >
+            0 && (
+            <div className="absolute top-[70px] left-0 w-full z-20 flex flex-col gap-1 p-3 pointer-events-none">
+              {pinnedGifts.map(
+                (
+                  gift,
+                ) => (
+                  <div
+                    key={
+                      gift.id
+                    }
+                    className="bg-gradient-to-r from-yellow-600 to-purple-700 border border-yellow-400 p-2.5 rounded-xl shadow-[0_0_15px_rgba(234,179,8,0.4)] animate-pulse flex justify-between items-center backdrop-blur-md"
+                  >
+                    <span className="font-bold text-white text-xs flex items-center gap-1">
+                      <Crown
+                        size={
+                          14
+                        }
+                        className="text-yellow-300"
+                      />{" "}
+                      {
+                        gift.fanName
+                      }
+                    </span>
+                    <span className="font-black text-yellow-200 text-sm tracking-wider">
+                      ₦
+                      {gift.amount?.toLocaleString()}
+                    </span>
+                  </div>
+                ),
+              )}
+            </div>
+          )}
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 z-10 relative">
             {messages.map(
               (
                 msg,
@@ -699,22 +814,38 @@ const LivePlayer =
                   key={
                     idx
                   }
-                  className={`text-sm ${msg.isGift ? "bg-gradient-to-r from-purple-900/40 to-pink-900/40 border border-purple-500/30 p-3 rounded-xl" : ""}`}
+                  className={`w-full flex ${msg.isCreator ? "justify-end" : "justify-start"}`}
                 >
                   {msg.isGift ? (
-                    <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 flex items-center gap-2">
-                      <Gift
-                        size={
-                          16
+                    <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/60 border border-purple-500/50 p-3 rounded-2xl w-[85%]">
+                      <span className="font-bold text-pink-400 flex items-center gap-2 text-sm">
+                        <Gift
+                          size={
+                            16
+                          }
+                          className="text-pink-400"
+                        />{" "}
+                        {
+                          msg.text
                         }
-                        className="text-pink-400 shrink-0"
-                      />{" "}
-                      {
-                        msg.text
-                      }
-                    </span>
+                      </span>
+                    </div>
+                  ) : msg.isCreator ? (
+                    <div className="max-w-[85%] bg-emerald-900/40 border border-emerald-500/50 p-3 rounded-2xl rounded-tr-sm text-right shadow-lg">
+                      <div className="text-xs font-black text-emerald-400 mb-1 animate-[pulse_1s_ease-in-out_2]">
+                        {
+                          msg.senderName
+                        }{" "}
+                        (Creator)
+                      </div>
+                      <div className="text-white text-sm">
+                        {
+                          msg.text
+                        }
+                      </div>
+                    </div>
                   ) : (
-                    <p>
+                    <div className="max-w-[85%] text-sm">
                       <span className="font-bold text-slate-400 mr-2">
                         {
                           msg.senderName
@@ -726,7 +857,7 @@ const LivePlayer =
                           msg.text
                         }
                       </span>
-                    </p>
+                    </div>
                   )}
                 </div>
               ),
@@ -738,16 +869,18 @@ const LivePlayer =
             />
           </div>
 
-          {/* Chat Input */}
           <form
             onSubmit={
               handleSendMessage
             }
-            className="p-4 border-t border-slate-800 bg-slate-950"
+            className="p-4 border-t border-slate-800 bg-slate-950 z-30"
           >
-            <div className="flex gap-2">
+            <div className="flex gap-2 relative">
               <input
                 type="text"
+                maxLength={
+                  140
+                }
                 value={
                   chatInput
                 }
@@ -761,11 +894,22 @@ const LivePlayer =
                   )
                 }
                 placeholder="Send a message..."
-                className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500 text-sm"
+                className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 pr-12 focus:outline-none focus:border-emerald-500 text-sm"
               />
+              <span
+                className={`absolute right-14 top-2.5 text-xs ${chatInput.length >= 140 ? "text-red-400" : "text-slate-500"}`}
+              >
+                {
+                  chatInput.length
+                }
+                /140
+              </span>
               <button
                 type="submit"
-                className="bg-emerald-500 hover:bg-emerald-600 text-white p-2 rounded-xl transition-colors"
+                disabled={
+                  !chatInput.trim()
+                }
+                className="bg-emerald-500 text-white p-2 rounded-xl transition-colors disabled:opacity-50"
               >
                 <Send
                   size={
@@ -776,7 +920,6 @@ const LivePlayer =
             </div>
           </form>
 
-          {/* --- SLIDING GIFT DRAWER --- */}
           <div
             className={`absolute top-0 right-0 w-full h-full bg-slate-900 border-l border-slate-800 z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${isGiftDrawerOpen ? "translate-x-0" : "translate-x-full"}`}
           >
@@ -793,11 +936,17 @@ const LivePlayer =
                 Gift
               </h3>
               <button
-                onClick={() =>
+                onClick={() => {
                   setIsGiftDrawerOpen(
                     false,
-                  )
-                }
+                  );
+                  setPaymentMethod(
+                    null,
+                  );
+                  setCryptoQuote(
+                    null,
+                  );
+                }}
                 className="text-slate-400 hover:text-white"
               >
                 <X
@@ -845,7 +994,7 @@ const LivePlayer =
                           amount
                         }
                         onClick={() =>
-                          setGiftAmountNGN(
+                          handleAmountSelect(
                             amount,
                           )
                         }
@@ -868,10 +1017,8 @@ const LivePlayer =
                 </label>
                 <div className="flex gap-2">
                   <button
-                    onClick={() =>
-                      setPaymentMethod(
-                        "CRYPTO",
-                      )
+                    onClick={
+                      handleSelectCrypto
                     }
                     className={`flex-1 py-3 flex justify-center items-center gap-2 rounded-xl border transition-all ${paymentMethod === "CRYPTO" ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700"}`}
                   >
@@ -899,6 +1046,45 @@ const LivePlayer =
                   </button>
                 </div>
               </div>
+
+              {/* --- VISUAL CONVERSION DISPLAY --- */}
+              {paymentMethod ===
+                "CRYPTO" && (
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center animate-in fade-in">
+                  {fetchingQuote ? (
+                    <p className="text-sm text-emerald-500 animate-pulse">
+                      Fetching
+                      live
+                      USDT
+                      quote...
+                    </p>
+                  ) : cryptoQuote ? (
+                    <>
+                      <p className="text-sm text-gray-400 mb-1">
+                        Converted
+                        Value
+                      </p>
+                      <p className="text-xl font-bold text-emerald-400">
+                        {
+                          cryptoQuote.requiredUSDT
+                        }{" "}
+                        USDT
+                      </p>
+                      <p className="text-xs text-emerald-500/70 mt-2 flex items-center justify-center gap-1">
+                        <Lock
+                          size={
+                            12
+                          }
+                        />{" "}
+                        Live
+                        API
+                        Rate
+                        Applied
+                      </p>
+                    </>
+                  ) : null}
+                </div>
+              )}
             </div>
 
             <div className="p-4 border-t border-slate-800 bg-slate-950">
@@ -907,7 +1093,12 @@ const LivePlayer =
                   handleSendGift
                 }
                 disabled={
-                  isProcessingGift
+                  isProcessingGift ||
+                  !paymentMethod ||
+                  (paymentMethod ===
+                    "CRYPTO" &&
+                    (!cryptoQuote ||
+                      fetchingQuote))
                 }
                 className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold py-3.5 rounded-xl transition-all flex justify-center items-center gap-2 disabled:opacity-50"
               >

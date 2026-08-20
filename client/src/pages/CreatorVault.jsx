@@ -20,6 +20,59 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+// THE FIX: Ironclad Dynamic Icon Renderer
+const DynamicCurrencyIcon =
+  ({
+    currency,
+    className,
+  }) => {
+    switch (
+      currency?.toUpperCase()
+    ) {
+      case "NGN":
+        return (
+          <span
+            className={`${className} flex items-center justify-center font-bold text-[15px]`}
+          >
+            ₦
+          </span>
+        );
+      case "EUR":
+        return (
+          <span
+            className={`${className} flex items-center justify-center font-bold text-[15px]`}
+          >
+            €
+          </span>
+        );
+      case "GBP":
+        return (
+          <span
+            className={`${className} flex items-center justify-center font-bold text-[15px]`}
+          >
+            £
+          </span>
+        );
+      case "GHS":
+        return (
+          <span
+            className={`${className} flex items-center justify-center font-bold text-[15px]`}
+          >
+            ₵
+          </span>
+        );
+      case "USD":
+      default:
+        return (
+          <DollarSign
+            className={
+              className
+            }
+          />
+        );
+    }
+  };
+
 const CreatorVault =
   () => {
     const navigate =
@@ -78,7 +131,7 @@ const CreatorVault =
             "",
           description:
             "",
-          priceInUSDT: 0,
+          price: 0,
           isNsfw: false,
           isActive: true,
         },
@@ -105,6 +158,18 @@ const CreatorVault =
       useState(
         false,
       );
+
+    // Pull the creator's preferred currency dynamically
+    const currentUser =
+      JSON.parse(
+        localStorage.getItem(
+          "nippy_user",
+        ) ||
+          "{}",
+      );
+    const defaultCurrency =
+      currentUser?.preferredCurrency ||
+      "USD";
 
     const getAuthToken =
       () => {
@@ -192,6 +257,14 @@ const CreatorVault =
         setEditingPost(
           post,
         );
+        // Safely fallback to old priceInUSDT for legacy posts, prioritize new `price` field
+        const rawPrice =
+          post.price !==
+          undefined
+            ? post.price
+            : post.priceInUSDT ||
+              0;
+
         setEditFormData(
           {
             title:
@@ -200,11 +273,8 @@ const CreatorVault =
             description:
               post.description ||
               "",
-            priceInUSDT:
-              post.priceInUSDT !==
-              undefined
-                ? post.priceInUSDT
-                : 0, // Loads raw price
+            price:
+              rawPrice,
             isNsfw:
               post.isNsfw ||
               false,
@@ -251,7 +321,7 @@ const CreatorVault =
                   },
                 body: JSON.stringify(
                   editFormData,
-                ), // Sends exactly what the creator typed
+                ),
               },
             );
 
@@ -385,12 +455,20 @@ const CreatorVault =
             !matchesSearch
           )
             return false;
+
+          const itemPrice =
+            item.price !==
+            undefined
+              ? item.price
+              : item.priceInUSDT ||
+                0;
+
           if (
             filterType ===
             "ppv"
           )
             return (
-              item.priceInUSDT >
+              itemPrice >
               0
             );
           if (
@@ -398,7 +476,7 @@ const CreatorVault =
             "free"
           )
             return (
-              item.priceInUSDT ===
+              itemPrice ===
               0
             );
           if (
@@ -412,6 +490,10 @@ const CreatorVault =
           return true;
         },
       );
+
+    const activeCurrency =
+      editingPost?.priceCurrency ||
+      defaultCurrency;
 
     return (
       <div className="min-h-screen bg-slate-950 p-4 md:p-8 text-slate-200 font-sans relative">
@@ -601,6 +683,17 @@ const CreatorVault =
                       "video",
                     );
 
+                  // Correctly extract exactly what the creator uploaded it for
+                  const postPrice =
+                    post.price !==
+                    undefined
+                      ? post.price
+                      : post.priceInUSDT ||
+                        0;
+                  const postCurrency =
+                    post.priceCurrency ||
+                    defaultCurrency;
+
                   return (
                     <div
                       key={
@@ -632,15 +725,17 @@ const CreatorVault =
                         )}
 
                         <div className="absolute top-3 left-3 bg-slate-950/80 backdrop-blur-md border border-slate-700 px-3 py-1 rounded-full text-xs font-mono font-bold text-emerald-400 flex items-center gap-1 shadow-lg">
-                          {post.priceInUSDT >
+                          {postPrice >
                           0 ? (
                             <>
                               <Lock className="w-3 h-3 text-amber-400" />
                               <span>
                                 {
-                                  post.priceInUSDT
+                                  postPrice
                                 }{" "}
-                                USDT
+                                {
+                                  postCurrency
+                                }
                               </span>
                             </>
                           ) : (
@@ -811,22 +906,30 @@ const CreatorVault =
                   <div>
                     <label className="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1 block">
                       Price
-                      in
-                      USDT
+                      in{" "}
+                      {
+                        activeCurrency
+                      }{" "}
                       (Set
                       0
                       for
                       Free)
                     </label>
                     <div className="relative">
-                      <DollarSign className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                      {/* THE FIX: Dynamic Currency Icon Injected Here */}
+                      <DynamicCurrencyIcon
+                        currency={
+                          activeCurrency
+                        }
+                        className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                      />
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         required
                         value={
-                          editFormData.priceInUSDT
+                          editFormData.price
                         }
                         onChange={(
                           e,
@@ -836,7 +939,7 @@ const CreatorVault =
                               prev,
                             ) => ({
                               ...prev,
-                              priceInUSDT:
+                              price:
                                 parseFloat(
                                   e
                                     .target
@@ -876,10 +979,18 @@ const CreatorVault =
                         className="sr-only"
                       />
                       <div
-                        className={`w-9 h-5 rounded-full transition-colors relative ${editFormData.isNsfw ? "bg-red-500" : "bg-slate-800"}`}
+                        className={`w-9 h-5 rounded-full transition-colors relative ${
+                          editFormData.isNsfw
+                            ? "bg-red-500"
+                            : "bg-slate-800"
+                        }`}
                       >
                         <div
-                          className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.75 transition-transform ${editFormData.isNsfw ? "transform translate-x-4.5" : "left-0.75"}`}
+                          className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.75 transition-transform ${
+                            editFormData.isNsfw
+                              ? "transform translate-x-4.5"
+                              : "left-0.75"
+                          }`}
                         ></div>
                       </div>
                       <span className="ml-3 text-sm text-slate-300 font-medium">
@@ -914,10 +1025,18 @@ const CreatorVault =
                         className="sr-only"
                       />
                       <div
-                        className={`w-9 h-5 rounded-full transition-colors relative ${editFormData.isActive ? "bg-emerald-500" : "bg-slate-800"}`}
+                        className={`w-9 h-5 rounded-full transition-colors relative ${
+                          editFormData.isActive
+                            ? "bg-emerald-500"
+                            : "bg-slate-800"
+                        }`}
                       >
                         <div
-                          className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.75 transition-transform ${editFormData.isActive ? "transform translate-x-4.5" : "left-0.75"}`}
+                          className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.75 transition-transform ${
+                            editFormData.isActive
+                              ? "transform translate-x-4.5"
+                              : "left-0.75"
+                          }`}
                         ></div>
                       </div>
                       <span className="ml-3 text-sm text-slate-300 font-medium">
