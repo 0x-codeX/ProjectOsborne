@@ -307,6 +307,8 @@ const PORT =
 
 require("./workers/treasuryAuditor");
 
+require("./workers/fiatBatchProcessor");
+
 server.listen(
   PORT,
   () => {

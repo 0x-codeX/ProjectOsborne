@@ -318,6 +318,53 @@ const PayoutQueue =
         }
       };
 
+    // --- FORCE FIAT BATCH LOGIC ---
+    const handleForceFiatBatch =
+      async () => {
+        if (
+          !isGodAdmin
+        )
+          return;
+
+        // Safety prompt before executing real money transfers
+        const confirmDispatch =
+          window.confirm(
+            "WARNING: This will instantly dispatch all APPROVED fiat transactions to Paystack for real-world bank settlement. Do you want to proceed?",
+          );
+        if (
+          !confirmDispatch
+        )
+          return;
+
+        setActionStatus(
+          "loading",
+        );
+        try {
+          const res =
+            await axios.get(
+              "http://localhost:5000/api/admin/treasury/force-fiat-batch",
+              getAxiosConfig(),
+            );
+          alert(
+            `Batch Result: ${res.data.message}`,
+          );
+          // Refresh the list so processing items disappear from the pending view
+          fetchPayouts();
+        } catch (error) {
+          alert(
+            error
+              .response
+              ?.data
+              ?.message ||
+              "Failed to dispatch fiat batch.",
+          );
+        } finally {
+          setActionStatus(
+            "idle",
+          );
+        }
+      };
+
     return (
       <div className="flex flex-col h-full gap-6">
         {/* --- TOP TAB NAVIGATOR --- */}
@@ -370,27 +417,49 @@ const PayoutQueue =
             </button>
           </div>
 
-          {/* GOD ADMIN MANUAL AUDIT BUTTON */}
+          {/* GOD ADMIN ACTION BUTTONS */}
           {isGodAdmin && (
-            <button
-              onClick={
-                handleForceAudit
-              }
-              disabled={
-                actionStatus ===
-                "loading"
-              }
-              className="mb-2 px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg"
-            >
-              <ShieldCheck
-                size={
-                  16
+            <div className="flex items-center gap-3">
+              <button
+                onClick={
+                  handleForceFiatBatch
                 }
-              />{" "}
-              Force
-              Treasury
-              Audit
-            </button>
+                disabled={
+                  actionStatus ===
+                  "loading"
+                }
+                className="mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg"
+              >
+                <Landmark
+                  size={
+                    16
+                  }
+                />{" "}
+                Force
+                Fiat
+                Dispatch
+              </button>
+
+              <button
+                onClick={
+                  handleForceAudit
+                }
+                disabled={
+                  actionStatus ===
+                  "loading"
+                }
+                className="mb-2 px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg"
+              >
+                <ShieldCheck
+                  size={
+                    16
+                  }
+                />{" "}
+                Force
+                Treasury
+                Audit
+              </button>
+            </div>
           )}
         </div>
 
@@ -1046,6 +1115,6 @@ const PayoutQueue =
         </div>
       </div>
     );
-  };
+  };;
 
 export default PayoutQueue;

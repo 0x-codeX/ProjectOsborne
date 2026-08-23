@@ -15,6 +15,9 @@ const Ticket = require("../models/Ticket");
 const {
   runReconciliation,
 } = require("../workers/treasuryAuditor");
+const {
+  runFiatBatchTransfer,
+} = require("../workers/fiatBatchProcessor");
 const transporter =
   nodemailer.createTransport(
     {
@@ -274,6 +277,30 @@ router.get("/treasury/force-audit", requireAuth, async (req, res) => {
     console.error("Force Audit Route Error:", error);
     res.status(500).json({ 
       message: "Failed to execute manual reconciliation.", 
+      error: error.message 
+    });
+  }
+});
+
+// GET /api/admin/treasury/force-fiat-batch
+// Restricted to GOD_ADMIN
+router.get("/treasury/force-fiat-batch", requireAuth, async (req, res) => {
+  try {
+    // 1. Strict Role Verification
+    if (req.user.role !== "GOD_ADMIN") {
+      return res.status(403).json({ message: "Forbidden: Requires God Admin privileges." });
+    }
+
+    // 2. Trigger the automated Paystack dispatcher
+    await runFiatBatchTransfer();
+
+    res.status(200).json({ 
+      message: "Fiat Bulk Transfer dispatched successfully. Check Paystack dashboard and server logs for final status." 
+    });
+  } catch (error) {
+    console.error("Force Fiat Batch Error:", error);
+    res.status(500).json({ 
+      message: "Failed to dispatch fiat batch.", 
       error: error.message 
     });
   }
