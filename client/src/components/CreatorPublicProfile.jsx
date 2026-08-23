@@ -3,6 +3,7 @@ import React, {
   useEffect,
 } from "react";
 import { usePaystackPayment } from "react-paystack";
+import AgeVerificationGate from "./AgeVerificationGate";
 import {
   useParams,
   useNavigate,
@@ -125,6 +126,56 @@ const CreatorPublicProfile =
       useState(
         false,
       );
+    // --- AGE VERIFICATION GATE STATES ---
+    const [
+      showAgeGate,
+      setShowAgeGate,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      pendingCheckoutData,
+      setPendingCheckoutData,
+    ] =
+      useState(
+        null,
+      );
+    const currentUser =
+      JSON.parse(
+        localStorage.getItem(
+          "nippy_user",
+        ) ||
+          "{}",
+      );
+
+    // THE WIRE: Universal Payment Guard
+    const handleGuardedCheckout =
+      (
+        checkoutPayload,
+        isRestricted,
+      ) => {
+        if (
+          isRestricted &&
+          !currentUser.isAgeVerified
+        ) {
+          setPendingCheckoutData(
+            checkoutPayload,
+          );
+          setShowAgeGate(
+            true,
+          );
+          return; // STOP! Block the checkout modal.
+        }
+
+        // Allow through if verified or SFW
+        setCheckoutData(
+          checkoutPayload,
+        );
+        setPaymentMethod(
+          null,
+        );
+      };
 
     const {
       transferUSDT,
@@ -175,7 +226,7 @@ const CreatorPublicProfile =
                 // THE FIX: Intercept failed network requests with the robust fallback
                 api
                   .get(
-                    "/exchange-rates",
+                    "/purchases/exchange-rates",
                   )
                   .catch(
                     () => ({
@@ -332,7 +383,7 @@ const CreatorPublicProfile =
         );
 
         try {
-          // Reverse calculate the Fan's bloated price back into exact USD for the Crypto Gateway
+          // Convert Fan's padded price back to USD for the quote
           const toFanRate =
             exchangeRates[
               checkoutData
@@ -343,6 +394,17 @@ const CreatorPublicProfile =
             checkoutData.amount /
             toFanRate;
 
+          // Convert Creator's true raw price to USD for the quote
+          const toRawRate =
+            exchangeRates[
+              checkoutData
+                .rawCurrency
+            ] ||
+            1;
+          const rawPriceInUSD =
+            checkoutData.raw /
+            toRawRate;
+
           const {
             data,
           } =
@@ -351,6 +413,8 @@ const CreatorPublicProfile =
               {
                 amountUSD:
                   fanPriceInUSD,
+                rawAmountUSD:
+                  rawPriceInUSD, // <--- We send the raw amount here
               },
             );
 
@@ -384,10 +448,32 @@ const CreatorPublicProfile =
           "CARD"
         ) {
           // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
-          // Multiply Fan's exact display price into subunits (e.g. kobo/cents)
+          // THE FIX: Gateway strictly requires the native merchant currency (NGN).
+          // Convert using checkoutData, not paymentModalPost
+          const fanRate =
+            exchangeRates[
+              checkoutData
+                .currency
+            ] ||
+            1;
+          const ngnRate =
+            exchangeRates[
+              "NGN"
+            ] ||
+            1500; // Fallback rate safeguard
+
+          // Reverse engineer the USD base price, then convert to NGN
+          const priceInUSD =
+            checkoutData.amount /
+            fanRate;
+          const priceInNGN =
+            priceInUSD *
+            ngnRate;
+
+          // Gateway expects subunits (Kobo)
           const amountInSubunits =
             Math.round(
-              checkoutData.amount *
+              priceInNGN *
                 100,
             );
 
@@ -400,16 +486,18 @@ const CreatorPublicProfile =
                       .getTime()
                       .toString(),
                   email:
+                    currentUser?.email ||
                     "fan@nippy.com",
                   amount:
                     amountInSubunits,
                   currency:
-                    checkoutData.currency, // Force Paystack to process in the Fan's local currency
+                    "NGN", // Hardcoded to match your merchant gateway compliance
                 },
               onSuccess:
                 async (
                   reference,
                 ) => {
+                  // Target checkoutData.post or fallback to the purchase type string
                   setProcessingId(
                     checkoutData.post
                       ? checkoutData
@@ -418,7 +506,7 @@ const CreatorPublicProfile =
                       : checkoutData.type,
                   );
                   try {
-                    // SEND BOTH PRICES TO THE LEDGER
+                    // The backend verifyPayment expects the exact currency/amount you just charged
                     await api.post(
                       "/purchases/verify",
                       {
@@ -427,7 +515,7 @@ const CreatorPublicProfile =
                         paymentMethod:
                           "FIAT",
                         creatorId:
-                          id,
+                          id, // Extracted from useParams at the top of the file
                         contentId:
                           checkoutData.post
                             ? checkoutData
@@ -439,12 +527,16 @@ const CreatorPublicProfile =
                         subscriptionTier:
                           checkoutData.tier ||
                           null,
+
+                        // Aligning charge payload with actual Gateway execution to pass fraud checks
                         chargeAmount:
-                          checkoutData.amount, // Paid by Fan
+                          priceInNGN,
                         chargeCurrency:
-                          checkoutData.currency,
+                          "NGN",
+
+                        // Creator ledger relies strictly on raw amounts for the 80% platform split
                         rawAmount:
-                          checkoutData.raw, // Credited to Creator
+                          checkoutData.raw,
                         rawCurrency:
                           checkoutData.rawCurrency,
                       },
@@ -496,18 +588,21 @@ const CreatorPublicProfile =
               "Creator missing Web3 wallet.",
             );
           if (
-            !cryptoQuote?.requiredUSDT
+            !cryptoQuote?.requiredUSDT ||
+            !cryptoQuote?.rawUSDT
           )
             throw new Error(
               "Missing crypto quote.",
             );
+
+          // THE FIX: We pass BOTH the Fan's bloated price and the Creator's raw base price to the Smart Contract!
           const txHash =
             await transferUSDT(
               profileData
                 .creator
                 .walletAddress,
-              cryptoQuote.requiredUSDT,
-              checkoutData.raw,
+              cryptoQuote.requiredUSDT, // e.g., 3.50 USDT (Fan is charged this)
+              cryptoQuote.rawUSDT, // e.g., 3.33 USDT (Contract calculates 80% split against this)
               checkoutData.post
                 ? checkoutData
                     .post
@@ -522,7 +617,7 @@ const CreatorPublicProfile =
               "Transaction completed but no hash was returned.",
             );
 
-          // SEND BOTH PRICES TO THE LEDGER
+          // The backend uses checkoutData.raw to credit the Creator's Wallet
           await api.post(
             "/purchases/verify",
             {
@@ -544,11 +639,11 @@ const CreatorPublicProfile =
                 checkoutData.tier ||
                 null,
               chargeAmount:
-                checkoutData.amount, // Paid by Fan
+                checkoutData.amount,
               chargeCurrency:
                 checkoutData.currency,
               rawAmount:
-                checkoutData.raw, // Credited to Creator
+                checkoutData.raw,
               rawCurrency:
                 checkoutData.rawCurrency,
             },
@@ -906,7 +1001,7 @@ const CreatorPublicProfile =
                             </p>
                             <button
                               onClick={() => {
-                                setCheckoutData(
+                                handleGuardedCheckout(
                                   {
                                     type: "PPV",
                                     post,
@@ -918,10 +1013,8 @@ const CreatorPublicProfile =
                                     rawCurrency:
                                       ppvPriceData.rawCurrency,
                                   },
-                                );
-                                setPaymentMethod(
-                                  null,
-                                );
+                                  post.isNsfw,
+                                ); // Checks if this specific post is NSFW
                               }}
                               className="bg-white hover:bg-gray-200 text-black font-bold py-2 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg"
                             >
@@ -1052,7 +1145,7 @@ const CreatorPublicProfile =
                         setShowSubModal(
                           false,
                         );
-                        setCheckoutData(
+                        handleGuardedCheckout(
                           {
                             type: "SUBSCRIPTION",
                             tier: tier.label,
@@ -1065,10 +1158,8 @@ const CreatorPublicProfile =
                             rawCurrency:
                               tier.rawCurrency,
                           },
-                        );
-                        setPaymentMethod(
-                          null,
-                        );
+                          creator.willingNsfw,
+                        ); // Checks if the creator produces NSFW content
                       }}
                       className="w-full bg-slate-800 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500 text-white p-4 rounded-xl flex items-center justify-between transition-all group"
                     >
@@ -1250,7 +1341,7 @@ const CreatorPublicProfile =
                     setShowBundleConfig(
                       false,
                     );
-                    setCheckoutData(
+                    handleGuardedCheckout(
                       {
                         type: "CHAT_BUNDLE",
                         amount:
@@ -1267,10 +1358,8 @@ const CreatorPublicProfile =
                           bundleQuantity *
                           settings.messageBundleSize,
                       },
-                    );
-                    setPaymentMethod(
-                      null,
-                    );
+                      creator.willingNsfw,
+                    ); // Gated if creator makes NSFW
                   }}
                   className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-lg transition-colors"
                 >
@@ -1282,6 +1371,17 @@ const CreatorPublicProfile =
             </div>
           </div>
         )}
+        {/* THE NEW AGE GATE */}
+        <AgeVerificationGate
+          isOpen={
+            showAgeGate
+          }
+          onClose={() =>
+            setShowAgeGate(
+              false,
+            )
+          }
+        />
 
         {/* CHECKOUT MASTER MODAL */}
         {checkoutData && (
@@ -1478,6 +1578,6 @@ const CreatorPublicProfile =
         )}
       </div>
     );
-  };
+  };;
 
 export default CreatorPublicProfile;

@@ -7,6 +7,7 @@ import {
   useParams,
   useNavigate,
 } from "react-router-dom";
+import AgeVerificationGate from "./AgeVerificationGate";
 import {
   ArrowLeft,
   Send,
@@ -148,6 +149,49 @@ const FanChatWindow =
       useState(
         false,
       );
+    // --- AGE VERIFICATION GATE STATES ---
+    const [
+      showAgeGate,
+      setShowAgeGate,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      pendingCheckoutData,
+      setPendingCheckoutData,
+    ] =
+      useState(
+        null,
+      );
+
+    // THE WIRE: Universal Payment Guard for DMs
+    const handleGuardedCheckout =
+      (
+        checkoutPayload,
+        isRestricted,
+      ) => {
+        if (
+          isRestricted &&
+          !currentUser.isAgeVerified
+        ) {
+          setPendingCheckoutData(
+            checkoutPayload,
+          );
+          setShowAgeGate(
+            true,
+          );
+          return; // STOP! Block the checkout modal.
+        }
+
+        // Allow through if verified or SFW
+        setCheckoutData(
+          checkoutPayload,
+        );
+        setPaymentMethod(
+          null,
+        );
+      };
 
     const currentUser =
       JSON.parse(
@@ -431,28 +475,45 @@ const FanChatWindow =
         );
 
         try {
-          const baseAmountUSD =
-            checkoutData.amount ||
-            0;
+          // Convert Fan's padded price back to USD for the quote
+          const toFanRate =
+            exchangeRates[
+              checkoutData
+                .currency
+            ] ||
+            1;
+          const fanPriceInUSD =
+            checkoutData.amount /
+            toFanRate;
 
-          // 3. Refactored: Stripped out the raw 'fetch' and replaced with 'api'
-          const res =
+          // Convert Creator's true raw price to USD for the quote
+          const toRawRate =
+            exchangeRates[
+              checkoutData
+                .rawCurrency
+            ] ||
+            1;
+          const rawPriceInUSD =
+            checkoutData.raw /
+            toRawRate;
+
+          const {
+            data,
+          } =
             await api.post(
               "/purchases/crypto-quote",
               {
                 amountUSD:
-                  baseAmountUSD,
+                  fanPriceInUSD,
+                rawAmountUSD:
+                  rawPriceInUSD, // <--- We send the raw amount here
               },
             );
 
           setCryptoQuote(
-            res.data,
+            data,
           );
         } catch (error) {
-          console.error(
-            "Quote error:",
-            error,
-          );
           alert(
             "Failed to get live crypto rates. Please try again.",
           );
@@ -474,28 +535,14 @@ const FanChatWindow =
         )
           return;
 
-        const isBundle =
-          checkoutData.type ===
-          "CHAT_BUNDLE";
-        const currentProcessingId =
-          isBundle
-            ? "BUNDLE_CHECKOUT"
-            : checkoutData
-                .message
-                ._id;
-        const creatorId =
-          chatInfo._id ||
-          chatInfo;
-
         if (
           paymentMethod ===
           "CARD"
         ) {
-          const exchangeRate = 1500;
-          const amountInKobo =
+          // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
+          const amountInSubunits =
             Math.round(
               checkoutData.amount *
-                exchangeRate *
                 100,
             );
 
@@ -511,17 +558,23 @@ const FanChatWindow =
                     currentUser?.email ||
                     "fan@nippy.com",
                   amount:
-                    amountInKobo,
+                    amountInSubunits,
+                  currency:
+                    checkoutData.currency,
                 },
               onSuccess:
                 async (
                   reference,
                 ) => {
                   setProcessingId(
-                    currentProcessingId,
+                    checkoutData.post
+                      ? checkoutData
+                          .post
+                          ._id
+                      : checkoutData.type,
                   );
                   try {
-                    // 4. Refactored: Clean api call using interceptor
+                    // The backend verifyPayment function uses checkoutData.raw to credit the Creator's Wallet
                     await api.post(
                       "/purchases/verify",
                       {
@@ -530,42 +583,39 @@ const FanChatWindow =
                         paymentMethod:
                           "FIAT",
                         creatorId:
-                          creatorId,
-                        messageId:
-                          isBundle
-                            ? null
-                            : checkoutData
-                                .message
-                                ._id,
+                          id,
+                        contentId:
+                          checkoutData.post
+                            ? checkoutData
+                                .post
+                                ._id
+                            : null,
                         purchaseType:
                           checkoutData.type,
+                        subscriptionTier:
+                          checkoutData.tier ||
+                          null,
+                        chargeAmount:
+                          checkoutData.amount,
+                        chargeCurrency:
+                          checkoutData.currency,
+                        rawAmount:
+                          checkoutData.raw,
+                        rawCurrency:
+                          checkoutData.rawCurrency,
                       },
                     );
 
-                    if (
-                      isBundle
-                    ) {
-                      setBubblesLeft(
-                        (
-                          prev,
-                        ) =>
-                          prev +
-                          checkoutData.bubbles,
-                      );
-                      setRequiresBundle(
-                        false,
-                      );
-                    } else {
-                      await fetchMessages();
-                    }
+                    await fetchProfileAndRates();
                     closeCheckoutModal();
-                  } catch (err) {
+                  } catch (error) {
                     alert(
-                      err
-                        .response
-                        ?.data
-                        ?.message ||
-                        "Verification failed on backend.",
+                      "Verification failed: " +
+                        (error
+                          .response
+                          ?.data
+                          ?.message ||
+                          error.message),
                     );
                   } finally {
                     setProcessingId(
@@ -576,91 +626,96 @@ const FanChatWindow =
               onClose:
                 () =>
                   alert(
-                    "Payment window closed.",
+                    "Payment window closed by user.",
                   ),
             },
           );
           return;
         }
 
+        // --- WEB3 EXECUTION ---
         try {
           setProcessingId(
-            currentProcessingId,
+            checkoutData.post
+              ? checkoutData
+                  .post
+                  ._id
+              : checkoutData.type,
           );
+
           if (
-            !chatInfo?.walletAddress
+            !profileData
+              ?.creator
+              ?.walletAddress
           )
             throw new Error(
-              "Creator wallet missing.",
+              "Creator missing Web3 wallet.",
             );
           if (
-            !cryptoQuote ||
-            !cryptoQuote.requiredUSDT
+            !cryptoQuote?.requiredUSDT ||
+            !cryptoQuote?.rawUSDT
           )
             throw new Error(
-              "Missing crypto quote. Please select payment method again.",
+              "Missing crypto quote.",
             );
 
+          // THE FIX: We pass BOTH the Fan's bloated price and the Creator's raw base price to the Smart Contract!
           const txHash =
             await transferUSDT(
-              chatInfo.walletAddress,
-              cryptoQuote.requiredUSDT,
-              isBundle
-                ? null
-                : checkoutData
-                    .message
-                    ._id,
+              profileData
+                .creator
+                .walletAddress,
+              cryptoQuote.requiredUSDT, // e.g., 3.50 USDT (Fan is charged this)
+              cryptoQuote.rawUSDT, // e.g., 3.33 USDT (Contract calculates 80% split against this)
+              checkoutData.post
+                ? checkoutData
+                    .post
+                    ._id
+                : null,
             );
 
           if (
             !txHash
           )
             throw new Error(
-              "Transaction completed but no hash returned.",
+              "Transaction completed but no hash was returned.",
             );
 
-          // 5. Refactored: Clean api call using interceptor
+          // The backend uses checkoutData.raw to credit the Creator's Wallet
           await api.post(
             "/purchases/verify",
             {
-              txHash,
+              txHash:
+                txHash,
               paymentMethod:
                 "CRYPTO",
               creatorId:
-                creatorId,
-              messageId:
-                isBundle
-                  ? null
-                  : checkoutData
-                      .message
-                      ._id,
+                id,
+              contentId:
+                checkoutData.post
+                  ? checkoutData
+                      .post
+                      ._id
+                  : null,
               purchaseType:
                 checkoutData.type,
+              subscriptionTier:
+                checkoutData.tier ||
+                null,
+              chargeAmount:
+                checkoutData.amount,
+              chargeCurrency:
+                checkoutData.currency,
+              rawAmount:
+                checkoutData.raw,
+              rawCurrency:
+                checkoutData.rawCurrency,
             },
           );
 
-          if (
-            isBundle
-          ) {
-            setBubblesLeft(
-              (
-                prev,
-              ) =>
-                prev +
-                checkoutData.bubbles,
-            );
-            setRequiresBundle(
-              false,
-            );
-          } else {
-            await fetchMessages();
-          }
+          await fetchProfileAndRates();
           closeCheckoutModal();
         } catch (error) {
-          console.error(
-            "Payment Error:",
-            error,
-          );
           alert(
             error
               .response
@@ -860,7 +915,7 @@ const FanChatWindow =
                           </span>
                           <button
                             onClick={() => {
-                              setCheckoutData(
+                              handleGuardedCheckout(
                                 {
                                   type: "DM_UNLOCK",
                                   message:
@@ -868,9 +923,8 @@ const FanChatWindow =
                                   amount:
                                     msg.priceInUSDT,
                                 },
-                              );
-                              setPaymentMethod(
-                                null,
+                                msg.isNsfw ||
+                                  chatInfo?.willingNsfw, // Fallback to creator's NSFW status if msg doesn't have it
                               );
                             }}
                             className="bg-yellow-500 hover:bg-yellow-400 transition-colors text-black text-xs font-bold py-2 px-4 rounded-full"
@@ -1157,6 +1211,7 @@ const FanChatWindow =
                         bundlePrice
                       }
                     </span>
+
                     .
                   </p>
 
@@ -1249,7 +1304,7 @@ const FanChatWindow =
                       setShowBundleConfig(
                         false,
                       );
-                      setCheckoutData(
+                      handleGuardedCheckout(
                         {
                           type: "CHAT_BUNDLE",
                           amount:
@@ -1259,9 +1314,7 @@ const FanChatWindow =
                             bundleQuantity *
                             bundleSize,
                         },
-                      );
-                      setPaymentMethod(
-                        null,
+                        chatInfo?.willingNsfw, // Restricts bundles if the creator produces NSFW
                       );
                     }}
                     className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-lg transition-colors"
@@ -1274,6 +1327,17 @@ const FanChatWindow =
               </div>
             </div>
           )}
+          {/* THE NEW AGE GATE */}
+          <AgeVerificationGate
+            isOpen={
+              showAgeGate
+            }
+            onClose={() =>
+              setShowAgeGate(
+                false,
+              )
+            }
+          />
 
           {/* UNIFIED CHECKOUT MODAL (Handles both DM Unlock and Bundles) */}
           {checkoutData && (
@@ -1466,6 +1530,6 @@ const FanChatWindow =
         </div>
       </div>
     );
-  };
+  };;
 
 export default FanChatWindow;

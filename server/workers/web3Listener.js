@@ -8,6 +8,9 @@ const User = require("../models/User");
 const Purchase = require("../models/Purchase");
 const Wallet = require("../models/Wallet");
 const Notification = require("../models/Notification");
+const Transaction = require("../models/Transaction");
+
+
 
 // SIMPLE IN-MEMORY / MONGO BLOCK TRACKER
 const SyncStateSchema =
@@ -48,11 +51,20 @@ const GATEWAY_ADDRESS =
   process
     .env
     .NIPPY_GATEWAY_ADDRESS;
+const PAYOUT_ADDRESS =
+  process
+    .env
+    .NIPPY_TREASURY_PAYOUT;
 
 
 const GATEWAY_ABI = [
   "event ContentPurchased(address indexed buyer, address indexed creator, bytes32 indexed contentId, address token, uint256 rawBasePrice, uint256 chargeAmount, uint256 creatorCut, uint256 treasuryCut)"
 ];;
+
+const PAYOUT_ABI =
+  [
+    "event PayoutClaimed(address indexed creator, uint256 amount, bytes32 nonce)",
+  ];
 
 /**
  * FULL Idempotent Fulfillment Engine
@@ -374,7 +386,7 @@ async function startListener() {
         : Math.max(
             0,
             currentBlock -
-              2000,
+              50,
           );
 
     if (
@@ -411,21 +423,24 @@ async function startListener() {
           for (const event of pastEvents) {
             await processPurchaseEvent(
               event
-                .args[0], // buyer
+                .args[0], // buyerWallet
               event
-                .args[1], // creator
+                .args[1], // creatorWallet
               event
-                .args[2], // contentId
+                .args[2], // contentIdBytes32
               event
-                .args[4], // rawPrice
+                .args[4], // rawPrice (The Base DB Price)
               event
-                .args[5], // rawCreatorCut
+                .args[6], // THE FIX: args[6] is the exact 80% creatorCut from the contract
               event.transactionHash,
             );
           }
         } catch (chunkError) {
+          // THE FIX: Stop swallowing the error so we can see the exact RPC rejection
           console.warn(
-            `[WARN] Chunk ${start}-${end} sweep skipped due to RPC limit.`,
+            `[WARN] Chunk ${start}-${end} sweep failed. Reason:`,
+            chunkError.message ||
+              chunkError,
           );
         }
         await new Promise(
@@ -483,14 +498,17 @@ async function startListener() {
         creator,
         contentIdBytes32,
         token,
-        price,
+        rawBasePrice,
+        chargeAmount,
         creatorCut,
         treasuryCut,
-        event,
+        event, // THE FIX: Ethers v6 always injects the event payload as the LAST argument
       ) => {
         console.log(
           `\n--- Live Purchase Detected ---`,
         );
+
+        // Now 'event' is actually the Ethers object, so this will not crash.
         const txHash =
           event
             .log
@@ -500,8 +518,8 @@ async function startListener() {
           buyer,
           creator,
           contentIdBytes32,
-          price,
-          creatorCut,
+          rawBasePrice, // Passing the actual base price
+          creatorCut, // Passing the exact 80% cut
           txHash,
         );
 
@@ -523,6 +541,75 @@ async function startListener() {
             {
               upsert: true,
             },
+          );
+        }
+      },
+    );
+
+    // --- TREASURY PAYOUT LISTENER ---
+    const payoutContract =
+      new ethers.Contract(
+        PAYOUT_ADDRESS,
+        PAYOUT_ABI,
+        wssProvider,
+      );
+
+    payoutContract.on(
+      "PayoutClaimed",
+      async (
+        creator,
+        amount,
+        nonce,
+        event,
+      ) => {
+        console.log(
+          `\n--- Creator Claimed Payout Detected ---`,
+        );
+        try {
+          const txHash =
+            event
+              .log
+              .transactionHash;
+
+          // Find the PENDING_CLAIM transaction that matches the exact cryptographic nonce
+          const updatedTx =
+            await Transaction.findOneAndUpdate(
+              {
+                "metadata.nonce":
+                  nonce,
+                status:
+                  "PENDING_CLAIM",
+              },
+              {
+                $set: {
+                  status:
+                    "COMPLETED",
+                  "metadata.claimTxHash":
+                    txHash,
+                  "metadata.claimedAt":
+                    new Date(),
+                },
+              },
+              {
+                new: true,
+              },
+            );
+
+          if (
+            updatedTx
+          ) {
+            console.log(
+              `[+] SUCCESS: Payout voucher for ${creator} marked as COMPLETED. Liquidity freed.`,
+            );
+          } else {
+            console.warn(
+              `[!] WARNING: Unmatched or already claimed nonce detected: ${nonce}`,
+            );
+          }
+        } catch (err) {
+          console.error(
+            "[-] ERROR processing PayoutClaimed event:",
+            err,
           );
         }
       },

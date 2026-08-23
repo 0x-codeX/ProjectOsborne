@@ -1205,132 +1205,75 @@ exports.verifyMessagePayment =
     }
   };
 
-// @desc    Get secure 15-minute streaming URL for a DM attachment
+// @desc    Get secure 5-minute streaming URL for a DM attachment
 // @route   GET /api/messages/:messageId/stream
-exports.getSecureMessageMedia =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const {
-        messageId,
-      } =
-        req.params;
-      const userId =
-        req
-          .user
-          ._id ||
-        req
-          .user
-          .id;
+exports.getSecureMessageMedia = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id || req.user.id;
 
-      const message =
-        await Message.findById(
-          messageId,
-        );
-      if (
-        !message ||
-        !message.fileKey
-      )
-        return res
-          .status(
-            404,
-          )
-          .json(
-            {
-              message:
-                "Media not found.",
-            },
-          );
-
-      const isCreator =
-        message.sender.toString() ===
-        userId.toString();
-      const isFree =
-        message.price ===
-        0;
-
-      if (
-        !isCreator &&
-        !isFree
-      ) {
-        const validPurchase =
-          await Purchase.findOne(
-            {
-              user: userId,
-              message:
-                messageId,
-              purchaseType:
-                "DM_UNLOCK",
-              status:
-                "completed",
-            },
-          );
-
-        if (
-          !validPurchase
-        )
-          return res
-            .status(
-              403,
-            )
-            .json(
-              {
-                message:
-                  "Access denied. You must purchase this message to view the media.",
-              },
-            );
-      }
-
-      const command =
-        new GetObjectCommand(
-          {
-            Bucket:
-              process
-                .env
-                .S3_BUCKET_NAME,
-            Key: message.fileKey,
-          },
-        );
-      const signedUrl =
-        await getSignedUrl(
-          s3Client,
-          command,
-          {
-            expiresIn: 900,
-          },
-        );
-
-      res
-        .status(
-          200,
-        )
-        .json(
-          {
-            streamUrl:
-              signedUrl,
-            fileType:
-              message.fileType,
-          },
-        );
-    } catch (error) {
-      console.error(
-        "Message Media Access Error:",
-        error,
-      );
-      res
-        .status(
-          500,
-        )
-        .json(
-          {
-            message:
-              "Server error generating media stream.",
-          },
-        );
+    // THE FIX: Populate sender so we can check their NSFW status for the Age Gate
+    const message = await Message.findById(messageId).populate("sender");
+    if (!message || !message.fileKey) {
+      return res.status(404).json({ message: "Media not found." });
     }
-  };
+
+    // Safely check isCreator whether sender was populated or not
+    const isCreator = message.sender._id 
+      ? message.sender._id.toString() === userId.toString()
+      : message.sender.toString() === userId.toString();
+
+    // =================================================================
+    // 1. SECURITY CHECK: THE AGE VERIFICATION GATE
+    // =================================================================
+    const isNsfw = message.isNsfw === true || message.sender.willingNsfw === true;
+    if (!isCreator && isNsfw && req.user.isAgeVerified !== true) {
+      return res.status(403).json({
+        error: "SECURITY BLOCK: Age verification required for this explicit content.",
+        isAgeRestricted: true
+      });
+    }
+    // =================================================================
+
+    const isFree = message.price === 0;
+
+    // 2. PAYMENT CHECK: Ensure they bought it if it isn't free
+    if (!isCreator && !isFree) {
+      const validPurchase = await Purchase.findOne({
+        user: userId,
+        message: messageId,
+        purchaseType: "DM_UNLOCK",
+        status: "completed",
+      });
+
+      if (!validPurchase) {
+        return res.status(403).json({
+          message: "Access denied. You must purchase this message to view the media.",
+        });
+      }
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: message.fileKey,
+    });
+    
+    // THE FIX: Dropped to 300 seconds (5 mins) to prevent link sharing piracy
+    const signedUrl = await getSignedUrl(s3Client, command, {
+      expiresIn: 300, 
+    });
+
+    res.status(200).json({
+      streamUrl: signedUrl,
+      fileType: message.fileType,
+    });
+  } catch (error) {
+    console.error("Message Media Access Error:", error);
+    res.status(500).json({
+      message: "Server error generating media stream.",
+    });
+  }
+};
 
 // @desc    Get total unread messages count for the layout badge
 // @route   GET /api/messages/unread-count

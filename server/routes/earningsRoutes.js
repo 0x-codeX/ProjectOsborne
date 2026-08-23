@@ -7,6 +7,9 @@ const {
 const {
   getDashboard,
   requestWithdrawal,
+  getP2PRatePreview,
+  getLiquidationQuote,
+  executeLiquidation,
 } = require("../controllers/earningsController");
 
 // GET /api/earnings/dashboard
@@ -23,6 +26,30 @@ router.post(
   "/withdraw",
   requireAuth,
   requestWithdrawal,
+);
+
+// GET /api/earnings/p2p-rate
+// Fetches the cached 24-hr P2P rate for the dashboard preview UI
+router.get(
+  "/p2p-rate",
+  requireAuth,
+  getP2PRatePreview
+);
+
+// POST /api/earnings/quote
+// Generates a 5-minute locked execution quote using the live P2P rate
+router.post(
+  "/quote",
+  requireAuth,
+  getLiquidationQuote
+);
+
+// POST /api/earnings/liquidate
+// Executes the atomic balance swap between fiat/crypto ledgers
+router.post(
+  "/liquidate",
+  requireAuth,
+  executeLiquidation
 );
 
 module.exports =

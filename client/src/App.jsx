@@ -42,6 +42,8 @@ import CreatorLiveSetup from "./components/CreatorLiveSetup";
 import CreatorLiveStudio from "./components/CreatorLiveStudio";
 import CreatorNotifications from "./components/CreatorNotifications";
 import MonetizationSettings from "./components/MonetizationSettings";
+import VerificationCallback from "./pages/VerificationCallback";
+import AgeVerificationGate from "./components/AgeVerificationGate";
 
 // Dummy components to prevent white-screen crashes on new routes
 const Placeholder =
@@ -90,6 +92,18 @@ function App() {
             path="/fan-setup"
             element={
               <FanBiodata />
+            }
+          />
+          <Route
+            path="/fan/AgeVerificationGate"
+            element={
+              <AgeVerificationGate />
+            }
+          />
+          <Route
+            path="/fan/VerificationCallback"
+            element={
+              <VerificationCallback />
             }
           />
 

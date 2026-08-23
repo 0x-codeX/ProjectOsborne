@@ -188,6 +188,67 @@ const userSchema =
               type: String,
             },
         },
+      ageVerification:
+        {
+          status:
+            {
+              type: String,
+              enum: [
+                "unverified",
+                "pending",
+                "verified",
+                "failed",
+                "expired",
+              ],
+              default:
+                "unverified",
+            },
+          method:
+            {
+              type: String,
+              enum: [
+                "card_on_file",
+                "third_party_avs",
+                "none",
+              ],
+              default:
+                "none",
+            },
+          sessionId:
+            {
+              type: String,
+              default:
+                null,
+            }, // Didit session ID
+          ipCountry:
+            {
+              type: String,
+              default:
+                null,
+            },
+          isVpnDetected:
+            {
+              type: Boolean,
+              default: false,
+            },
+          verifiedAt:
+            {
+              type: Date,
+              default:
+                null,
+            },
+          expiresAt:
+            {
+              type: Date,
+              default:
+                null,
+            },
+        },
+      isAgeVerified:
+        {
+          type: Boolean,
+          default: false,
+        },
 
       // --- CREATOR SPECIFIC FIELDS ---
       creatorProfile:

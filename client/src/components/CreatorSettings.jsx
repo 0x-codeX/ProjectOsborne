@@ -1323,12 +1323,13 @@ const CreatorSettings =
               </div>
 
               {/* THE FIX: PREFERRED CURRENCY SELECTOR */}
-              <div>
+              <div className="flex flex-col">
                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                   <Globe className="w-3 h-3 text-amber-500" />{" "}
                   Preferred
                   Currency
                 </label>
+
                 <div className="relative">
                   <select
                     name="preferredCurrency"
@@ -1369,6 +1370,61 @@ const CreatorSettings =
                     </svg>
                   </div>
                 </div>
+
+                {/* THE FIX: Settlement Warning for Non-NGN Display Currencies */}
+                {formData.preferredCurrency !==
+                  "NGN" && (
+                  <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex gap-2 text-amber-500 text-xs leading-relaxed">
+                    <AlertCircle
+                      size={
+                        16
+                      }
+                      className="shrink-0 mt-0.5"
+                    />
+                    <p>
+                      <strong className="text-amber-400">
+                        Display
+                        Only:
+                      </strong>{" "}
+                      Your
+                      profile
+                      will
+                      charge
+                      fans
+                      in{" "}
+                      {
+                        formData.preferredCurrency
+                      }
+                      ,
+                      but
+                      all
+                      Web2
+                      bank
+                      payouts
+                      are
+                      strictly
+                      settled
+                      in{" "}
+                      <strong className="text-amber-400">
+                        NGN
+                      </strong>
+                      .
+                      We
+                      do
+                      not
+                      support
+                      direct{" "}
+                      {
+                        formData.preferredCurrency
+                      }{" "}
+                      bank
+                      transfers
+                      at
+                      this
+                      time.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>

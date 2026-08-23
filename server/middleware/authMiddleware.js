@@ -153,8 +153,29 @@ const requireVerifiedCreator =
     }
   };
 
+// =================================================================
+// 18+ Geofence & Age Verification Enforcer
+// =================================================================
+const requireAgeVerified = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: "Not authorized, user not found." });
+  }
+
+  // Creators are already KYC-verified by the platform (18 U.S.C. § 2257)
+  // If the user is a creator OR a verified fan, let them through.
+  if (req.user.role === "creator" || req.user.isAgeVerified === true) {
+    next(); 
+  } else {
+    // Block unverified fans
+    res.status(403).json({
+      message: "SECURITY BLOCK: Age verification required. Explicit content cannot be requested without a verified ID."
+    });
+  }
+};
+
 module.exports =
   {
     requireAuth,
     requireVerifiedCreator,
+    requireAgeVerified,
   };

@@ -12,11 +12,9 @@ const {
 const adminController = require("../controllers/adminController");
 const nodemailer = require("nodemailer");
 const Ticket = require("../models/Ticket");
-
-
-
-
-
+const {
+  runReconciliation,
+} = require("../workers/treasuryAuditor");
 const transporter =
   nodemailer.createTransport(
     {
@@ -32,6 +30,9 @@ const transporter =
       },
     },
   );
+
+
+
 // All admin routes require base JWT authentication
 router.use(
   requireAuth,
@@ -150,6 +151,7 @@ router.get(
   requireGodAdmin,
   adminController.getAdmins,
 );
+
 router.post(
   "/role/assign-staff",
   requireGodAdmin,
@@ -174,6 +176,7 @@ router.get(
   requireAnyAdmin,
   adminController.getPayouts,
 );
+
 router.post(
   "/withdrawals/action",
   requireAnyAdmin,
@@ -194,10 +197,37 @@ router.get(
 
 router.get(
   "/item/360/:itemId",
-  requireAnyAdmin, 
+  requireAnyAdmin,
   adminController.getItem360,
 );
 
+// Moderate Admin or higher can initiate
+router.post(
+  "/clearing/initiate",
+  requireAnyAdmin,
+  adminController.initiateClearing,
+);
+
+// Super Admin or higher can approve
+router.post(
+  "/clearing/approve",
+  requireSuperAdmin,
+  adminController.approveClearing,
+);
+
+// God Admin instant bypass
+router.post(
+  "/clearing/instant",
+  requireGodAdmin,
+  adminController.godAdminInstantClear,
+);
+
+// Any admin can view the pending queue
+router.get(
+  "/clearing/pending",
+  requireAnyAdmin,
+  adminController.getPendingClearings,
+);
 
 // ==========================================
 // MAKER-CHECKER APPROVAL ROUTES
@@ -205,26 +235,49 @@ router.get(
 
 // 1. MODERATE ADMINS (and above) can REQUEST an unlock
 router.post(
-  '/item/:itemId/request-manual-unlock', 
-  requireAnyAdmin, 
-  adminController.requestManualUnlock
+  "/item/:itemId/request-manual-unlock",
+  requireAnyAdmin,
+  adminController.requestManualUnlock,
 );
 
 // 2. SUPER ADMINS (and above) ONLY can VIEW pending approvals
 router.get(
-  '/approvals/pending', 
-  requireSuperAdmin, 
-  adminController.getPendingApprovals
+  "/approvals/pending",
+  requireSuperAdmin,
+  adminController.getPendingApprovals,
 );
 
 // 3. SUPER ADMINS (and above) ONLY can PROCESS (Approve/Reject)
 router.post(
-  '/approvals/:approvalId/process', 
-  requireSuperAdmin, 
-  adminController.processApproval
+  "/approvals/:approvalId/process",
+  requireSuperAdmin,
+  adminController.processApproval,
 );
 
+// Audits
+// GET /api/admin/treasury/force-audit
+// Restricted to GOD_ADMIN
+router.get("/treasury/force-audit", requireAuth, async (req, res) => {
+  try {
+    // Role check
+    if (req.user.role !== "GOD_ADMIN") {
+      return res.status(403).json({ message: "Forbidden: Requires God Admin privileges." });
+    }
 
+    // Trigger the auditor function
+    await runReconciliation();
+
+    res.status(200).json({ 
+      message: "Treasury Reconciliation completed successfully. Check server console for full logs." 
+    });
+  } catch (error) {
+    console.error("Force Audit Route Error:", error);
+    res.status(500).json({ 
+      message: "Failed to execute manual reconciliation.", 
+      error: error.message 
+    });
+  }
+});
 
 module.exports =
   router;

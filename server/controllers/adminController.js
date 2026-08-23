@@ -1,4 +1,7 @@
 const mongoose = require("mongoose");
+const {
+  ethers,
+} = require("ethers");
 const User = require("../models/User");
 const Content = require("../models/Content");
 const Purchase = require("../models/Purchase");
@@ -7,6 +10,12 @@ const Ticket = require("../models/Ticket");
 const Withdrawal = require("../models/Withdrawal");
 const AdminApproval = require("../models/AdminApproval");
 const SystemLog = require("../models/SystemLog");
+const ClearingRequest = require("../models/ClearingRequest");
+const {
+  sendAccountsCryptoPayoutEmail,
+} = require("../utils/emailService");
+const Transaction = require("../models/Transaction");
+const SystemState = require("../models/SystemState");
 
 // =========================================================
 // HELPER FUNCTION: SYSTEM AUDIT LOGGER
@@ -1727,6 +1736,1086 @@ exports.getSystemLogs =
           {
             message:
               "Server error fetching logs.",
+          },
+        );
+    }
+  };
+
+// 1. Moderate Admin Initiates Clearing Request
+exports.initiateClearing =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const {
+        creatorId,
+        amount,
+        currency,
+        direction,
+        depositConfirmed,
+      } =
+        req.body;
+      const adminId =
+        req
+          .user
+          ._id;
+
+      if (
+        !depositConfirmed
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "You must confirm deposit verification before submitting.",
+            },
+          );
+      }
+
+      const creator =
+        await User.findById(
+          creatorId,
+        );
+      const wallet =
+        await Wallet.findOne(
+          {
+            creator:
+              creatorId,
+          },
+        );
+
+      if (
+        !creator ||
+        !wallet
+      ) {
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "Creator or Wallet not found.",
+            },
+          );
+      }
+
+      const payoutAddress =
+        creator.payoutAddress ||
+        creator.walletAddress ||
+        "Bank Account";
+
+      const clearingReq =
+        await ClearingRequest.create(
+          {
+            creator:
+              creatorId,
+            wallet:
+              wallet._id,
+            amount,
+            currency,
+            direction,
+            payoutMethod:
+              creator.payoutMethod ||
+              "bank",
+            payoutAddress,
+            initiatedBy:
+              adminId,
+            depositConfirmedByAdmin: true,
+            status:
+              "PENDING_APPROVAL",
+          },
+        );
+
+      await SystemLog.create(
+        {
+          adminId,
+          action:
+            "INITIATED_CLEARING_REQUEST",
+          targetUserId:
+            creatorId,
+          details: `Initiated clearing of ${amount} ${currency} for ${creator.username}`,
+        },
+      );
+
+      res
+        .status(
+          201,
+        )
+        .json(
+          {
+            message:
+              "Clearing request initiated for Super Admin approval.",
+            clearingReq,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Initiate Clearing Error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Failed to initiate clearing request.",
+          },
+        );
+    }
+  };
+
+// 2. Super Admin Approves Clearing Request (or God Admin)
+exports.approveClearing =
+  async (
+    req,
+    res,
+  ) => {
+    const systemState =
+      await SystemState.findOne(
+        {
+          key: "MASTER_STATE",
+        },
+      );
+
+    if (
+      systemState &&
+      systemState.payoutsLocked
+    ) {
+      return res
+        .status(
+          503,
+        )
+        .json(
+          {
+            message:
+              "CRITICAL ALERT: Treasury operations are currently locked by the automated security protocol. Contact Engineering.",
+          },
+        );
+    }
+
+    try {
+      const {
+        requestId,
+        depositConfirmed,
+      } =
+        req.body;
+      const adminId =
+        req
+          .user
+          ._id;
+      const adminRole =
+        req
+          .user
+          .adminRole;
+
+      if (
+        adminRole ===
+        "MODERATE_ADMIN"
+      ) {
+        return res
+          .status(
+            403,
+          )
+          .json(
+            {
+              message:
+                "Forbidden: Moderate Admins cannot approve clearings.",
+            },
+          );
+      }
+      if (
+        !depositConfirmed
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Confirmation checkbox required.",
+            },
+          );
+      }
+
+      const clearingReq =
+        await ClearingRequest.findById(
+          requestId,
+        )
+          .populate(
+            "creator",
+          )
+          .populate(
+            "wallet",
+          );
+      if (
+        !clearingReq ||
+        clearingReq.status !==
+          "PENDING_APPROVAL"
+      ) {
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "Pending clearing request not found.",
+            },
+          );
+      }
+
+      // Four-Eyes Rule
+      if (
+        clearingReq.initiatedBy.toString() ===
+          adminId.toString() &&
+        adminRole !==
+          "GOD_ADMIN"
+      ) {
+        return res
+          .status(
+            403,
+          )
+          .json(
+            {
+              message:
+                "Four-Eyes Violation: You cannot approve a request you initiated.",
+            },
+          );
+      }
+
+      const wallet =
+        clearingReq.wallet;
+      const creator =
+        clearingReq.creator;
+
+      let txStatus =
+        "PENDING"; // Default for Fiat (waits for CSV batch)
+      let signatureMetadata =
+        {};
+
+      // --- CRYPTO LIQUIDITY CHECK & VOUCHER GENERATION ---
+      if (
+        clearingReq.payoutMethod ===
+        "crypto"
+      ) {
+        const provider =
+          new ethers.JsonRpcProvider(
+            process
+              .env
+              .POLYGON_RPC_URL,
+          );
+        const usdtContract =
+          new ethers.Contract(
+            process
+              .env
+              .USDT_ADDRESS,
+            [
+              "function balanceOf(address) view returns (uint256)",
+            ],
+            provider,
+          );
+
+        // 1. Calculate Effective Liquidity
+        const rawBalance =
+          await usdtContract.balanceOf(
+            process
+              .env
+              .NIPPY_TREASURY_PAYOUT,
+          );
+        const actualBalanceUSDT =
+          Number(
+            ethers.formatUnits(
+              rawBalance,
+              6,
+            ),
+          );
+
+        const outstandingClaims =
+          await Transaction.aggregate(
+            [
+              {
+                $match:
+                  {
+                    status:
+                      "PENDING_CLAIM",
+                    currency:
+                      "USDT",
+                  },
+              },
+              {
+                $group:
+                  {
+                    _id: null,
+                    totalLocked:
+                      {
+                        $sum: "$amount",
+                      },
+                  },
+              },
+            ],
+          );
+
+        const lockedLiquidity =
+          outstandingClaims.length >
+          0
+            ? outstandingClaims[0]
+                .totalLocked
+            : 0;
+        const effectiveAvailable =
+          actualBalanceUSDT -
+          lockedLiquidity;
+
+        if (
+          clearingReq.amount >
+          effectiveAvailable
+        ) {
+          return res
+            .status(
+              400,
+            )
+            .json(
+              {
+                message: `Insufficient treasury liquidity. Only ${effectiveAvailable.toFixed(2)} USDT remains uncommitted. Top up the smart contract.`,
+              },
+            );
+        }
+
+        // 2. Generate EIP-712 Voucher with 23-Hour Time-Bomb
+        const walletSigner =
+          new ethers.Wallet(
+            process
+              .env
+              .BACKEND_SIGNER_PRIVATE_KEY,
+          );
+        const nonce =
+          ethers.hexlify(
+            ethers.randomBytes(
+              32,
+            ),
+          );
+        const amountInWei =
+          ethers.parseUnits(
+            clearingReq.amount.toString(),
+            6,
+          );
+
+        // Calculate Unix timestamp for 23 hours from now
+        const deadline =
+          Math.floor(
+            Date.now() /
+              1000,
+          ) +
+          23 *
+            60 *
+            60;
+
+        const domain =
+          {
+            name: "NippyPayouts",
+            version:
+              "1",
+            chainId:
+              parseInt(
+                process
+                  .env
+                  .POLYGON_CHAIN_ID ||
+                  "80002",
+              ),
+            verifyingContract:
+              process
+                .env
+                .NIPPY_TREASURY_PAYOUT,
+          };
+
+        const types =
+          {
+            Claim:
+              [
+                {
+                  name: "creator",
+                  type: "address",
+                },
+                {
+                  name: "amount",
+                  type: "uint256",
+                },
+                {
+                  name: "nonce",
+                  type: "bytes32",
+                },
+                {
+                  name: "deadline",
+                  type: "uint256",
+                }, // <-- INJECTED DEADLINE
+              ],
+          };
+
+        const message =
+          {
+            creator:
+              creator.payoutAddress ||
+              creator.walletAddress,
+            amount:
+              amountInWei,
+            nonce:
+              nonce,
+            deadline:
+              deadline, // <-- INJECTED DEADLINE
+          };
+
+        const signature =
+          await walletSigner.signTypedData(
+            domain,
+            types,
+            message,
+          );
+
+        txStatus =
+          "PENDING_CLAIM";
+        signatureMetadata =
+          {
+            nonce,
+            signature,
+            deadline,
+            amountInWei:
+              amountInWei.toString(),
+          };
+
+        await sendAccountsCryptoPayoutEmail(
+          {
+            creatorUsername:
+              creator.username,
+            walletAddress:
+              creator.payoutAddress ||
+              creator.walletAddress,
+            amountUSDT:
+              clearingReq.amount,
+            requestId:
+              clearingReq._id,
+            approvedByAdmin:
+              adminId,
+          },
+        );
+      }
+
+      // --- EXECUTE BALANCE TRANSFERS ---
+      if (
+        clearingReq.direction ===
+        "USDT_TO_NGN"
+      ) {
+        wallet.fiatBalances.floating.NGN =
+          Math.max(
+            0,
+            (wallet
+              .fiatBalances
+              .floating
+              .NGN ||
+              0) -
+              clearingReq.amount,
+          );
+        wallet.fiatBalances.withdrawable.NGN =
+          (wallet
+            .fiatBalances
+            .withdrawable
+            .NGN ||
+            0) +
+          clearingReq.amount;
+      } else if (
+        clearingReq.direction ===
+        "NGN_TO_USDT"
+      ) {
+        wallet.fiatBalances.floating.USDT =
+          Math.max(
+            0,
+            (wallet
+              .fiatBalances
+              .floating
+              .USDT ||
+              0) -
+              clearingReq.amount,
+          );
+        wallet.fiatBalances.withdrawable.USDT =
+          (wallet
+            .fiatBalances
+            .withdrawable
+            .USDT ||
+            0) +
+          clearingReq.amount;
+      }
+
+      // --- MINT LEDGER RECEIPT ---
+      const ledgerEntry =
+        await Transaction.create(
+          {
+            user: creator._id,
+            wallet:
+              wallet._id,
+            type: "LIQUIDATION",
+            status:
+              txStatus,
+            amount:
+              clearingReq.amount,
+            currency:
+              clearingReq.currency,
+            isSwap: true,
+            swapDetails:
+              {
+                fromCurrency:
+                  clearingReq.direction ===
+                  "USDT_TO_NGN"
+                    ? "USDT"
+                    : "NGN",
+                toCurrency:
+                  clearingReq.direction ===
+                  "USDT_TO_NGN"
+                    ? "NGN"
+                    : "USDT",
+              },
+            authorizedByAdmin:
+              adminId,
+            clearingRequestId:
+              clearingReq._id,
+            metadata:
+              {
+                payoutMethod:
+                  clearingReq.payoutMethod,
+                ipAddress:
+                  req.ip,
+                ...signatureMetadata,
+              },
+          },
+        );
+
+      await wallet.save();
+      clearingReq.status =
+        "APPROVED";
+      clearingReq.approvedBy =
+        adminId;
+      await clearingReq.save();
+
+      await SystemLog.create(
+        {
+          adminId,
+          action:
+            "APPROVED_CLEARING_REQUEST",
+          targetUserId:
+            creator._id,
+          details: `Approved clearing of ${clearingReq.amount} ${clearingReq.currency}. Payout method: ${clearingReq.payoutMethod}`,
+        },
+      );
+
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            message:
+              "Clearing approved and processed successfully.",
+            clearingReq,
+            ledgerEntry,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Approve Clearing Error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Failed to approve clearing request.",
+          },
+        );
+    }
+  };
+
+// 3. God Admin Instant Execution Bypass
+exports.godAdminInstantClear =
+  async (
+    req,
+    res,
+  ) => {
+    const systemState =
+      await SystemState.findOne(
+        {
+          key: "MASTER_STATE",
+        },
+      );
+
+    if (
+      systemState &&
+      systemState.payoutsLocked
+    ) {
+      return res
+        .status(
+          503,
+        )
+        .json(
+          {
+            message:
+              "CRITICAL ALERT: Treasury operations are currently locked by the automated security protocol. Contact Engineering.",
+          },
+        );
+    }
+
+    try {
+      const {
+        creatorId,
+        amount,
+        currency,
+        direction,
+        depositConfirmed,
+      } =
+        req.body;
+      const adminId =
+        req
+          .user
+          ._id;
+
+      if (
+        req
+          .user
+          .adminRole !==
+        "GOD_ADMIN"
+      ) {
+        return res
+          .status(
+            403,
+          )
+          .json(
+            {
+              message:
+                "Forbidden: Requires God Admin privileges.",
+            },
+          );
+      }
+      if (
+        !depositConfirmed
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Confirmation checkbox required.",
+            },
+          );
+      }
+
+      const creator =
+        await User.findById(
+          creatorId,
+        );
+      const wallet =
+        await Wallet.findOne(
+          {
+            creator:
+              creatorId,
+          },
+        );
+      if (
+        !creator ||
+        !wallet
+      )
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "Creator/Wallet not found.",
+            },
+          );
+
+      let txStatus =
+        "PENDING";
+      let signatureMetadata =
+        {};
+
+      // --- CRYPTO LIQUIDITY CHECK & VOUCHER GENERATION ---
+      if (
+        creator.payoutMethod ===
+        "crypto"
+      ) {
+        const provider =
+          new ethers.JsonRpcProvider(
+            process
+              .env
+              .POLYGON_RPC_URL,
+          );
+        const usdtContract =
+          new ethers.Contract(
+            process
+              .env
+              .USDT_ADDRESS,
+            [
+              "function balanceOf(address) view returns (uint256)",
+            ],
+            provider,
+          );
+
+        const rawBalance =
+          await usdtContract.balanceOf(
+            process
+              .env
+              .NIPPY_TREASURY_PAYOUT,
+          );
+        const actualBalanceUSDT =
+          Number(
+            ethers.formatUnits(
+              rawBalance,
+              6,
+            ),
+          );
+
+        const outstandingClaims =
+          await Transaction.aggregate(
+            [
+              {
+                $match:
+                  {
+                    status:
+                      "PENDING_CLAIM",
+                    currency:
+                      "USDT",
+                  },
+              },
+              {
+                $group:
+                  {
+                    _id: null,
+                    totalLocked:
+                      {
+                        $sum: "$amount",
+                      },
+                  },
+              },
+            ],
+          );
+
+        const lockedLiquidity =
+          outstandingClaims.length >
+          0
+            ? outstandingClaims[0]
+                .totalLocked
+            : 0;
+        const effectiveAvailable =
+          actualBalanceUSDT -
+          lockedLiquidity;
+
+        if (
+          amount >
+          effectiveAvailable
+        ) {
+          return res
+            .status(
+              400,
+            )
+            .json(
+              {
+                message: `Insufficient treasury liquidity. Only ${effectiveAvailable.toFixed(2)} USDT remains uncommitted. Top up the smart contract.`,
+              },
+            );
+        }
+
+        // Generate EIP-712 Voucher with 23-Hour Time-Bomb
+        const walletSigner =
+          new ethers.Wallet(
+            process
+              .env
+              .BACKEND_SIGNER_PRIVATE_KEY,
+          );
+        const nonce =
+          ethers.hexlify(
+            ethers.randomBytes(
+              32,
+            ),
+          );
+        const amountInWei =
+          ethers.parseUnits(
+            amount.toString(),
+            6,
+          );
+        const deadline =
+          Math.floor(
+            Date.now() /
+              1000,
+          ) +
+          23 *
+            60 *
+            60;
+
+        const domain =
+          {
+            name: "NippyPayouts",
+            version:
+              "1",
+            chainId:
+              parseInt(
+                process
+                  .env
+                  .POLYGON_CHAIN_ID ||
+                  "80002",
+              ),
+            verifyingContract:
+              process
+                .env
+                .NIPPY_TREASURY_PAYOUT,
+          };
+
+        const types =
+          {
+            Claim:
+              [
+                {
+                  name: "creator",
+                  type: "address",
+                },
+                {
+                  name: "amount",
+                  type: "uint256",
+                },
+                {
+                  name: "nonce",
+                  type: "bytes32",
+                },
+                {
+                  name: "deadline",
+                  type: "uint256",
+                }, // <-- INJECTED DEADLINE
+              ],
+          };
+
+        const message =
+          {
+            creator:
+              creator.payoutAddress ||
+              creator.walletAddress,
+            amount:
+              amountInWei,
+            nonce:
+              nonce,
+            deadline:
+              deadline, // <-- INJECTED DEADLINE
+          };
+
+        const signature =
+          await walletSigner.signTypedData(
+            domain,
+            types,
+            message,
+          );
+
+        txStatus =
+          "PENDING_CLAIM";
+        signatureMetadata =
+          {
+            nonce,
+            signature,
+            deadline,
+            amountInWei:
+              amountInWei.toString(),
+          };
+
+        await sendAccountsCryptoPayoutEmail(
+          {
+            creatorUsername:
+              creator.username,
+            walletAddress:
+              creator.payoutAddress ||
+              creator.walletAddress,
+            amountUSDT:
+              amount,
+            requestId:
+              "GOD_BYPASS_" +
+              Date.now(),
+            approvedByAdmin:
+              adminId,
+          },
+        );
+      }
+
+      // --- EXECUTE BALANCE TRANSFERS ---
+      if (
+        direction ===
+        "USDT_TO_NGN"
+      ) {
+        wallet.fiatBalances.floating.NGN =
+          Math.max(
+            0,
+            (wallet
+              .fiatBalances
+              .floating
+              .NGN ||
+              0) -
+              amount,
+          );
+        wallet.fiatBalances.withdrawable.NGN =
+          (wallet
+            .fiatBalances
+            .withdrawable
+            .NGN ||
+            0) +
+          amount;
+      } else {
+        wallet.fiatBalances.floating.USDT =
+          Math.max(
+            0,
+            (wallet
+              .fiatBalances
+              .floating
+              .USDT ||
+              0) -
+              amount,
+          );
+        wallet.fiatBalances.withdrawable.USDT =
+          (wallet
+            .fiatBalances
+            .withdrawable
+            .USDT ||
+            0) +
+          amount;
+      }
+
+      // --- MINT LEDGER RECEIPT ---
+      const ledgerEntry =
+        await Transaction.create(
+          {
+            user: creator._id,
+            wallet:
+              wallet._id,
+            type: "LIQUIDATION",
+            status:
+              txStatus,
+            amount:
+              amount,
+            currency:
+              currency,
+            isSwap: true,
+            swapDetails:
+              {
+                fromCurrency:
+                  direction ===
+                  "USDT_TO_NGN"
+                    ? "USDT"
+                    : "NGN",
+                toCurrency:
+                  direction ===
+                  "USDT_TO_NGN"
+                    ? "NGN"
+                    : "USDT",
+              },
+            authorizedByAdmin:
+              adminId,
+            metadata:
+              {
+                payoutMethod:
+                  creator.payoutMethod,
+                ipAddress:
+                  req.ip,
+                ...signatureMetadata,
+              },
+          },
+        );
+
+      await wallet.save();
+
+      await SystemLog.create(
+        {
+          adminId,
+          action:
+            "GOD_ADMIN_INSTANT_CLEAR",
+          targetUserId:
+            creatorId,
+          details: `God Admin instantly cleared ${amount} ${currency} for ${creator.username}`,
+        },
+      );
+
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            message:
+              "Instant clearing executed by God Admin.",
+            wallet,
+            ledgerEntry,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "God Clear Error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Failed to execute instant clear.",
+          },
+        );
+    }
+  };
+
+exports.getPendingClearings =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const clearings =
+        await ClearingRequest.find(
+          {
+            status:
+              "PENDING_APPROVAL",
+          },
+        )
+          .populate(
+            "creator",
+            "username email",
+          )
+          .sort(
+            {
+              createdAt:
+                -1,
+            },
+          );
+      res
+        .status(
+          200,
+        )
+        .json(
+          clearings,
+        );
+    } catch (error) {
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Failed to fetch clearings",
           },
         );
     }

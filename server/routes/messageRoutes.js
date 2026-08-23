@@ -4,6 +4,7 @@ const router =
 const multer = require("multer");
 const {
   requireAuth,
+  requireAgeVerified,
 } = require("../middleware/authMiddleware");
 const {
   sendMessage,

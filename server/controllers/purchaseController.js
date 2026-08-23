@@ -13,6 +13,11 @@ const {
   convertAndRoundPrice,
   getExchangeRates,
 } = require("../utils/currencyConversion");
+const {
+  generateLiquidationQuote,
+} = require("../utils/p2pLiquidity");
+
+
 
 const {
   S3Client,
@@ -428,6 +433,59 @@ exports.verifyPayment =
             );
       }
 
+      // =================================================================
+      // 2.5 SECURITY CHECK: THE AGE VERIFICATION ENFORCER
+      // =================================================================
+      // We pull a fresh copy of the fan from the DB to prevent stale JWT token bypasses
+      const fan =
+        await User.findById(
+          buyerId,
+        ).select(
+          "isAgeVerified",
+        );
+
+      let requiresAgeCheck = false;
+      if (
+        normalizedPurchaseType ===
+          "PPV" ||
+        normalizedPurchaseType ===
+          "DM_UNLOCK"
+      ) {
+        // For individual items, check the item first. If undefined, fallback to the creator's general setting.
+        requiresAgeCheck =
+          content.isNsfw ===
+            true ||
+          creator.willingNsfw ===
+            true;
+      } else if (
+        normalizedPurchaseType ===
+          "SUBSCRIPTION" ||
+        normalizedPurchaseType ===
+          "CHAT_BUNDLE"
+      ) {
+        // For broad access items, check if the creator is known to produce NSFW content.
+        requiresAgeCheck =
+          creator.willingNsfw ===
+          true;
+      }
+
+      if (
+        requiresAgeCheck &&
+        !fan.isAgeVerified
+      ) {
+        return res
+          .status(
+            403,
+          )
+          .json(
+            {
+              message:
+                "SECURITY BLOCK: Age verification required. Explicit content cannot be unlocked without a verified ID.",
+            },
+          );
+      }
+      // =================================================================
+
       // FRAUD CHECK: Ensure the rawAmount provided by the frontend matches the actual DB base price
       // We allow a tiny 2% margin of error for floating point calculations.
       if (
@@ -637,10 +695,11 @@ exports.verifyPayment =
             );
         }
 
+        // THE FIX: Update the signature to match our new Profit Skim architecture (5 arguments)
         const iface =
           new ethers.Interface(
             [
-              "function purchaseWithERC20(address token, address creator, bytes32 contentId, uint256 price)",
+              "function purchaseWithERC20(address token, address creator, bytes32 contentId, uint256 rawBasePrice, uint256 chargeAmount)",
             ],
           );
 
@@ -669,11 +728,13 @@ exports.verifyPayment =
           decoded.args[0].toLowerCase();
         const actualRecipient =
           decoded.args[1].toLowerCase();
+
+        // THE FIX: Extract the amount from args[4] (the 5th parameter: chargeAmount)
         const transferredUSDT =
           Number(
             ethers.formatUnits(
               decoded
-                .args[3],
+                .args[4],
               6,
             ),
           );
@@ -692,6 +753,7 @@ exports.verifyPayment =
                   "Fraud: Incorrect token used.",
               },
             );
+
         if (
           actualRecipient !==
           expectedWallet
@@ -707,7 +769,6 @@ exports.verifyPayment =
               },
             );
 
-        // Because USDT is pegged to USD, the transferred amount MUST cover the base dbBasePrice at minimum.
         if (
           transferredUSDT <
           dbBasePrice *
@@ -1308,7 +1369,7 @@ exports.getFanDashboard =
                     s3,
                     command,
                     {
-                      expiresIn: 3600,
+                      expiresIn: 600,
                     },
                   );
                 return {
@@ -1390,8 +1451,10 @@ exports.getCryptoQuote =
     res,
   ) => {
     try {
+      // THE FIX: We now accept BOTH the Fan's bloated price and the Creator's true base price
       const {
         amountUSD,
+        rawAmountUSD,
       } =
         req.body;
 
@@ -1427,16 +1490,12 @@ exports.getCryptoQuote =
               "https://api.bybit.com/v5/market/tickers?category=spot&symbol=USDTUSD",
             );
           if (
-            response.data &&
             response
               .data
-              .result &&
-            response
-              .data
-              .result
-              .list
-              .length >
-              0
+              ?.result
+              ?.list
+              ?.length >
+            0
           ) {
             cachedUsdtRate =
               parseFloat(
@@ -1464,12 +1523,25 @@ exports.getCryptoQuote =
         }
       }
 
+      // Convert both prices to USDT
       const requiredUSDT =
         amountUSD /
         cachedUsdtRate;
-      const formattedUSDT =
+      const rawUSDT =
+        (rawAmountUSD ||
+          amountUSD) /
+        cachedUsdtRate;
+
+      // Ceil to 4 decimal places for precision
+      const formattedRequiredUSDT =
         Math.ceil(
           requiredUSDT *
+            10000,
+        ) /
+        10000;
+      const formattedRawUSDT =
+        Math.ceil(
+          rawUSDT *
             10000,
         ) /
         10000;
@@ -1484,7 +1556,9 @@ exports.getCryptoQuote =
             amountUSD:
               amountUSD,
             requiredUSDT:
-              formattedUSDT,
+              formattedRequiredUSDT, // e.g., 3.50 (Fan pays this)
+            rawUSDT:
+              formattedRawUSDT, // e.g., 3.33 (Smart contract uses this for the 80% split)
             rateUsed:
               cachedUsdtRate,
             expiresAt:
@@ -1513,13 +1587,57 @@ exports.getCryptoQuote =
   };
 
 // GET /api/exchange-rates
-exports.getLiveExchangeRates = async (req, res) => {
+exports.getLiveExchangeRates =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const rates =
+        await getExchangeRates();
+      res
+        .status(
+          200,
+        )
+        .json(
+          rates,
+        );
+    } catch (error) {
+      console.error(
+        "Failed to fetch rates:",
+        error,
+      );
+      // Ultimate backend fallback
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            USD: 1,
+            NGN: 1500,
+            EUR: 0.92,
+            GBP: 0.79,
+          },
+        );
+    }
+  };
+
+
+exports.getLiquidationQuote = async (req, res) => {
   try {
-    const rates = await getExchangeRates();
-    res.status(200).json(rates);
+    const { amount, direction } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: "Invalid amount." });
+    }
+
+    // Generate the quote with a 3% protective spread
+    const quote = await generateLiquidationQuote(amount, direction, 0.03);
+
+    res.status(200).json(quote);
   } catch (error) {
-    console.error("Failed to fetch rates:", error);
-    // Ultimate backend fallback
-    res.status(500).json({ USD: 1, NGN: 1500, EUR: 0.92, GBP: 0.79 }); 
+    console.error("Quote Error:", error);
+    res.status(500).json({ message: "Failed to generate execution quote." });
   }
 };

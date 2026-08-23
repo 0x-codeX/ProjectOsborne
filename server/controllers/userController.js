@@ -265,6 +265,24 @@ exports.submitBioData =
                   "Email is already in use by another account.",
               },
             );
+            if (
+              req
+                .body
+                .isAgeVerified !==
+              undefined
+            )
+              delete req
+                .body
+                .isAgeVerified;
+            if (
+              req
+                .body
+                .ageVerification !==
+              undefined
+            )
+              delete req
+                .body
+                .ageVerification;
       }
 
       // --- CURRENCY HYBRID STRATEGY LOGIC ---
@@ -307,12 +325,12 @@ exports.submitBioData =
               gender,
               country,
               preferredCurrency:
-                finalCurrency, // <-- SAVED
+                finalCurrency,
               referredBy,
               willingNsfw,
               agreedTerms,
               confirmedAge,
-              isAgeVerified,
+              // REMOVED: isAgeVerified - Fans can NEVER update this themselves
               subscribeEmails,
               hasCompletedBioData: true,
               profileImage,

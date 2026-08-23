@@ -36,8 +36,21 @@ The project already has a meaningful working base in these areas:
 - Cloudflare R2 / S3-style asset handling for private/public media
 - Background workers for treasury and test data
 - Admin dashboard with user management and support ticketing
+- Three-currency preference and display flow for `NGN`, `GHS`, and `USD`
+- Cached exchange-rate conversion with fallback rates and upward half-unit rounding
+- P2P USDT/NGN liquidation quotes with a configurable spread and five-minute expiry
+- Authenticated Didit age-verification session, status, callback, and restricted-content gate
 
 The app is not just scaffolded. It has real backend controllers, models, routes, and web3 integration logic already wired together.
+
+### Current implementation snapshot (2026-08-22)
+
+- `User.preferredCurrency` is constrained to `NGN`, `GHS`, or `USD`; country is used only for the initial suggestion.
+- `server/utils/currencyConversion.js` resolves currencies, caches live rates for one hour, falls back to configured rates, and returns rounded display and Paystack NGN amounts.
+- `server/utils/p2pLiquidity.js` fetches the Monierate parallel USDT/NGN rate, falls back to a configured treasury rate, and generates five-minute buy/sell quotes with a spread.
+- `server/routes/ageVerificationRoutes.js` exposes authenticated `/start` and `/status` endpoints plus a public provider webhook. The webhook updates the user's verification state and one-year expiry after an approved result.
+- The age-verification frontend includes `AgeVerificationGate.jsx` and `VerificationCallback.jsx`; the general `AgeGateway.jsx` acknowledgment remains separate from provider-backed eligibility.
+- The web3 listener is currently disabled during Livepeer stabilization; it must be re-enabled and tested before production payments.
 
 ## 2.5 Production Status & Risk Assessment
 
@@ -2688,6 +2701,8 @@ This section shows the complete data flow for different purchase scenarios:
 
 ## 17. Currency and price-rounding consolidation plan
 
+**Implementation status (2026-08-22):** The initial three-currency implementation is active. Creator prices remain stored in their source/base currency, while fan-facing values are converted through the shared backend utility. The remaining work is to finish quote identity and server-side payment binding so a client cannot substitute an amount or stale rate.
+
 **Authority note:** This section supersedes the earlier Section 13 currency proposal where the two conflict. The current scope is `NGN`, `GHS`, and `USD`, with creator and fan preferences persisted independently.
 
 ### Product intent
@@ -2778,15 +2793,12 @@ For currencies where a half-unit is not appropriate in the future, make the incr
 - `server/controllers/earningsController.js`, `server/models/Wallet.js`, and `server/models/Withdrawal.js` - decide whether balances are stored in creator currency or one settlement currency, then convert only at reporting/withdrawal boundaries and show the currency on every amount.
 - `server/controllers/streamController.js` and `server/models/Stream.js` - inspect live-gift pricing because it currently has a separate `priceNGN` path.
 
-### Suggested implementation order
+### Remaining implementation order
 
-1. Inventory all price fields and classify each as creator input, fan display, payment charge, or creator settlement. Resolve legacy `priceInUSDT`, `price`, `priceNGN`, `fiatCurrency`, and `baseCurrency` before adding more fields.
-2. Add the supported-currency configuration, `preferredCurrency`, country suggestion helper, conversion cache, quote shape, formatter, and one round-up utility.
-3. Add settings APIs and UI so a fan or creator can select and persist `NGN`, `GHS`, or `USD`.
-4. Convert feed, public profile, subscriptions, bundles, DM unlocks, streams, and vault surfaces to server-generated quotes.
-5. Make Paystack and Web3 consume the exact server quote, then make purchase verification recompute and audit it.
-6. Update earnings and withdrawals to show explicit settlement currency and platform margin.
-7. Add tests for all currency pairs, rounding boundaries, preference persistence, stale rates, payment mismatch rejection, and legacy-account migration.
+1. Inventory and migrate legacy price fields so every creator price has an explicit source currency.
+2. Bind Paystack and Web3 payments to a server-created quote or quote snapshot, then reject stale or substituted amounts during verification.
+3. Apply the shared quote contract consistently to subscriptions, bundles, DM unlocks, streams, vault surfaces, and withdrawals.
+4. Add tests for all supported currency pairs, rounding boundaries, preference persistence, stale rates, payment mismatch rejection, and legacy-account migration.
 
 ### Acceptance criteria
 
@@ -2798,6 +2810,171 @@ For currencies where a half-unit is not appropriate in the future, make the incr
 - Rounding is always upward to the nearest `0.50` or `0.00` for the initial three currencies and is covered by boundary tests.
 - No frontend file contains a hardcoded exchange rate or a second rounding implementation.
 - Adding a fourth currency requires changing configuration and provider/fallback data, not rewriting every component.
+
+---
+
+## 18. Fan age-verification pre-gate for restricted content
+
+**Implementation status (2026-08-22):** The authenticated Didit flow and frontend callback page are present. The current implementation still requires production hardening: validate the provider webhook signature and session binding, complete the bypass policy, and verify every restricted purchase server-side before fulfillment.
+
+**Authority note:** This section defines the required age-verification flow for fan purchases of NSFW/explicit content. It is separate from the general site-entry age acknowledgment in `AgeGateway.jsx`. The purchase pre-gate must complete before any Web3 wallet approval, gateway transaction, Paystack initialization, or other charge.
+
+### Product and safety objective
+
+When a fan selects an NSFW/explicit post, bundle, stream item, or locked message, Nippy must verify that the fan is eligible to receive adult content before accepting payment. The platform must never take crypto or fiat payment from an unverified fan and only then ask for age verification. If verification fails or is abandoned, no payment transaction may have started and no purchase record may be marked complete.
+
+The experience should be:
+
+1. Fan sees a blurred/restricted NSFW item and its price.
+2. Fan clicks `Unlock`.
+3. The frontend checks the authenticated user's server-backed `isAgeVerified` state.
+4. If verified, the normal payment modal opens.
+5. If not verified, an age-verification pre-gate modal opens instead of the payment modal.
+6. The fan chooses an approved verification method, such as an anonymous age-assurance provider or an approved card-based age check.
+7. The provider completes its callback/webhook flow and the server marks the fan verified only after validating the provider result.
+8. The frontend refreshes the user profile, closes the pre-gate, and opens checkout only after `isAgeVerified === true`.
+9. The fan pays, the backend verifies the payment, and the content unlocks.
+
+The current scope is fan eligibility. Creator KYC remains a separate compliance and payout requirement. Do not use creator KYC status as a substitute for fan age verification.
+
+### Existing files and current risks
+
+- `client/src/components/AgeGateway.jsx` is only a site-entry self-attestation stored as `nippy_age_verified` in localStorage. It must not be treated as sufficient proof for an NSFW purchase.
+- `client/src/components/FanBiodata.jsx` currently writes `isAgeVerified: true` during fan setup. This is a critical trust-boundary issue: completing a profile or checking a box must not grant verified purchase eligibility.
+- `client/src/components/BioDataSetup.jsx` also handles `isAgeVerified` fields and must not accidentally grant a fan-level verification state.
+- `client/src/components/LandingPage.jsx` and `client/src/components/OAuthSuccess.jsx` route based on `isAgeVerified`; inspect these paths so they distinguish onboarding/entry state from provider-verified adult-content eligibility.
+- `client/src/components/FanFeed.jsx` and `client/src/components/BookmarksFeed.jsx` contain `openPaymentModal`/unlock paths. These are the primary pre-gate insertion points.
+- `client/src/components/FanChatWindow.jsx`, `client/src/pages/ChatWindow.jsx`, `client/src/components/LivePlayer.jsx`, and any subscription/live-gift surface must apply the same pre-gate before an NSFW purchase or unlock.
+- `server/models/User.js` already has `isAgeVerified`, but the schema needs an auditable verification source, provider reference, verification timestamp, expiry/reverification policy, and failure/status fields.
+- `server/controllers/userController.js` accepts onboarding/profile fields including age state. It must reject client attempts to set `isAgeVerified` and expose a safe authenticated status endpoint.
+- `server/controllers/authController.js` initializes age state during registration/login. Inspect it to ensure it does not infer provider verification from age acknowledgment, role, wallet login, or country.
+- `server/controllers/kycController.js` currently starts a Didit session from a client-supplied `userId` and is not clearly scoped to the authenticated user. It is creator-KYC-oriented and must not be reused for fan age verification without a separate, authenticated age-verification flow.
+- `server/routes/authRoutes.js` currently exposes `/kyc/start-session` without `requireAuth`. Do not attach a fan age flow to this route as-is; create protected routes with server-derived identity.
+- `server/controllers/purchaseController.js`, `server/routes/purchaseRoutes.js`, and payment verification logic must enforce the server-side NSFW eligibility check as a second boundary. The frontend pre-gate improves UX, but it is not a security control by itself.
+- `client/src/hooks/useWeb3Transfer.js` must only be called after the pre-gate resolves. The hook should not own age verification, but it must not be invoked by an unverified NSFW path.
+
+### Required backend design
+
+#### User verification state
+
+Keep `isAgeVerified` as the simple eligibility flag if existing clients depend on it, but add explicit audit fields to `server/models/User.js`:
+
+```javascript
+ageVerification: {
+  status: "unverified" | "pending" | "verified" | "failed" | "expired",
+  method: "provider_name" | "card_age_assurance" | null,
+  providerReference: String,
+  verifiedAt: Date,
+  expiresAt: Date,
+  lastFailureReason: String
+}
+```
+
+The exact provider and retention policy must be decided with legal/compliance advice. Store the minimum provider result needed to prove eligibility; do not store raw identity documents or unnecessary biometric data in Nippy.
+
+#### Protected routes and controller responsibilities
+
+Add a dedicated controller/route boundary, for example:
+
+- `POST /api/age-verification/start` - authenticated fan only; derive the user from `req.user`, never accept an arbitrary `userId` from the browser.
+- `GET /api/age-verification/status` - authenticated; returns safe status and whether the user may purchase restricted content.
+- `POST /api/age-verification/webhook` - public provider callback, but validate the provider signature, event type, session ID, and stored user/provider reference before changing a user.
+- `POST /api/age-verification/refresh` - optional authenticated endpoint to refresh status after the provider redirects back to the client.
+
+Likely backend files:
+
+- `server/controllers/ageVerificationController.js` (new) - start session, return status, process signed webhook, handle expiration/failure.
+- `server/routes/ageVerificationRoutes.js` (new) - protected start/status routes and public signed webhook route.
+- `server/server.js` - mount the route and ensure webhook raw-body/signature requirements are preserved if the provider requires them.
+- `server/middleware/authMiddleware.js` - reuse `requireAuth`; add a narrow `requireAgeVerified` middleware for server operations that must never proceed without eligibility.
+- `server/models/User.js` - add the auditable verification state and prevent profile endpoints from setting it directly.
+- `server/controllers/userController.js` - strip/reject `isAgeVerified` and `ageVerification` mutations from profile/biodata requests.
+- `server/controllers/authController.js` - return verification status in safe user responses without treating it as client-controlled data.
+
+#### Payment enforcement
+
+`server/controllers/purchaseController.js` must determine whether the requested resource is restricted by loading the authoritative `Content`, `Message`, subscription, or stream record. For an NSFW purchase, reject before payment verification/fulfillment unless the current database user has a valid verified status. The check must be repeated for fiat and crypto flows.
+
+The purchase request should carry a server-created quote or resource identifier, not a frontend assertion such as `isAgeVerified: true`. The backend must:
+
+- resolve the authenticated fan from the JWT;
+- load the content and its `isNsfw`/restriction state;
+- check `ageVerification.status`, `verifiedAt`, and `expiresAt`;
+- reject with a clear verification-required response before accepting or fulfilling payment;
+- only after verification passes, validate the currency quote and payment amount;
+- preserve an audit record showing that age eligibility was valid at purchase time.
+
+For defense in depth, the payment gateway contract cannot know Nippy's database age state. Therefore the backend must never treat an on-chain transfer as permission to unlock restricted content by itself. A verified payment from an ineligible fan must be held/rejected according to the refund policy, and the product must avoid creating that situation by enforcing the pre-gate before checkout.
+
+### Required frontend design
+
+#### New components and shared state
+
+- `client/src/components/AgeVerificationGate.jsx` (new) - modal or route-level dialog explaining why verification is required and offering approved methods. It must support loading, pending, success, failure, cancellation, retry, and provider-unavailable states.
+- `client/src/context/AuthContext.jsx` or the existing auth context location - expose authoritative `user.isAgeVerified`/`ageVerification.status`, a `refreshCurrentUser()` function, and a `startAgeVerification()` function if that matches the existing architecture.
+- `client/src/components/VerificationCallback.jsx` or a dedicated page (new) - receives the provider return, asks the backend for the refreshed status, and never marks the user verified from URL parameters alone.
+- `client/src/utils/api.js` - ensure authenticated requests and 401 handling work for the new status/start endpoints.
+
+#### Pre-gate insertion points
+
+Refactor the payment entry point into a shared guard such as `requestRestrictedPurchase(resource)`:
+
+```javascript
+const openPaymentModal = async (item) => {
+  if (item.isNsfw && !currentUser?.isAgeVerified) {
+    setAgeVerificationItem(item);
+    setShowAgeVerificationGate(true);
+    return;
+  }
+
+  setPaymentModalPost(item);
+};
+```
+
+The real implementation must use refreshed server state, not only stale localStorage. After successful provider completion, refresh the authenticated user and only call the original payment opener when the server confirms verification. Do not trigger `useWeb3Transfer`, `usePaystackPayment`, `initializePayment`, or `/api/purchases/verify` from the unverified branch.
+
+Inspect and update:
+
+- `client/src/components/FanFeed.jsx` - primary `openPaymentModal`, PPV unlock, card checkout, crypto quote, and Web3 entry path.
+- `client/src/components/BookmarksFeed.jsx` - duplicate PPV checkout entry path.
+- `client/src/components/FanChatWindow.jsx` and `client/src/pages/ChatWindow.jsx` - DM unlock and bundle-related restricted content.
+- `client/src/components/CreatorPublicProfile.jsx` and `client/src/components/FeedPost.jsx` - ensure restricted previews never bypass the shared guard.
+- `client/src/components/LivePlayer.jsx` - gate NSFW live access/gifts where applicable.
+- `client/src/hooks/useWeb3Transfer.js` - preserve payment-only responsibility; do not embed a second age flow.
+- `client/src/components/AgeGateway.jsx` - keep general site-entry acknowledgment separate from provider-backed purchase eligibility and avoid naming localStorage state as verified proof.
+
+### Verification state machine
+
+```text
+UNVERIFIED
+    │ fan selects restricted content
+    ▼
+PRE_GATE_SHOWN
+    │ selects provider
+    ▼
+PENDING  ───────────────► FAILED / ABANDONED
+    │ signed webhook + status refresh
+    ▼
+VERIFIED ───────────────► EXPIRED (when policy requires)
+    │ server confirms
+    ▼
+PAYMENT_MODAL
+    │ card or Web3 payment
+    ▼
+PURCHASE_VERIFIED_AND_UNLOCKED
+```
+
+### Acceptance criteria
+
+- A fan cannot start a Web3 approval, Web3 purchase, Paystack initialization, or fiat charge for NSFW content while unverified.
+- The pre-gate appears before checkout and clearly explains the verification requirement without promising access before verification succeeds.
+- Completing fan biodata, clicking the 18+ entry button, logging in with Web3, or changing localStorage cannot set verified status.
+- Provider success is accepted only through a validated server callback/status lookup tied to the authenticated user's verification session.
+- The backend repeats the eligibility check before restricted purchase fulfillment for both crypto and fiat paths.
+- A failed, abandoned, expired, or unavailable verification leaves the content locked and creates no completed purchase.
+- A verified fan can complete subsequent restricted purchases without repeating verification until the configured expiry/reverification policy requires it.
+- All NSFW entry points use one shared guard; there are no bypasses in bookmarks, chat, profiles, streams, or alternate payment buttons.
+- Verification events and restricted purchases are auditable without storing unnecessary identity documents.
 
 
 

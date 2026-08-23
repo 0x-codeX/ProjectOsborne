@@ -2,7 +2,8 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import api from "../utils/api"; // <-- Replaced raw Axios
+import { ethers } from "ethers"; // <-- ADDED: Required for Web3 transactions
+import api from "../utils/api";
 import {
   Users,
   Video,
@@ -17,6 +18,17 @@ import {
   ShieldCheck,
   ArrowRight,
 } from "lucide-react";
+
+// THE FIX: Use Vite's import.meta.env instead of Node's process.env
+const PAYOUT_CONTRACT_ADDRESS =
+  import.meta
+    .env
+    .VITE_NIPPY_TREASURY_PAYOUT_ADDRESS;
+
+const PAYOUT_ABI =
+  [
+    "function claimPayout(uint256 amount, bytes32 nonce, uint256 deadline, bytes calldata signature) external",
+  ];
 
 const COUNTRY_TO_CURRENCY =
   {
@@ -109,11 +121,201 @@ const EarningsDashboard =
         "",
       );
     const [
+      liquidationQuote,
+      setLiquidationQuote,
+    ] =
+      useState(
+        null,
+      );
+    const [
       modalSuccess,
       setModalSuccess,
     ] =
       useState(
         "",
+      );
+
+    // --- WEB3 VOUCHER CLAIM STATE & LOGIC ---
+    const [
+      claimingId,
+      setClaimingId,
+    ] =
+      useState(
+        null,
+      );
+
+    const handleClaimPayout =
+      async (
+        withdrawal,
+      ) => {
+        try {
+          setClaimingId(
+            withdrawal._id,
+          );
+          setError(
+            "",
+          );
+
+          if (
+            !window.ethereum
+          ) {
+            alert(
+              "MetaMask wallet is required to claim your payout.",
+            );
+            return;
+          }
+
+          // Multi-wallet extension resolver
+          let targetProvider =
+            window.ethereum;
+          if (
+            window
+              .ethereum
+              .providers
+              ?.length
+          ) {
+            targetProvider =
+              window.ethereum.providers.find(
+                (
+                  p,
+                ) =>
+                  p.isMetaMask,
+              ) ||
+              window
+                .ethereum
+                .providers[0];
+          }
+
+          const provider =
+            new ethers.BrowserProvider(
+              targetProvider,
+            );
+          const signer =
+            await provider.getSigner();
+
+          // Verify user is connected to Polygon Amoy (80002 / 0x13882) or Mainnet (137 / 0x89)
+          const network =
+            await provider.getNetwork();
+          const expectedChainId =
+            BigInt(
+              process
+                .env
+                .REACT_APP_POLYGON_CHAIN_ID ||
+                80002,
+            );
+
+          if (
+            network.chainId !==
+            expectedChainId
+          ) {
+            try {
+              await targetProvider.request(
+                {
+                  method:
+                    "wallet_switchEthereumChain",
+                  params:
+                    [
+                      {
+                        chainId: `0x${expectedChainId.toString(16)}`,
+                      },
+                    ],
+                },
+              );
+            } catch (switchError) {
+              alert(
+                `Please switch your wallet network to Chain ID ${expectedChainId}.`,
+              );
+              return;
+            }
+          }
+
+          // Extract cryptographic voucher parameters saved in Transaction metadata
+          const metadata =
+            withdrawal.metadata ||
+            {};
+          const {
+            nonce,
+            signature,
+            deadline,
+            amountInWei,
+          } =
+            metadata;
+
+          if (
+            !nonce ||
+            !signature ||
+            !deadline
+          ) {
+            alert(
+              "Invalid or missing cryptographic voucher metadata. Please contact support.",
+            );
+            return;
+          }
+
+          const contract =
+            new ethers.Contract(
+              PAYOUT_CONTRACT_ADDRESS,
+              PAYOUT_ABI,
+              signer,
+            );
+
+          // Execute EIP-712 claim on-chain
+          const tx =
+            await contract.claimPayout(
+              amountInWei ||
+                ethers.parseUnits(
+                  withdrawal.amount.toString(),
+                  6,
+                ),
+              nonce,
+              deadline,
+              signature,
+            );
+
+          console.log(
+            "Claim Tx Broadcasted:",
+            tx.hash,
+          );
+          await tx.wait(); // Wait for block confirmation
+
+          alert(
+            "Payout claimed successfully on Polygon!",
+          );
+          fetchDashboardData(); // Refresh UI to update balances and statuses
+        } catch (err) {
+          console.error(
+            "Claim Execution Error:",
+            err,
+          );
+          if (
+            err.code ===
+            "ACTION_REJECTED"
+          ) {
+            alert(
+              "Transaction signature was rejected in MetaMask.",
+            );
+          } else {
+            alert(
+              err.reason ||
+                err.message ||
+                "Failed to execute claim on-chain.",
+            );
+          }
+        } finally {
+          setClaimingId(
+            null,
+          );
+        }
+      };
+
+    const [
+      exchangeRates,
+      setExchangeRates,
+    ] =
+      useState(
+        {
+          NGN: null,
+        },
       );
 
     const fetchDashboardData =
@@ -142,11 +344,12 @@ const EarningsDashboard =
             ] ||
             COUNTRY_TO_CURRENCY.default;
 
-          // IRONCLAD FIX: Used the global API interceptor.
-          // No token grabbing, no headers, no /api prefixes.
+          // IRONCLAD FIX: Added a third request to fetch the live P2P preview rate.
+          // The .catch() ensures the dashboard still loads even if this specific API fails.
           const [
             dashboardRes,
             settingsRes,
+            rateRes,
           ] =
             await Promise.all(
               [
@@ -156,6 +359,17 @@ const EarningsDashboard =
                 api.get(
                   "/users/settings/monetization",
                 ),
+                api
+                  .get(
+                    "/earnings/p2p-rate",
+                  )
+                  .catch(
+                    () => ({
+                      data: {
+                        NGN: 1500,
+                      },
+                    }),
+                  ),
               ],
             );
 
@@ -164,6 +378,17 @@ const EarningsDashboard =
               .data
               ?.baseCurrency ||
             autoCurrency;
+
+          // Store the fetched rate in state so the cards can display it
+          setExchangeRates(
+            {
+              NGN:
+                rateRes
+                  .data
+                  .NGN ||
+                1500,
+            },
+          );
 
           setDashboardData(
             {
@@ -271,13 +496,20 @@ const EarningsDashboard =
         );
       };
 
-    const handleConfirmWithdrawal =
-      async () => {
+    // 1. Intercept the click and calculate the spread via Backend Quote
+    const handleOpenLiquidateModal =
+      async (
+        currency,
+        amount,
+      ) => {
         try {
           setIsSubmitting(
             true,
-          );
+          ); // Re-use submitting state for the loading spinner
           setModalError(
+            "",
+          );
+          setModalSuccess(
             "",
           );
 
@@ -288,25 +520,92 @@ const EarningsDashboard =
               ) ||
                 "{}",
             );
+          const isBankPayout =
+            storedUser.payoutMethod ===
+            "bank";
 
-          // IRONCLAD FIX: Raw Axios and headers removed.
-          await api.post(
-            "/earnings/withdraw",
+          // Dynamically set the P2P direction
+          const direction =
+            isBankPayout
+              ? "USDT_TO_NGN"
+              : `${currency}_TO_USDT`;
+
+          // Fetch the live, spread-adjusted quote from your new backend route
+          const response =
+            await api.post(
+              "/earnings/quote",
+              {
+                amount,
+                direction,
+              },
+            );
+          const quoteData =
+            response.data;
+
+          setLiquidationQuote(
+            quoteData,
+          );
+          setWithdrawalConfig(
             {
+              isOpen: true,
+              type: "LIQUIDATE",
               currency:
-                withdrawalConfig.currency,
+                currency,
+              amount,
+              direction,
+            },
+          );
+        } catch (err) {
+          console.error(
+            "Quote error:",
+            err,
+          );
+          alert(
+            err
+              .response
+              ?.data
+              ?.message ||
+              "Failed to fetch live market rate.",
+          );
+        } finally {
+          setIsSubmitting(
+            false,
+          );
+        }
+      };
+
+    // 2. The actual API execution when they confirm the modal
+    const executeLiquidation =
+      async () => {
+        try {
+          setIsSubmitting(
+            true,
+          );
+          setModalError(
+            "",
+          );
+
+          // Hit the new dedicated liquidation route
+          await api.post(
+            "/earnings/liquidate",
+            {
               amount:
                 withdrawalConfig.amount,
-              payoutAddress:
-                storedUser.payoutAddress ||
-                storedUser.walletAddress ||
-                "",
+              quote:
+                liquidationQuote, // Pass the quoted math to enforce the agreed rate
             },
           );
 
+          const successMsg =
+            withdrawalConfig.direction ===
+            "USDT_TO_NGN"
+              ? "Liquidation successful! Funds moved to Floating NGN."
+              : "Liquidation successful! Funds moved to Floating USDT.";
+
           setModalSuccess(
-            "Withdrawal request submitted successfully!",
+            successMsg,
           );
+
           setTimeout(
             () => {
               handleCloseModal();
@@ -316,7 +615,7 @@ const EarningsDashboard =
           );
         } catch (err) {
           console.error(
-            "Withdrawal error:",
+            "Liquidation error:",
             err,
           );
           setModalError(
@@ -324,7 +623,7 @@ const EarningsDashboard =
               .response
               ?.data
               ?.message ||
-              "Failed to request withdrawal. Please try again.",
+              "Failed to liquidate. Try again.",
           );
         } finally {
           setIsSubmitting(
@@ -579,30 +878,160 @@ const EarningsDashboard =
                       </p>
                     </div>
 
-                    <div className="mt-6 pt-4 border-t border-slate-800/50">
-                      <button
-                        disabled={
-                          withdrawableAmt <=
-                          0
-                        }
-                        onClick={() =>
-                          handleOpenWithdrawModal(
-                            currency,
-                            withdrawableAmt,
-                          )
-                        }
-                        className="w-full py-2.5 bg-[#FF5757] hover:bg-rose-600 disabled:opacity-40 disabled:hover:bg-slate-800 disabled:bg-slate-800 text-white font-bold rounded-xl transition-all text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-500/10"
-                      >
-                        Withdraw{" "}
-                        {
-                          currency
-                        }{" "}
-                        <ArrowRight
-                          size={
-                            16
-                          }
-                        />
-                      </button>
+                    <div className="mt-6 pt-4 border-t border-slate-800/50 space-y-3">
+                      {storedUser.payoutMethod ===
+                      "bank" ? (
+                        // --- BANK CREATOR LOGIC (USDT -> NGN) ---
+                        currency ===
+                        "USDT" ? (
+                          <>
+                            {/* The Estimate Preview */}
+                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-center">
+                              <p className="text-[11px] text-slate-400 font-medium">
+                                Est.
+                                Payout
+                                Rate
+                                (incl.
+                                spread)
+                              </p>
+                              <p className="text-xs font-bold text-amber-400 font-mono mt-0.5">
+                                1
+                                USDT
+                                ≈
+                                ₦
+                                {(
+                                  (exchangeRates?.NGN ||
+                                    1500) *
+                                  0.97
+                                ).toLocaleString(
+                                  undefined,
+                                  {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  },
+                                )}
+                              </p>
+                              <p className="text-[9px] text-slate-500 mt-1 italic">
+                                *Final
+                                live
+                                quote
+                                generated
+                                on
+                                click.
+                              </p>
+                            </div>
+
+                            <button
+                              disabled={
+                                withdrawableAmt <=
+                                  0 ||
+                                isSubmitting
+                              }
+                              onClick={() =>
+                                handleOpenLiquidateModal(
+                                  currency,
+                                  withdrawableAmt,
+                                )
+                              }
+                              className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:hover:bg-slate-800 disabled:bg-slate-800 text-slate-950 font-bold rounded-xl transition-all text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10"
+                            >
+                              Liquidate
+                              to
+                              NGN{" "}
+                              <ArrowRight
+                                size={
+                                  16
+                                }
+                              />
+                            </button>
+                          </>
+                        ) : (
+                          <div className="w-full py-2.5 bg-slate-800/50 text-slate-500 font-bold rounded-xl text-sm flex items-center justify-center gap-2 cursor-not-allowed">
+                            <Clock
+                              size={
+                                16
+                              }
+                            />{" "}
+                            Auto-Settles
+                            Weekly
+                          </div>
+                        )
+                      ) : // --- CRYPTO CREATOR LOGIC (FIAT -> USDT) ---
+                      currency ===
+                        "USDT" ? (
+                        <div className="w-full py-2.5 bg-emerald-500/10 text-emerald-500 font-bold rounded-xl text-sm flex items-center justify-center gap-2 cursor-not-allowed border border-emerald-500/20">
+                          <WalletIcon
+                            size={
+                              16
+                            }
+                          />{" "}
+                          Instant
+                          Web3
+                          Settlement
+                        </div>
+                      ) : (
+                        <>
+                          {/* The Estimate Preview */}
+                          <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-center">
+                            <p className="text-[11px] text-slate-400 font-medium">
+                              Est.
+                              Conversion
+                              Rate
+                              (incl.
+                              spread)
+                            </p>
+                            <p className="text-xs font-bold text-emerald-400 font-mono mt-0.5">
+                              1
+                              USDT
+                              ≈
+                              ₦
+                              {(
+                                (exchangeRates?.NGN ||
+                                  1500) *
+                                1.03
+                              ).toLocaleString(
+                                undefined,
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                },
+                              )}
+                            </p>
+                            <p className="text-[9px] text-slate-500 mt-1 italic">
+                              *Final
+                              live
+                              quote
+                              generated
+                              on
+                              click.
+                            </p>
+                          </div>
+
+                          <button
+                            disabled={
+                              withdrawableAmt <=
+                                0 ||
+                              isSubmitting
+                            }
+                            onClick={() =>
+                              handleOpenLiquidateModal(
+                                currency,
+                                withdrawableAmt,
+                              )
+                            }
+                            className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-slate-800 disabled:bg-slate-800 text-white font-bold rounded-xl transition-all text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10"
+                          >
+                            Liquidate
+                            to
+                            USDT{" "}
+                            <ArrowRight
+                              size={
+                                16
+                              }
+                            />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -823,21 +1252,51 @@ const EarningsDashboard =
                             : "Bank Account"}
                         </p>
                       </div>
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold tracking-wider ${
-                          w.status ===
-                          "COMPLETED"
-                            ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                            : w.status ===
-                                "PENDING"
-                              ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                              : "bg-red-500/10 text-red-500 border border-red-500/20"
-                        }`}
-                      >
-                        {
-                          w.status
-                        }
-                      </span>
+
+                      {/* DYNAMIC ACTION: CLAIM BUTTON vs STATUS BADGE */}
+                      <div className="flex items-center gap-2">
+                        {w.status ===
+                        "PENDING_CLAIM" ? (
+                          <button
+                            onClick={() =>
+                              handleClaimPayout(
+                                w,
+                              )
+                            }
+                            disabled={
+                              claimingId ===
+                              w._id
+                            }
+                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5"
+                          >
+                            <WalletIcon
+                              size={
+                                14
+                              }
+                            />
+                            {claimingId ===
+                            w._id
+                              ? "Claiming..."
+                              : "Claim USDT"}
+                          </button>
+                        ) : (
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-semibold tracking-wider ${
+                              w.status ===
+                              "COMPLETED"
+                                ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                                : w.status ===
+                                    "PENDING"
+                                  ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                                  : "bg-red-500/10 text-red-500 border border-red-500/20"
+                            }`}
+                          >
+                            {
+                              w.status
+                            }
+                          </span>
+                        )}
+                      </div>
                     </li>
                   ),
                 )
@@ -846,10 +1305,10 @@ const EarningsDashboard =
           </div>
         </div>
 
-        {/* WITHDRAWAL DISCLAIMER MODAL */}
+        {/* LIQUIDATION DISCLAIMER MODAL */}
         {withdrawalConfig.isOpen && (
           <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-8 shadow-2xl relative space-y-6 flex flex-col items-center text-center">
+            <div className="bg-slate-900 border border-amber-500/30 rounded-3xl max-w-md w-full p-8 shadow-2xl relative space-y-6 flex flex-col items-center">
               <button
                 onClick={
                   handleCloseModal
@@ -863,28 +1322,24 @@ const EarningsDashboard =
                 />
               </button>
 
-              <div className="flex flex-col items-center gap-3 border-b border-slate-800 pb-4 w-full">
-                <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-full mb-2">
-                  <ShieldCheck
+              <div className="flex flex-col items-center gap-3 border-b border-slate-800 pb-4 w-full text-center">
+                <div className="p-3 bg-amber-500/10 text-amber-500 rounded-full mb-2 border border-amber-500/20">
+                  <RefreshCw
                     size={
                       32
                     }
                   />
                 </div>
                 <h3 className="text-xl font-bold text-white">
-                  Confirm{" "}
-                  {
-                    withdrawalConfig.currency
-                  }{" "}
-                  Payout
-                  Request
+                  {withdrawalConfig.direction ===
+                  "USDT_TO_NGN"
+                    ? "Liquidate to NGN"
+                    : "Liquidate to USDT"}
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Web3
-                  Crypto
-                  Payout
+                  P2P
+                  Treasury
                   Conversion
-                  Notice
                 </p>
               </div>
 
@@ -895,7 +1350,7 @@ const EarningsDashboard =
                       16
                     }
                     className="shrink-0"
-                  />
+                  />{" "}
                   {
                     modalError
                   }
@@ -909,104 +1364,127 @@ const EarningsDashboard =
                       16
                     }
                     className="shrink-0"
-                  />
+                  />{" "}
                   {
                     modalSuccess
                   }
                 </div>
               )}
 
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3 w-full">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-400">
-                    Amount
-                    Requested:
-                  </span>
-                  <span className="font-mono font-bold text-white text-lg">
-                    {withdrawalConfig.amount.toLocaleString()}{" "}
-                    {
-                      withdrawalConfig.currency
-                    }
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-sm border-t border-slate-800/60 pt-2">
-                  <span className="text-slate-400">
-                    Destination
-                    Address:
-                  </span>
-                  <span className="font-mono text-xs text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded">
-                    {targetAddress !==
-                    "Not Configured"
-                      ? `${targetAddress.substring(0, 6)}...${targetAddress.slice(-4)}`
-                      : "Web3 Address Missing"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-3 text-xs text-slate-400 bg-blue-500/5 border border-blue-500/20 p-4 rounded-2xl w-full text-left">
-                <h4 className="font-bold text-blue-400 text-sm flex items-center justify-center gap-1.5 mb-2">
-                  <Clock
-                    size={
-                      14
-                    }
-                  />{" "}
-                  Settlement
-                  Terms
-                  &
-                  Disclaimers
-                </h4>
-                <ul className="space-y-2 list-disc list-inside text-slate-300">
-                  <li>
-                    <strong className="text-white">
-                      Payout
-                      Token:
-                    </strong>{" "}
-                    Disbursed
-                    as
-                    USDT
-                    directly
-                    on
-                    Polygon.
-                  </li>
-                  <li>
-                    <strong className="text-white">
-                      Processing
-                      Window:
-                    </strong>{" "}
-                    Completed
-                    within{" "}
-                    <strong>
-                      48
-                      business
-                      hours
-                    </strong>{" "}
-                    after
-                    verification.
-                  </li>
-                  <li>
-                    <strong className="text-white">
+              {liquidationQuote && (
+                <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 w-full">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-400 font-medium">
+                      Amount
+                      to
+                      Liquidate:
+                    </span>
+                    <span className="font-mono font-bold text-white">
+                      {liquidationQuote.amount.toLocaleString()}{" "}
+                      {
+                        withdrawalConfig.currency
+                      }
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-400 font-medium">
+                      Live
+                      Market
+                      Rate:
+                    </span>
+                    <span className="font-mono text-slate-300">
+                      ~₦
+                      {liquidationQuote.liveMarketRate.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm border-b border-slate-800/60 pb-4">
+                    <span className="text-slate-400 font-medium">
+                      Execution
                       Rate
-                      Lock:
+                      (incl.{" "}
+                      {
+                        liquidationQuote.spreadApplied
+                      }
+
+                      %
+                      spread):
+                    </span>
+                    <span className="font-mono text-amber-400 font-bold">
+                      ₦
+                      {liquidationQuote.executionRate.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1">
+                    <span className="text-slate-300 font-bold uppercase tracking-wider text-xs">
+                      Total
+                      Estimated
+                      Payout:
+                    </span>
+                    <span className="font-mono font-black text-emerald-400 text-xl">
+                      {withdrawalConfig.direction ===
+                      "USDT_TO_NGN"
+                        ? "₦"
+                        : ""}
+                      {liquidationQuote.estimatedPayout.toLocaleString()}
+                      {withdrawalConfig.direction !==
+                      "USDT_TO_NGN"
+                        ? " USDT"
+                        : ""}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-2xl w-full">
+                <p className="text-xs text-amber-500/90 leading-relaxed flex items-start gap-2">
+                  <AlertCircle
+                    size={
+                      16
+                    }
+                    className="shrink-0 mt-0.5"
+                  />
+                  <span>
+                    <strong className="text-amber-500 block mb-1">
+                      Irreversible
+                      Action
+                    </strong>
+                    By
+                    confirming,
+                    these
+                    funds
+                    will
+                    be
+                    traded
+                    with
+                    our
+                    treasury.
+                    The
+                    output
+                    will
+                    be
+                    moved
+                    to
+                    your{" "}
+                    <strong>
+                      Floating
+                      Balance
                     </strong>{" "}
-                    Converted
-                    at
+                    and
+                    will
+                    clear
+                    for
+                    payout
+                    once
                     the
-                    prevailing
-                    market
-                    exchange
-                    rate
-                    at
-                    the
-                    exact
-                    time
-                    of
-                    transfer
-                    execution.
-                  </li>
-                </ul>
+                    P2P
+                    settlement
+                    is
+                    complete.
+                  </span>
+                </p>
               </div>
 
-              <div className="flex gap-3 pt-2 w-full">
+              <div className="flex gap-3 w-full pt-2">
                 <button
                   type="button"
                   onClick={
@@ -1020,14 +1498,12 @@ const EarningsDashboard =
                   type="button"
                   disabled={
                     isSubmitting ||
-                    !!modalSuccess ||
-                    targetAddress ===
-                      "Not Configured"
+                    !!modalSuccess
                   }
                   onClick={
-                    handleConfirmWithdrawal
+                    executeLiquidation
                   }
-                  className="flex-1 py-3 bg-[#FF5757] hover:bg-rose-600 disabled:opacity-50 text-white font-bold rounded-xl transition-colors text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-500/20"
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl transition-colors text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
                 >
                   {isSubmitting ? (
                     <>
@@ -1037,10 +1513,10 @@ const EarningsDashboard =
                         }
                         className="animate-spin"
                       />{" "}
-                      Processing...
+                      Executing...
                     </>
                   ) : (
-                    "Confirm & Disburse"
+                    "Confirm Sale"
                   )}
                 </button>
               </div>

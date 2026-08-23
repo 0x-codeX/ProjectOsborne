@@ -4,6 +4,7 @@ import React, {
 } from "react";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import api from "../utils/api";
+import { usePaystackPayment } from "react-paystack";
 import {
   Heart,
   MessageCircle,
@@ -21,6 +22,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import AgeVerificationGate from "./AgeVerificationGate"; // <-- 1. IMPORTED THE GATE
 
 // --- SUB-COMPONENT ---
 const FeedPostItem =
@@ -498,6 +500,32 @@ const BookmarksFeed =
         null,
       );
 
+    // --- 2. ADDED AGE VERIFICATION STATES ---
+    const [
+      showAgeGate,
+      setShowAgeGate,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      pendingRestrictedPost,
+      setPendingRestrictedPost,
+    ] =
+      useState(
+        null,
+      );
+
+    // Pull current user to check verification status locally
+    const currentUser =
+      JSON.parse(
+        localStorage.getItem(
+          "nippy_user",
+        ) ||
+          "{}",
+      );
+    // ----------------------------------------
+
     // PRICING ENGINE STATES
     const [
       fanCurrency,
@@ -518,6 +546,15 @@ const BookmarksFeed =
       transferUSDT,
     } =
       useWeb3Transfer();
+    const initializePayment =
+      usePaystackPayment(
+        {
+          publicKey:
+            import.meta
+              .env
+              .VITE_PAYSTACK_PUBLIC_KEY,
+        },
+      );
 
     const [
       activeCommentPostId,
@@ -612,7 +649,7 @@ const BookmarksFeed =
                 // THE FIX: Protect the app against 404s/timeouts
                 api
                   .get(
-                    "/exchange-rates",
+                    "/purchases/exchange-rates",
                   )
                   .catch(
                     () => ({
@@ -889,11 +926,30 @@ const BookmarksFeed =
         }
       };
 
+    // --- 3. THE WIRE: INTERCEPTING THE CHECKOUT FLOW ---
     const openPaymentModal =
       (
         post,
         ppvPriceData,
       ) => {
+        // Intercept NSFW content if unverified
+        if (
+          post.isNsfw &&
+          !currentUser.isAgeVerified
+        ) {
+          setPendingRestrictedPost(
+            {
+              post,
+              ppvPriceData,
+            },
+          );
+          setShowAgeGate(
+            true,
+          );
+          return; // STOP! Do not open the payment modal.
+        }
+
+        // Normal execution
         setPaymentModalPost(
           {
             ...post,
@@ -941,43 +997,45 @@ const BookmarksFeed =
         );
 
         try {
-          let exactUSDAmount = 0;
+          // Convert Fan's padded price back to USD for the quote
+          const toFanRate =
+            exchangeRates[
+              paymentModalPost
+                .fanCurrency
+            ] ||
+            1;
+          const fanPriceInUSD =
+            paymentModalPost.fanPrice /
+            toFanRate;
 
-          if (
-            paymentModalPost.creatorCurrency ===
-            "USD"
-          ) {
-            exactUSDAmount =
-              paymentModalPost.creatorRawPrice;
-          } else {
-            const toFanRate =
-              exchangeRates[
-                paymentModalPost
-                  .fanCurrency
-              ] ||
-              1;
-            exactUSDAmount =
-              paymentModalPost.fanPrice /
-              toFanRate;
-          }
+          // Convert Creator's true raw price to USD for the quote
+          const toRawRate =
+            exchangeRates[
+              paymentModalPost
+                .creatorCurrency
+            ] ||
+            1;
+          const rawPriceInUSD =
+            paymentModalPost.creatorRawPrice /
+            toRawRate;
 
-          const res =
+          const {
+            data,
+          } =
             await api.post(
               "/purchases/crypto-quote",
               {
                 amountUSD:
-                  exactUSDAmount,
+                  fanPriceInUSD,
+                rawAmountUSD:
+                  rawPriceInUSD, // <--- We send the raw amount here
               },
             );
 
           setCryptoQuote(
-            res.data,
+            data,
           );
         } catch (error) {
-          console.error(
-            "Quote error:",
-            error,
-          );
           alert(
             "Failed to get live crypto rates. Please try again.",
           );
@@ -1003,48 +1061,179 @@ const BookmarksFeed =
           paymentMethod ===
           "CARD"
         ) {
-          alert(
-            "Paystack integration is handled similarly to FanFeed. Please use Web3 Crypto for now.",
+          // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
+          // THE FIX: Gateway strictly requires the native merchant currency (NGN).
+          // We calculate the exact NGN equivalent of the Fan's dynamic display price.
+          const fanRate =
+            exchangeRates[
+              paymentModalPost
+                .fanCurrency
+            ] ||
+            1;
+          const ngnRate =
+            exchangeRates[
+              "NGN"
+            ] ||
+            1500; // Fallback rate safeguard
+
+          // Reverse engineer the USD base price, then convert to NGN
+          const priceInUSD =
+            paymentModalPost.fanPrice /
+            fanRate;
+          const priceInNGN =
+            priceInUSD *
+            ngnRate;
+
+          // Gateway expects subunits (Kobo)
+          const amountInSubunits =
+            Math.round(
+              priceInNGN *
+                100,
+            );
+
+          initializePayment(
+            {
+              config:
+                {
+                  reference:
+                    new Date()
+                      .getTime()
+                      .toString(),
+                  email:
+                    currentUser?.email ||
+                    "fan@nippy.com",
+                  amount:
+                    amountInSubunits,
+                  currency:
+                    "NGN", // Hardcoded to match your merchant gateway compliance
+                },
+              onSuccess:
+                async (
+                  reference,
+                ) => {
+                  setProcessingId(
+                    paymentModalPost._id,
+                  );
+                  try {
+                    // The backend verifyPayment expects the exact currency/amount you just charged
+                    await api.post(
+                      "/purchases/verify",
+                      {
+                        reference:
+                          reference.reference,
+                        paymentMethod:
+                          "FIAT",
+                        creatorId:
+                          paymentModalPost
+                            .creator
+                            ._id,
+                        contentId:
+                          paymentModalPost._id,
+                        purchaseType:
+                          "PPV", // Feed items are always PPV
+                        subscriptionTier:
+                          null,
+
+                        // Aligning charge payload with actual Gateway execution to pass fraud checks
+                        chargeAmount:
+                          priceInNGN,
+                        chargeCurrency:
+                          "NGN",
+
+                        // Creator ledger relies strictly on raw amounts for the 80% platform split
+                        rawAmount:
+                          paymentModalPost.creatorRawPrice,
+                        rawCurrency:
+                          paymentModalPost.creatorCurrency,
+                      },
+                    );
+
+                    // Refresh the feed to show the unlocked content
+                    await pollForNewPosts();
+                    closeModal();
+                  } catch (error) {
+                    alert(
+                      "Verification failed: " +
+                        (error
+                          .response
+                          ?.data
+                          ?.message ||
+                          error.message),
+                    );
+                  } finally {
+                    setProcessingId(
+                      null,
+                    );
+                  }
+                },
+              onClose:
+                () =>
+                  alert(
+                    "Payment window closed by user.",
+                  ),
+            },
           );
           return;
         }
 
+        // --- WEB3 EXECUTION ---
         try {
           setProcessingId(
             paymentModalPost._id,
           );
+
           if (
-            !cryptoQuote ||
-            !cryptoQuote.requiredUSDT
+            !paymentModalPost
+              ?.creator
+              ?.walletAddress
           )
             throw new Error(
-              "Missing crypto quote. Please re-select the payment method.",
+              "Creator missing Web3 wallet.",
+            );
+          if (
+            !cryptoQuote?.requiredUSDT ||
+            !cryptoQuote?.rawUSDT
+          )
+            throw new Error(
+              "Missing crypto quote.",
             );
 
+          // THE FIX: We pass BOTH the Fan's bloated price and the Creator's raw base price!
           const txHash =
             await transferUSDT(
               paymentModalPost
                 .creator
                 .walletAddress,
-              cryptoQuote.requiredUSDT,
-              paymentModalPost.creatorRawPrice,
+              cryptoQuote.requiredUSDT, // e.g., 3.50 USDT (Fan pays)
+              cryptoQuote.rawUSDT, // e.g., 3.33 USDT (Contract Skim split)
               paymentModalPost._id,
             );
 
+          if (
+            !txHash
+          )
+            throw new Error(
+              "Transaction completed but no hash was returned.",
+            );
+
+          // The backend uses rawAmount to credit the Creator's Wallet
           await api.post(
             "/purchases/verify",
             {
-              txHash,
+              txHash:
+                txHash,
               paymentMethod:
                 "CRYPTO",
               creatorId:
                 paymentModalPost
                   .creator
-                  ?._id,
+                  ._id,
               contentId:
                 paymentModalPost._id,
               purchaseType:
-                "PPV",
+                "PPV", // Feed items are always PPV
+              subscriptionTier:
+                null,
               chargeAmount:
                 paymentModalPost.fanPrice,
               chargeCurrency:
@@ -1056,13 +1245,10 @@ const BookmarksFeed =
             },
           );
 
-          await fetchBookmarksAndRates();
+          // Pull fresh feed data to remove the lock
+          await pollForNewPosts();
           closeModal();
         } catch (error) {
-          console.error(
-            "Unlock failed:",
-            error,
-          );
           alert(
             error
               .response
@@ -1212,6 +1398,18 @@ const BookmarksFeed =
             },
           )
         )}
+
+        {/* --- 4. THE NEW AGE GATE UI COMPONENT --- */}
+        <AgeVerificationGate
+          isOpen={
+            showAgeGate
+          }
+          onClose={() =>
+            setShowAgeGate(
+              false,
+            )
+          }
+        />
 
         {/* REUSABLE CHECKOUT MODAL */}
         {paymentModalPost && (

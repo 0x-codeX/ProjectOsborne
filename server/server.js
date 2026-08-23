@@ -20,6 +20,7 @@ const userRoutes = require("./routes/userRoutes");
 const earningsRoutes = require("./routes/earningsRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const streamRoutes = require("./routes/streamRoutes");
+const ageVerificationRoutes = require("./routes/ageVerificationRoutes");
 
 // Cron Jobs
 const startReaper = require("./cron/reaper");
@@ -292,6 +293,10 @@ app.use(
   "/api/streams",
   streamRoutes,
 );
+app.use(
+  "/api/age-verification",
+  ageVerificationRoutes,
+);
 
 // Server Initialization
 const PORT =
@@ -299,6 +304,8 @@ const PORT =
     .env
     .PORT ||
   5000;
+
+require("./workers/treasuryAuditor");
 
 server.listen(
   PORT,
