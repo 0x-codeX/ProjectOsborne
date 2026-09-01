@@ -1,15 +1,22 @@
 import axios from "axios";
 
-// 1. Create a customized Axios instance
+// 1. Get a clean root domain (strip '/api' if Vercel injected it)
+const rawUrl =
+  import.meta
+    .env
+    .VITE_API_URL ||
+  "https://nippy-serverside.onrender.com";
+const rootDomain =
+  rawUrl.replace(
+    "/api",
+    "",
+  );
+
 const api =
   axios.create(
     {
-      // Point this to your backend environment
       baseURL:
-        import.meta
-          .env
-          .VITE_API_URL ||
-        "https://nippy-serverside.onrender.com",
+        rootDomain,
       headers:
         {
           "Content-Type":
@@ -18,12 +25,32 @@ const api =
     },
   );
 
-// 2. REQUEST INTERCEPTOR: The "Bouncer"
-// This runs BEFORE every single request leaves your frontend
+// 2. REQUEST INTERCEPTOR: The "Bouncer & Router"
 api.interceptors.request.use(
   (
     config,
   ) => {
+    // Automatically inject '/api' into the URL if it is missing
+    if (
+      config.url &&
+      !config.url.startsWith(
+        "/api",
+      ) &&
+      !config.url.startsWith(
+        "http",
+      )
+    ) {
+      const cleanPath =
+        config.url.startsWith(
+          "/",
+        )
+          ? config.url.substring(
+              1,
+            )
+          : config.url;
+      config.url = `/api/${cleanPath}`;
+    }
+
     // Grab the token securely
     const token =
       localStorage.getItem(
@@ -49,12 +76,10 @@ api.interceptors.request.use(
 );
 
 // 3. RESPONSE INTERCEPTOR: The "Safety Net"
-// This runs EVERY TIME your frontend receives a response from the backend
 api.interceptors.response.use(
   (
     response,
   ) => {
-    // If the request was successful, just pass it through
     return response;
   },
   (
@@ -80,8 +105,7 @@ api.interceptors.response.use(
         "nippy_user",
       );
 
-      // Force reload and kick them to the login screen securely
-      // We use window.location here because this file lives outside React Router
+      // Kick them to the login screen securely
       if (
         window
           .location
