@@ -16,6 +16,7 @@ import { ethers } from "ethers";
 import { useGoogleLogin } from "@react-oauth/google";
 import landingBackground from "../assets/background7.jpg";
 import nippyLogo from "../assets/NippyLogo.png";
+import api from "../utils/api";
 
 const LandingPage =
   () => {
@@ -113,82 +114,65 @@ const LandingPage =
 
         try {
           const response =
-            await fetch(
-              `http://localhost:5000${endpoint}`,
-              {
-                method:
-                  "POST",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  payload,
-                ),
-              },
+            await api.post(
+              endpoint,
+              payload,
             );
-
           const data =
-            await response.json();
+            response.data;
+
+          localStorage.setItem(
+            "nippy_token",
+            data.token,
+          );
+          const userObj =
+            data.user ||
+            data;
+          localStorage.setItem(
+            "nippy_user",
+            JSON.stringify(
+              userObj,
+            ),
+          );
 
           if (
-            response.ok
+            userObj.role ===
+            "creator"
           ) {
-            localStorage.setItem(
-              "nippy_token",
-              data.token,
-            );
-            const userObj =
-              data.user ||
-              data;
-            localStorage.setItem(
-              "nippy_user",
-              JSON.stringify(
-                userObj,
-              ),
-            );
-
             if (
-              userObj.role ===
-              "creator"
+              !isLogin ||
+              userObj.hasCompletedBioData ===
+                false
             ) {
-              if (
-                !isLogin ||
-                userObj.hasCompletedBioData ===
-                  false
-              ) {
-                navigate(
-                  "/auth/creator/biodata",
-                );
-              } else {
-                navigate(
-                  "/creator/dashboard",
-                );
-              }
+              navigate(
+                "/auth/creator/biodata",
+              );
             } else {
-              if (
-                !isLogin ||
-                !userObj.isAgeVerified
-              ) {
-                navigate(
-                  "/fan-setup",
-                );
-              } else {
-                navigate(
-                  "/feed",
-                );
-              }
+              navigate(
+                "/creator/dashboard",
+              );
             }
           } else {
-            setError(
-              data.message ||
-                "Authentication failed",
-            );
+            if (
+              !isLogin ||
+              !userObj.isAgeVerified
+            ) {
+              navigate(
+                "/fan-setup",
+              );
+            } else {
+              navigate(
+                "/feed",
+              );
+            }
           }
         } catch (err) {
           setError(
-            "Server connection error. Ensure backend is running.",
+            err
+              .response
+              ?.data
+              ?.message ||
+              "Server connection error. Ensure backend is running.",
           );
         } finally {
           setLoading(
@@ -249,18 +233,11 @@ const LandingPage =
             await signer.getAddress();
 
           const nonceRes =
-            await fetch(
-              `http://localhost:5000/api/auth/web3-nonce?walletAddress=${walletAddress}`,
+            await api.get(
+              `/api/auth/web3-nonce?walletAddress=${walletAddress}`,
             );
-          if (
-            !nonceRes.ok
-          )
-            throw new Error(
-              "Failed to secure login challenge.",
-            );
-
           const nonceData =
-            await nonceRes.json();
+            nonceRes.data;
           const serverMessage =
             typeof nonceData ===
             "string"
@@ -281,78 +258,57 @@ const LandingPage =
             };
 
           const response =
-            await fetch(
-              "http://localhost:5000/api/auth/web3-login",
-              {
-                method:
-                  "POST",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  payload,
-                ),
-              },
+            await api.post(
+              "/api/auth/web3-login",
+              payload,
             );
-
           const data =
-            await response.json();
+            response.data;
+
+          localStorage.setItem(
+            "nippy_token",
+            data.token,
+          );
+          const userObj =
+            data.user ||
+            data;
+          localStorage.setItem(
+            "nippy_user",
+            JSON.stringify(
+              userObj,
+            ),
+          );
 
           if (
-            response.ok
+            userObj.role ===
+            "creator"
           ) {
-            localStorage.setItem(
-              "nippy_token",
-              data.token,
-            );
-            const userObj =
-              data.user ||
-              data;
-            localStorage.setItem(
-              "nippy_user",
-              JSON.stringify(
-                userObj,
-              ),
-            );
-
             if (
-              userObj.role ===
-              "creator"
+              data.isNewUser ||
+              userObj.hasCompletedBioData ===
+                false
             ) {
-              if (
-                data.isNewUser ||
-                userObj.hasCompletedBioData ===
-                  false
-              ) {
-                navigate(
-                  "/auth/creator/biodata",
-                );
-              } else {
-                navigate(
-                  "/creator/dashboard",
-                );
-              }
+              navigate(
+                "/auth/creator/biodata",
+              );
             } else {
-              if (
-                data.isNewUser ||
-                !userObj.isAgeVerified
-              ) {
-                navigate(
-                  "/fan-setup",
-                );
-              } else {
-                navigate(
-                  "/feed",
-                );
-              }
+              navigate(
+                "/creator/dashboard",
+              );
             }
           } else {
-            setError(
-              data.message ||
-                "Web3 Authentication failed",
-            );
+            if (
+              data.isNewUser ||
+              !userObj.isAgeVerified
+            ) {
+              navigate(
+                "/fan-setup",
+              );
+            } else {
+              navigate(
+                "/feed",
+              );
+            }
           }
         } catch (err) {
           console.error(
@@ -360,7 +316,11 @@ const LandingPage =
             err,
           );
           setError(
-            err.message ||
+            err
+              .response
+              ?.data
+              ?.message ||
+              err.message ||
               "Wallet connection failed.",
           );
         } finally {
@@ -388,7 +348,6 @@ const LandingPage =
                   view ===
                   "login";
 
-                // Google returns an access_token here. We send it to our backend.
                 const payload =
                   {
                     credential:
@@ -399,83 +358,65 @@ const LandingPage =
                   };
 
                 const response =
-                  await fetch(
-                    "http://localhost:5000/api/auth/google",
-                    {
-                      method:
-                        "POST",
-                      headers:
-                        {
-                          "Content-Type":
-                            "application/json",
-                        },
-                      body: JSON.stringify(
-                        payload,
-                      ),
-                    },
+                  await api.post(
+                    "/api/auth/google",
+                    payload,
                   );
-
                 const data =
-                  await response.json();
+                  response.data;
+
+                localStorage.setItem(
+                  "nippy_token",
+                  data.token,
+                );
+                const userObj =
+                  data.user ||
+                  data;
+                localStorage.setItem(
+                  "nippy_user",
+                  JSON.stringify(
+                    userObj,
+                  ),
+                );
 
                 if (
-                  response.ok
+                  userObj.role ===
+                  "creator"
                 ) {
-                  localStorage.setItem(
-                    "nippy_token",
-                    data.token,
-                  );
-                  const userObj =
-                    data.user ||
-                    data;
-                  localStorage.setItem(
-                    "nippy_user",
-                    JSON.stringify(
-                      userObj,
-                    ),
-                  );
-
-                  // Exact same routing logic as your Web3 setup
                   if (
-                    userObj.role ===
-                    "creator"
+                    data.isNewUser ||
+                    userObj.hasCompletedBioData ===
+                      false
                   ) {
-                    if (
-                      data.isNewUser ||
-                      userObj.hasCompletedBioData ===
-                        false
-                    ) {
-                      navigate(
-                        "/auth/creator/biodata",
-                      );
-                    } else {
-                      navigate(
-                        "/creator/dashboard",
-                      );
-                    }
+                    navigate(
+                      "/auth/creator/biodata",
+                    );
                   } else {
-                    if (
-                      data.isNewUser ||
-                      !userObj.isAgeVerified
-                    ) {
-                      navigate(
-                        "/fan-setup",
-                      );
-                    } else {
-                      navigate(
-                        "/feed",
-                      );
-                    }
+                    navigate(
+                      "/creator/dashboard",
+                    );
                   }
                 } else {
-                  setError(
-                    data.message ||
-                      "Google Authentication failed on server",
-                  );
+                  if (
+                    data.isNewUser ||
+                    !userObj.isAgeVerified
+                  ) {
+                    navigate(
+                      "/fan-setup",
+                    );
+                  } else {
+                    navigate(
+                      "/feed",
+                    );
+                  }
                 }
               } catch (err) {
                 setError(
-                  "Network error communicating with server.",
+                  err
+                    .response
+                    ?.data
+                    ?.message ||
+                    "Google Authentication failed on server",
                 );
               } finally {
                 setLoading(
