@@ -2,6 +2,7 @@ import React, {
   useState,
 } from "react";
 import { useNavigate } from "react-router-dom";
+import api from "../utils/api";
 
 
 const FanBiodata =
@@ -49,62 +50,23 @@ const FanBiodata =
         }
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-
-          // 1. Send the native fetch call
+          // 1. Send the request using your configured api interceptor
+          // It automatically handles the localhost vs Render routing and attaches the token
           const response =
-            await fetch(
-              "http://localhost:5000/api/users/biodata",
+            await api.put(
+              "/users/biodata",
               {
-                method:
-                  "PUT",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    username,
-                    // Match the backend variable names exactly:
-                    confirmedAge: true,
-                    agreedTerms: true,
-                    // You can keep this here if your user schema relies on it for routing later
-                    isAgeVerified: true,
-                  },
-                ),
+                username,
+                confirmedAge: true,
+                agreedTerms: true,
+                isAgeVerified: true,
               },
             );
 
-          // 🚨 NEW ERROR HANDLING: Parse the backend's exact complaint
-          if (
-            !response.ok
-          ) {
-            const errorData =
-              await response
-                .json()
-                .catch(
-                  () => ({}),
-                );
-            console.error(
-              "BACKEND REJECTION:",
-              errorData,
-            );
-            throw new Error(
-              errorData.message ||
-                "Server rejected the profile update.",
-            );
-          }
-
           const data =
-            await response.json();
+            response.data;
 
           // 2. Crucial Step: Update the user object in localStorage!
-          // If you don't do this, the frontend still thinks they are unverified until they log out.
           const storedUser =
             JSON.parse(
               localStorage.getItem(
@@ -131,8 +93,13 @@ const FanBiodata =
             "Biodata update error:",
             err,
           );
+          // Safely parse Axios error responses
           setError(
-            err.message ||
+            err
+              .response
+              ?.data
+              ?.message ||
+              err.message ||
               "Failed to update profile. Try again.",
           );
         }
