@@ -21,19 +21,65 @@ const earningsRoutes = require("./routes/earningsRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const streamRoutes = require("./routes/streamRoutes");
 const ageVerificationRoutes = require("./routes/ageVerificationRoutes");
-const allowedOrigins =
-  [
-    "https://nippy-client.vercel.app",
-    "https://nippy-admin.vercel.app",
-    "http://localhost:5173", // local client dev
-    "http://localhost:5174", // local admin dev
-  ];
 
 // Cron Jobs
 const startReaper = require("./cron/reaper");
 
 // Initialize Web3 Listener
 require("./workers/web3Listener.js");
+
+// Allowed Origins Configuration
+const allowedOrigins =
+  [
+    "https://project-osborne-client.vercel.app",
+  "https://project-osborne.vercel.app",
+    "https://nippy-client.vercel.app",
+    "https://nippy-admin.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:5174",
+  ];
+
+const corsOptions =
+  {
+    origin:
+      function (
+        origin,
+        callback,
+      ) {
+        if (
+          !origin ||
+          allowedOrigins.includes(
+            origin,
+          )
+        ) {
+          callback(
+            null,
+            true,
+          );
+        } else {
+          callback(
+            new Error(
+              "Blocked by CORS policy",
+            ),
+          );
+        }
+      },
+    credentials: true,
+    methods:
+      [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "OPTIONS",
+      ],
+    allowedHeaders:
+      [
+        "Content-Type",
+        "Authorization",
+      ],
+  };
 
 const app =
   express();
@@ -44,45 +90,38 @@ const server =
     app,
   );
 
-// 2. Initialize Socket.io with CORS allowing your React frontend
+// 2. Initialize Socket.io with production CORS
 const io =
   new Server(
     server,
     {
       cors: {
         origin:
-          [
-            "http://localhost:5173",
-            "http://localhost:5174",
-          ], // Change this if your React port is different
+          allowedOrigins,
         methods:
           [
             "GET",
             "POST",
           ],
+        credentials: true,
       },
     },
   );
 
-// Security & Middleware
+// 3. Security & Global Middleware (MUST BE AT THE VERY TOP)
 app.use(
-  helmet(),
+  cors(
+    corsOptions,
+  ),
 );
 app.use(
-  cors({
-    origin:
-      [
-        "http://localhost:5173",
-        "http://localhost:5174",
-      ],
-    //credentials: true,
-  }),
+  helmet(),
 );
 app.use(
   express.json(),
 );
 
-// 3. Make 'io' available inside all your controllers via 'req'
+// 4. Attach Socket.io to request object
 app.use(
   (
     req,
@@ -95,7 +134,7 @@ app.use(
   },
 );
 
-// 4. THE MASTER SWITCHBOARD: Listen for live connections
+// 5. Socket.io Event Handlers
 io.on(
   "connection",
   (
@@ -106,9 +145,6 @@ io.on(
       socket.id,
     );
 
-    // ==========================================
-    // SYSTEM 1: DIRECT MESSAGES (CHAT BUNDLES)
-    // ==========================================
     socket.on(
       "join_chat",
       (
@@ -117,16 +153,9 @@ io.on(
         socket.join(
           conversationId,
         );
-        console.log(
-          `User joined DM room: ${conversationId}`,
-        );
       },
     );
 
-    // ==========================================
-    // SYSTEM 2: LIVE STREAM CHAT
-    // ==========================================
-    // Join the specific Live Stream Room
     socket.on(
       "join_live_chat",
       (
@@ -139,14 +168,10 @@ io.on(
           socket.join(
             data.streamId,
           );
-          console.log(
-            `User joined live stream room: ${data.streamId}`,
-          );
         }
       },
     );
 
-    // Broadcast Live Messages between fans and creator
     socket.on(
       "send_live_message",
       (
@@ -156,7 +181,6 @@ io.on(
           data &&
           data.streamId
         ) {
-          // socket.to() sends to EVERYONE in the room EXCEPT the sender.
           socket
             .to(
               data.streamId,
@@ -169,7 +193,6 @@ io.on(
       },
     );
 
-    // Broadcast when Creator kills the stream
     socket.on(
       "end_live_stream",
       (
@@ -191,9 +214,6 @@ io.on(
       },
     );
 
-    // ==========================================
-    // DISCONNECT
-    // ==========================================
     socket.on(
       "disconnect",
       () => {
@@ -217,10 +237,6 @@ mongoose
       console.log(
         "MongoDB Connected: Nippy Core DB",
       );
-
-      // THE FIX: We are commenting this out temporarily!
-      // We must stabilize the server to test Livepeer first.
-      // require("./workers/web3Listener.js");
     },
   )
   .catch(
@@ -233,7 +249,7 @@ mongoose
       ),
   );
 
-// Basic API Health Route
+// API Health Route
 app.get(
   "/api/health",
   (
@@ -304,34 +320,6 @@ app.use(
   "/api/age-verification",
   ageVerificationRoutes,
 );
-app.use(
-  cors({
-    origin:
-      function (
-        origin,
-        callback,
-      ) {
-        if (
-          !origin ||
-          allowedOrigins.includes(
-            origin,
-          )
-        ) {
-          callback(
-            null,
-            true,
-          );
-        } else {
-          callback(
-            new Error(
-              "Blocked by CORS policy",
-            ),
-          );
-        }
-      },
-    credentials: true,
-  }),
-);
 
 // Server Initialization
 const PORT =
@@ -341,9 +329,7 @@ const PORT =
   5000;
 
 require("./workers/treasuryAuditor");
-
 require("./workers/fiatBatchProcessor");
-
 require("./workers/voucherSweeper");
 
 server.listen(
@@ -352,8 +338,6 @@ server.listen(
     console.log(
       `Server running on port ${PORT}`,
     );
-
-    // Start the background cron jobs
     if (
       typeof startReaper ===
       "function"
