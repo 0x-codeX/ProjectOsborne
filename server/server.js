@@ -21,6 +21,13 @@ const earningsRoutes = require("./routes/earningsRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const streamRoutes = require("./routes/streamRoutes");
 const ageVerificationRoutes = require("./routes/ageVerificationRoutes");
+const allowedOrigins =
+  [
+    "https://nippy-client.vercel.app",
+    "https://nippy-admin.vercel.app",
+    "http://localhost:5173", // local client dev
+    "http://localhost:5174", // local admin dev
+  ];
 
 // Cron Jobs
 const startReaper = require("./cron/reaper");
@@ -296,6 +303,34 @@ app.use(
 app.use(
   "/api/age-verification",
   ageVerificationRoutes,
+);
+app.use(
+  cors({
+    origin:
+      function (
+        origin,
+        callback,
+      ) {
+        if (
+          !origin ||
+          allowedOrigins.includes(
+            origin,
+          )
+        ) {
+          callback(
+            null,
+            true,
+          );
+        } else {
+          callback(
+            new Error(
+              "Blocked by CORS policy",
+            ),
+          );
+        }
+      },
+    credentials: true,
+  }),
 );
 
 // Server Initialization
