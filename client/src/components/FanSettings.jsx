@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
+import api from "../utils/api"
 
 const COUNTRY_TO_CURRENCY =
   {
@@ -171,232 +172,89 @@ const FanSettings =
         );
       };
 
-    // 1. UPDATE PREFERENCES (No Password Required)
-    const handlePreferencesUpdate =
-      async (
-        e,
-      ) => {
-        e.preventDefault();
-        setLoading(
-          true,
-        );
-        setMessage(
-          {
-            type: "",
-            text: "",
-          },
-        );
+    const handlePreferencesUpdate = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage({ type: "", text: "" });
 
-        try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
-          // Routes to the profile endpoint which handles currency and country
-          const response =
-            await fetch(
-              "http://localhost:5000/api/users/profile",
-              {
-                method:
-                  "PUT",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    country:
-                      formData.country,
-                    preferredCurrency:
-                      formData.preferredCurrency,
-                  },
-                ),
-              },
-            );
+    try {
+      await api.put("/users/profile", {
+        country: formData.country,
+        preferredCurrency: formData.preferredCurrency,
+      });
+      
+      setMessage({
+        type: "success",
+        text: "Preferences saved successfully.",
+      });
+      
+      if (user) {
+        const updatedUser = {
+          ...user,
+          country: formData.country,
+          preferredCurrency: formData.preferredCurrency,
+        };
+        setUser(updatedUser);
+        localStorage.setItem("nippy_user", JSON.stringify(updatedUser));
+      }
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error.response?.data?.message || "A network error occurred.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
-          const data =
-            await response.json();
-          if (
-            response.ok
-          ) {
-            setMessage(
-              {
-                type: "success",
-                text: "Preferences saved successfully.",
-              },
-            );
-            if (
-              user
-            ) {
-              const updatedUser =
-                {
-                  ...user,
-                  country:
-                    formData.country,
-                  preferredCurrency:
-                    formData.preferredCurrency,
-                };
-              setUser(
-                updatedUser,
-              );
-              localStorage.setItem(
-                "nippy_user",
-                JSON.stringify(
-                  updatedUser,
-                ),
-              );
-            }
-          } else {
-            setMessage(
-              {
-                type: "error",
-                text: data.message,
-              },
-            );
-          }
-        } catch (error) {
-          setMessage(
-            {
-              type: "error",
-              text: "A network error occurred.",
-            },
-          );
-        } finally {
-          setLoading(
-            false,
-          );
-        }
-      };
+    const handleSecurityUpdate = async (e) => {
+    e.preventDefault();
+    if (!formData.currentPassword) {
+      return setMessage({
+        type: "error",
+        text: "Current password is required to authorize updates.",
+      });
+    }
+    
+    setLoading(true);
+    setMessage({ type: "", text: "" });
 
-    // 2. UPDATE SECURITY (Requires Current Password)
-    const handleSecurityUpdate =
-      async (
-        e,
-      ) => {
-        e.preventDefault();
-        if (
-          !formData.currentPassword
-        ) {
-          return setMessage(
-            {
-              type: "error",
-              text: "Current password is required to authorize updates.",
-            },
-          );
-        }
-        setLoading(
-          true,
-        );
-        setMessage(
-          {
-            type: "",
-            text: "",
-          },
-        );
-
-        try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
-          const response =
-            await fetch(
-              "http://localhost:5000/api/users/settings",
-              {
-                method:
-                  "PUT",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    currentPassword:
-                      formData.currentPassword,
-                    newEmail:
-                      formData.newEmail,
-                    newPassword:
-                      formData.newPassword,
-                  },
-                ),
-              },
-            );
-
-          const data =
-            await response.json();
-          if (
-            response.ok
-          ) {
-            setMessage(
-              {
-                type: "success",
-                text: data.message,
-              },
-            );
-            if (
-              user &&
-              formData.newEmail
-            ) {
-              const updatedUser =
-                {
-                  ...user,
-                  email:
-                    formData.newEmail,
-                };
-              setUser(
-                updatedUser,
-              );
-              localStorage.setItem(
-                "nippy_user",
-                JSON.stringify(
-                  updatedUser,
-                ),
-              );
-            }
-            setFormData(
-              (
-                prev,
-              ) => ({
-                ...prev,
-                currentPassword:
-                  "",
-                newEmail:
-                  "",
-                newPassword:
-                  "",
-              }),
-            );
-          } else {
-            setMessage(
-              {
-                type: "error",
-                text: data.message,
-              },
-            );
-          }
-        } catch (error) {
-          setMessage(
-            {
-              type: "error",
-              text: "A network error occurred.",
-            },
-          );
-        } finally {
-          setLoading(
-            false,
-          );
-        }
-      };
+    try {
+      const response = await api.put("/users/settings", {
+        currentPassword: formData.currentPassword,
+        newEmail: formData.newEmail,
+        newPassword: formData.newPassword,
+      });
+      
+      setMessage({
+        type: "success",
+        text: response.data.message || "Settings updated successfully.",
+      });
+      
+      if (user && formData.newEmail) {
+        const updatedUser = {
+          ...user,
+          email: formData.newEmail,
+        };
+        setUser(updatedUser);
+        localStorage.setItem("nippy_user", JSON.stringify(updatedUser));
+      }
+      
+      setFormData((prev) => ({
+        ...prev,
+        currentPassword: "",
+        newEmail: "",
+        newPassword: "",
+      }));
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error.response?.data?.message || "A network error occurred.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
     // WEB3 UPDATE: Cryptographic Wallet Linking
     const handleLinkWallet =
@@ -437,66 +295,37 @@ const FanSettings =
               authMessage,
             );
 
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
-          const res =
-            await fetch(
-              "http://localhost:5000/api/auth/link-wallet",
-              {
-                method:
-                  "PUT",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    walletAddress:
-                      address,
-                    signature,
-                  },
-                ),
-              },
-            );
+          await api.put(
+            "/auth/link-wallet",
+            {
+              walletAddress:
+                address,
+              signature,
+            },
+          );
 
-          const data =
-            await res.json();
-          if (
-            res.ok
-          ) {
-            setMessage(
-              {
-                type: "success",
-                text: "Wallet successfully linked!",
-              },
-            );
-            const updatedUser =
-              {
-                ...user,
-                walletAddress:
-                  address.toLowerCase(),
-              };
-            setUser(
+          setMessage(
+            {
+              type: "success",
+              text: "Wallet successfully linked!",
+            },
+          );
+
+          const updatedUser =
+            {
+              ...user,
+              walletAddress:
+                address.toLowerCase(),
+            };
+          setUser(
+            updatedUser,
+          );
+          localStorage.setItem(
+            "nippy_user",
+            JSON.stringify(
               updatedUser,
-            );
-            localStorage.setItem(
-              "nippy_user",
-              JSON.stringify(
-                updatedUser,
-              ),
-            );
-          } else {
-            setMessage(
-              {
-                type: "error",
-                text: data.message,
-              },
-            );
-          }
+            ),
+          );
         } catch (err) {
           if (
             err.code ===
@@ -512,7 +341,12 @@ const FanSettings =
             setMessage(
               {
                 type: "error",
-                text: "Failed to link wallet.",
+                text:
+                  err
+                    .response
+                    ?.data
+                    ?.message ||
+                  "Failed to link wallet.",
               },
             );
           }
@@ -605,44 +439,9 @@ const FanSettings =
           setLoading(
             true,
           );
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
-
-          // --- EXECUTE DELETION ---
-          const response =
-            await fetch(
-              "http://localhost:5000/api/users/profile",
-              {
-                method:
-                  "DELETE",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                body: JSON.stringify(
-                  authPayload,
-                ),
-              },
-            );
-
-          const data =
-            await response.json();
-
-          if (
-            !response.ok
-          ) {
-            throw new Error(
-              data.message ||
-                "Failed to delete account.",
-            );
-          }
+          const response = await api.delete("/users/profile", {
+            data: authPayload, // Axios DELETE body requirement
+          });
 
           // --- WIPE LOCAL STATE & REDIRECT ---
           localStorage.removeItem(
@@ -1168,6 +967,6 @@ const FanSettings =
         </div>
       </div>
     );
-  };;
+  };
 
 export default FanSettings;

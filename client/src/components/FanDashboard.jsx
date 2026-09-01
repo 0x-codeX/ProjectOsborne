@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import api from "../utils/api";
 
 
 const FanDashboard =
@@ -47,30 +48,13 @@ const FanDashboard =
     const fetchDashboardData =
       async () => {
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const response =
-            await fetch(
-              "http://localhost:5000/api/purchases/dashboard",
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
+            await api.get(
+              "/purchases/dashboard",
             );
-
-          if (
-            response.ok
-          ) {
-            const result =
-              await response.json();
-            setData(
-              result,
-            );
-          }
+          setData(
+            response.data,
+          );
         } catch (error) {
           console.error(
             "Failed to load dashboard",

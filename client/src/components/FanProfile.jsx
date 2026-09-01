@@ -13,6 +13,9 @@ import {
   Settings,
   LayoutDashboard,
 } from "lucide-react";
+import api from "../utils/api";
+
+
 
 const FanProfile =
   () => {
@@ -59,29 +62,13 @@ const FanProfile =
     const fetchProfile =
       async () => {
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const response =
-            await fetch(
-              "http://localhost:5000/api/users/profile",
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
+            await api.get(
+              "/users/profile",
             );
-          if (
-            response.ok
-          ) {
-            const data =
-              await response.json();
-            setProfile(
-              data,
-            );
-          }
+          setProfile(
+            response.data,
+          );
         } catch (error) {
           console.error(
             "Failed to load profile",
@@ -107,52 +94,24 @@ const FanProfile =
         );
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            );
           const response =
-            await fetch(
-              "http://localhost:5000/api/users/profile",
+            await api.put(
+              "/users/profile",
               {
-                method:
-                  "PUT",
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    username:
-                      profile.username,
-                  },
-                ),
+                username:
+                  profile.username,
               },
             );
-
-          if (
-            response.ok
-          ) {
-            setSuccessMessage(
-              "Profile updated successfully!",
-            );
-            setTimeout(
-              () =>
-                setSuccessMessage(
-                  "",
-                ),
-              3000,
-            );
-          } else {
-            const errorData =
-              await response.json();
-            alert(
-              errorData.message ||
-                "Update failed",
-            );
-          }
+          setSuccessMessage(
+            "Profile updated successfully!",
+          );
+          setTimeout(
+            () =>
+              setSuccessMessage(
+                "",
+              ),
+            3000,
+          );
         } catch (error) {
           console.error(
             "Update failed",
@@ -313,39 +272,20 @@ const FanProfile =
 
                     // 1. Request the Presigned S3 Ticket
                     const ticketRes =
-                      await fetch(
-                        "http://localhost:5000/api/media/upload-ticket",
+                      await api.post(
+                        "/media/upload-ticket",
                         {
-                          method:
-                            "POST",
-                          headers:
-                            {
-                              Authorization: `Bearer ${token}`,
-                              "Content-Type":
-                                "application/json",
-                            },
-                          body: JSON.stringify(
-                            {
-                              fileName:
-                                file.name,
-                              fileType:
-                                file.type,
-                            },
-                          ),
+                          fileName:
+                            file.name,
+                          fileType:
+                            file.type,
                         },
-                      );
-
-                    if (
-                      !ticketRes.ok
-                    )
-                      throw new Error(
-                        "Failed to secure upload ticket",
                       );
                     const {
                       uploadUrl,
                       publicUrl,
                     } =
-                      await ticketRes.json();
+                      ticketRes.data;
 
                     // 2. Upload file directly to Cloudflare R2
                     const uploadRes =
@@ -380,45 +320,23 @@ const FanProfile =
                     );
 
                     // 4. Save the new image URL to the database
-                    const saveRes =
-                      await fetch(
-                        "http://localhost:5000/api/users/profile",
-                        {
-                          method:
-                            "PUT",
-                          headers:
-                            {
-                              Authorization: `Bearer ${token}`,
-                              "Content-Type":
-                                "application/json",
-                            },
-                          body: JSON.stringify(
-                            {
-                              profileImage:
-                                publicUrl,
-                            },
-                          ),
-                        },
-                      );
-
-                    if (
-                      saveRes.ok
-                    ) {
-                      setSuccessMessage(
-                        "Avatar updated successfully!",
-                      );
-                      setTimeout(
-                        () =>
-                          setSuccessMessage(
-                            "",
-                          ),
-                        3000,
-                      );
-                    } else {
-                      throw new Error(
-                        "Failed to save avatar to profile",
-                      );
-                    }
+                    await api.put(
+                      "/users/profile",
+                      {
+                        profileImage:
+                          publicUrl,
+                      },
+                    );
+                    setSuccessMessage(
+                      "Avatar updated successfully!",
+                    );
+                    setTimeout(
+                      () =>
+                        setSuccessMessage(
+                          "",
+                        ),
+                      3000,
+                    );
                   } catch (error) {
                     console.error(
                       "Avatar upload failed:",

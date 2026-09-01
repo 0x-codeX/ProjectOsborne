@@ -441,8 +441,12 @@ const LandingPage =
 
     const handleXAuth =
       () => {
-        window.location.href =
-          "http://localhost:5000/api/auth/x";
+        const backendUrl =
+          import.meta
+            .env
+            .VITE_API_URL ||
+          "https://nippy-serverside.onrender.com/api";
+        window.location.href = `${backendUrl}/auth/x`;
       };
 
     return (

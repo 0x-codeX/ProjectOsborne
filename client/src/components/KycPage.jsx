@@ -8,6 +8,9 @@ import {
   FileText,
   Lock,
 } from "lucide-react";
+import api from "../utils/api";
+
+
 
 const KycPage =
   () => {
@@ -54,39 +57,25 @@ const KycPage =
           }
 
           const response =
-            await fetch(
-              "http://localhost:5000/api/auth/kyc/start-session",
+            await api.post(
+              "/auth/kyc/start-session",
               {
-                method:
-                  "POST",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                  },
-                body: JSON.stringify(
-                  {
-                    userId:
-                      user._id,
-                  },
-                ),
+                userId:
+                  user._id,
               },
             );
 
-          const data =
-            await response.json();
-
           if (
-            response.ok &&
-            data.url
+            response.data &&
+            response
+              .data
+              .url
           ) {
-            // Redirect the user to the secure identity verification portal
             window.location.href =
-              data.url;
+              response.data.url;
           } else {
             throw new Error(
-              data.message ||
-                "Failed to initialize gateway.",
+              "Failed to initialize gateway.",
             );
           }
         } catch (err) {

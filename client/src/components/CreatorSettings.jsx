@@ -27,6 +27,7 @@ import {
   ImageIcon,
 } from "lucide-react";
 import { ethers } from "ethers";
+import api from "../utils/api";
 
 // OFFICIAL PAYSTACK BANK CODES FOR NIGERIA
 const NIGERIAN_BANKS =
@@ -407,40 +408,18 @@ const CreatorSettings =
               "token",
             );
 
-          // 1. Request a 15-minute S3 upload ticket
           const ticketRes =
-            await fetch(
-              "http://localhost:5000/api/media/upload-ticket",
+            await api.post(
+              "/media/upload-ticket",
               {
-                method:
-                  "POST",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                body: JSON.stringify(
-                  {
-                    fileName:
-                      file.name,
-                    fileType:
-                      file.type,
-                  },
-                ),
+                fileName:
+                  file.name,
+                fileType:
+                  file.type,
               },
             );
-
           const ticketData =
-            await ticketRes.json();
-          if (
-            !ticketRes.ok
-          ) {
-            throw new Error(
-              ticketData.message ||
-                "Failed to generate upload URL",
-            );
-          }
+            ticketRes.data;
 
           // 2. Direct binary PUT to storage bucket (bypasses Express payload limit)
           const uploadRes =
@@ -861,45 +840,16 @@ const CreatorSettings =
             "USD");
 
         try {
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
           const response =
-            await fetch(
-              "http://localhost:5000/api/users/profile",
+            await api.put(
+              "/users/profile",
               {
-                method:
-                  "PUT",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                body: JSON.stringify(
-                  {
-                    ...formData,
-                    ...authPayload,
-                  },
-                ),
+                ...formData,
+                ...authPayload,
               },
             );
-
           const data =
-            await response.json();
-
-          if (
-            !response.ok
-          ) {
-            throw new Error(
-              data.message ||
-                "Failed to update profile",
-            );
-          }
+            response.data;
 
           const updatedUser =
             {
@@ -1036,43 +986,13 @@ const CreatorSettings =
           setIsSaving(
             true,
           );
-          const token =
-            localStorage.getItem(
-              "nippy_token",
-            ) ||
-            localStorage.getItem(
-              "token",
-            );
-
           const response =
-            await fetch(
-              "http://localhost:5000/api/users/profile",
+            await api.delete(
+              "/users/profile",
               {
-                method:
-                  "DELETE",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                body: JSON.stringify(
-                  authPayload,
-                ),
+                data: authPayload, // Axios sends body for DELETE via 'data'
               },
             );
-
-          const data =
-            await response.json();
-
-          if (
-            !response.ok
-          ) {
-            throw new Error(
-              data.message ||
-                "Failed to delete account.",
-            );
-          }
 
           localStorage.removeItem(
             "nippy_user",
