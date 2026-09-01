@@ -155,7 +155,7 @@ const LandingPage =
           } else {
             if (
               !isLogin ||
-              !userObj.isAgeVerified
+              !userObj.username
             ) {
               navigate(
                 "/fan-setup",
@@ -299,7 +299,7 @@ const LandingPage =
           } else {
             if (
               data.isNewUser ||
-              !userObj.isAgeVerified
+              !userObj.username
             ) {
               navigate(
                 "/fan-setup",
@@ -399,7 +399,7 @@ const LandingPage =
                 } else {
                   if (
                     data.isNewUser ||
-                    !userObj.isAgeVerified
+                    !userObj.username
                   ) {
                     navigate(
                       "/fan-setup",

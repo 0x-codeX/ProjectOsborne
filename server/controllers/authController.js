@@ -117,6 +117,12 @@ exports.registerUser =
               email:
                 user.email,
               role: user.role,
+              username:
+                user.username,
+              hasCompletedBioData:
+                user.hasCompletedBioData,
+              isAgeVerified:
+                user.isAgeVerified,
               token:
                 generateToken(
                   user._id,
@@ -187,6 +193,12 @@ exports.loginUser =
             email:
               user.email,
             role: user.role,
+            username:
+              user.username,
+            hasCompletedBioData:
+              user.hasCompletedBioData,
+            isAgeVerified:
+              user.isAgeVerified,
             token:
               generateToken(
                 user._id,
