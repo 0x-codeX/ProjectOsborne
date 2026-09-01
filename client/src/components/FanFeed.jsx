@@ -983,7 +983,7 @@ const FanFeed =
             "/api",
             "",
           ) ||
-            "http://localhost:5000",
+            "https://nippy-serverside.onrender.com"
         );
 
       // FIXED: Real-time listener to instantly light up the LIVE badge

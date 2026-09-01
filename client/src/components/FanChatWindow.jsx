@@ -358,7 +358,7 @@ const FanChatWindow =
             "/api",
             "",
           ) ||
-            "http://localhost:5000",
+            "https://nippy-serverside.onrender.com"
         );
 
       if (

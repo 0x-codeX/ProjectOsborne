@@ -76,7 +76,7 @@ const NotificationsFeed =
             "/api",
             "",
           ) ||
-            "http://localhost:5000",
+            "https://nippy-serverside.onrender.com"
         );
 
       // FIXED: Instantly light up the notification card when they go live

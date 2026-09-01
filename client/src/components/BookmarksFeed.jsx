@@ -665,7 +665,7 @@ const BookmarksFeed =
             "/api",
             "",
           ) ||
-            "http://localhost:5000",
+            "https://nippy-serverside.onrender.com"
         );
       socket.on(
         "live_stream_ended",

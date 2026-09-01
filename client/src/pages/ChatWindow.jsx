@@ -76,7 +76,7 @@ const ChatWindow =
           import.meta
             .env
             .VITE_BACKEND_URL ||
-            "http://localhost:5000",
+            "https://nippy-serverside.onrender.com"
         );
       socketRef.current.emit(
         "join_chat",

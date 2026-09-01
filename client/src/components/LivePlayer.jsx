@@ -399,7 +399,7 @@ const LivePlayer =
               "/api",
               "",
             ) ||
-              "http://localhost:5000",
+              "https://nippy-serverside.onrender.com"
           );
         socketRef.current.emit(
           "join_live_chat",

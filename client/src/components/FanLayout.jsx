@@ -138,7 +138,7 @@ const FanLayout =
             "/api",
             "",
           ) ||
-            "http://localhost:5000",
+            "https://nippy-serverside.onrender.com"
         );
 
       socket.on(
