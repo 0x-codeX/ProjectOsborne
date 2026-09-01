@@ -61,10 +61,10 @@ const CreatorProfile =
       <div className="min-h-screen bg-slate-950 p-6 md:p-12 text-slate-200 font-sans relative">
         <div className="max-w-3xl mx-auto">
           <div className="flex justify-between items-center mb-8">
-            <h1 className="text-3xl font-bold text-white tracking-tight">
+            <h2 className="text-3xl font-bold text-white tracking-tight">
               Profile
               Overview
-            </h1>
+            </h2>
             <Link
               to="/creator/settings"
               className="flex items-center px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition-colors text-sm font-bold shadow-lg"

@@ -47,6 +47,9 @@ const TransactionSchema =
           "LIQUIDATION",
           "TRANSFER",
           "FEE",
+          "SALE",
+          "CHARGEBACK_DEBIT",
+          "CHARGEBACK_REVERSAL",
         ],
         required: true,
       },
@@ -72,11 +75,18 @@ const TransactionSchema =
       currency:
         {
           type: String,
+          required: true,
           enum: [
+            "USD",
             "NGN",
+            "EUR",
+            "GBP",
+            "GHS",
+            "ZAR",
             "USDT",
           ],
-          required: true,
+          default:
+            "USD",
         },
 
       // For swaps/liquidations (e.g., USDT -> NGN)
@@ -128,41 +138,13 @@ const TransactionSchema =
   );
 
 // Prevent modifications to completed transactions (Immutability check)
-TransactionSchema.pre(
-  "save",
-  function (
-    next,
-  ) {
-    if (
-      !this
-        .isNew &&
-      this.isModified() &&
-      this
-        .status ===
-        "COMPLETED"
-    ) {
-      // Only allow status changes if it's failing/reversing, but block arbitrary data changes
-      if (
-        this.isModified(
-          "amount",
-        ) ||
-        this.isModified(
-          "currency",
-        )
-      ) {
-        return next(
-          new Error(
-            "FATAL: Cannot modify amounts on a logged transaction.",
-          ),
-        );
-      }
+TransactionSchema.pre("save", function () {
+  if (!this.isNew && this.isModified() && this.status === "COMPLETED") {
+    // Only allow status changes if it's failing/reversing, but block arbitrary data changes
+    if (this.isModified("amount") || this.isModified("currency")) {
+      throw new Error("FATAL: Cannot modify amounts on a logged transaction.");
     }
-    next();
-  },
-);
+  }
+});
 
-module.exports =
-  mongoose.model(
-    "Transaction",
-    TransactionSchema,
-  );
+module.exports = mongoose.model("Transaction", TransactionSchema);

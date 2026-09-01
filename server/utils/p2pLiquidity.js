@@ -1,24 +1,185 @@
-// server/utils/p2pLiquidity.js
 const axios = require("axios");
 
-// Cache mechanism for the dashboard preview (saves API limits)
-let cachedRate =
+// Cache mechanism for the global multi-currency rate map
+let cachedRates =
   null;
 let lastCacheTime = 0;
 const CACHE_TTL_MS =
-  24 *
+  15 *
   60 *
-  60 *
-  1000; // 24 hours
+  1000; // 15-minute cache for P2P Army
 
+// Global Fallback Matrix (in case all APIs fail completely)
 const P2P_FALLBACK_RATES =
   {
-    USDT_NGN: 1500, // Treasury fallback rate (1 USDT = 1500 NGN)
+    USD: {
+      buy: 1,
+      sell: 1,
+      mid: 1,
+    },
+    NGN: {
+      buy: 1400,
+      sell: 1400,
+      mid: 1400,
+    },
+    GHS: {
+      buy: 15.0,
+      sell: 15.0,
+      mid: 15.0,
+    },
+    KES: {
+      buy: 130.0,
+      sell: 130.0,
+      mid: 130.0,
+    },
   };
 
 /**
- * Fetches Live P2P rates specifically for USDT <-> NGN
- * @param {boolean} forceRefresh - If true, bypasses the cache to get the live prevailing rate
+ * Helper: Fetches live P2P Army prices (BUY/SELL averages across payment methods) for a single fiat currency
+ */
+async function fetchP2PArmyRate(
+  fiatCurrency,
+) {
+  if (
+    fiatCurrency ===
+    "USD"
+  ) {
+    return {
+      buy: 1,
+      sell: 1,
+      mid: 1,
+    };
+  }
+
+  const apiKey =
+    process.env.P2PARMY_API_KEY?.trim();
+  const baseUrl =
+    process.env.P2PARMY_BASE_URL?.trim() ||
+    "https://p2p.army/v1/api";
+  const market =
+    process.env.P2PARMY_MARKET?.trim() ||
+    "bybit";
+
+  if (
+    !apiKey
+  ) {
+    throw new Error(
+      "P2PARMY_API_KEY is not configured in .env",
+    );
+  }
+
+  const response =
+    await axios.post(
+      `${baseUrl}/get_p2p_prices`,
+      {
+        market:
+          market,
+        fiat: fiatCurrency,
+        asset:
+          "USDT",
+        limit: 10,
+      },
+      {
+        headers:
+          {
+            "X-APIKEY":
+              apiKey,
+            "Content-Type":
+              "application/json",
+          },
+        timeout: 6000,
+      },
+    );
+
+  const data =
+    response.data;
+  if (
+    data?.status ===
+      1 &&
+    Array.isArray(
+      data?.prices,
+    ) &&
+    data
+      .prices
+      .length >
+      0
+  ) {
+    // Filter out payment methods with zeroed averages
+    const validMethods =
+      data.prices.filter(
+        (
+          p,
+        ) =>
+          p.avg_price_BUY >
+            0 &&
+          p.avg_price_SELL >
+            0,
+      );
+
+    const priceList =
+      validMethods.length >
+      0
+        ? validMethods
+        : data.prices;
+
+    const avgBuy =
+      priceList.reduce(
+        (
+          acc,
+          curr,
+        ) =>
+          acc +
+          (curr.avg_price_BUY ||
+            0),
+        0,
+      ) /
+      priceList.length;
+
+    const avgSell =
+      priceList.reduce(
+        (
+          acc,
+          curr,
+        ) =>
+          acc +
+          (curr.avg_price_SELL ||
+            0),
+        0,
+      ) /
+      priceList.length;
+
+    return {
+      buy:
+        Math.round(
+          avgBuy *
+            100,
+        ) /
+        100,
+      sell:
+        Math.round(
+          avgSell *
+            100,
+        ) /
+        100,
+      mid:
+        Math.round(
+          ((avgBuy +
+            avgSell) /
+            2) *
+            100,
+        ) /
+        100,
+    };
+  }
+
+  throw new Error(
+    `P2P Army returned no valid prices for ${fiatCurrency}`,
+  );
+}
+
+/**
+ * Fetches Live Global P2P rates across all quote currencies for dashboard previews
+ * @param {boolean} forceRefresh - If true, bypasses the cache to get live prevailing rates
  */
 async function getLiveP2PRates(
   forceRefresh = false,
@@ -26,153 +187,202 @@ async function getLiveP2PRates(
   const now =
     Date.now();
 
-  const monierateKey =
-    process.env.MONIERATE_API_KEY?.trim();
-  const monierateBase =
-    process.env.MONIERATE_BASE_URL?.trim() ||
-    "https://api.monierate.com";
-
-  // Return cached rate if valid and forceRefresh is false
+  // Return cached rate map if valid and forceRefresh is false
   if (
     !forceRefresh &&
-    cachedRate &&
+    cachedRates &&
     now -
       lastCacheTime <
       CACHE_TTL_MS
   ) {
-    return cachedRate;
+    return cachedRates;
   }
 
-  // TIER 1: Primary API - Monierate
+  const quoteAssets =
+    (
+      process
+        .env
+        .QUOTE_ASSETS ||
+      "NGN,GHS,KES,ZAR,GBP,EUR"
+    ).split(
+      ",",
+    );
+
+  // TIER 1: Primary API - P2P Army (Queries each target fiat)
   if (
-    monierateKey
+    process
+      .env
+      .P2PARMY_API_KEY
   ) {
     try {
-      const cleanBase =
-        monierateBase.endsWith(
-          "/",
-        )
-          ? monierateBase.slice(
-              0,
-              -1,
-            )
-          : monierateBase;
-
-      // If POST /core/rates/convert.json throws a 404 Not Found, change this string to just "/rates/convert.json"
-      const url = `${cleanBase}/core/rates/convert.json`;
-
-      // Using the POST variant guarantees strict data types and bypasses their URL parser bugs
-      const res =
-        await axios.post(
-          url,
-          {
-            from: "USDT",
-            to: "NGN",
-            amount: 1,
-            market:
-              "parallel",
+      const rateMap =
+        {
+          USD: {
+            buy: 1,
+            sell: 1,
+            mid: 1,
           },
+        };
+
+      // Concurrently query P2P rates for configured fiats
+      await Promise.all(
+        quoteAssets.map(
+          async (
+            fiat,
+          ) => {
+            const trimmedFiat =
+              fiat.trim();
+            if (
+              trimmedFiat ===
+              "USD"
+            )
+              return;
+            try {
+              const rates =
+                await fetchP2PArmyRate(
+                  trimmedFiat,
+                );
+              rateMap[
+                trimmedFiat
+              ] =
+                rates;
+            } catch (err) {
+              console.warn(
+                `[!] P2P Army skip for ${trimmedFiat}: ${err.message}`,
+              );
+            }
+          },
+        ),
+      );
+
+      if (
+        Object.keys(
+          rateMap,
+        )
+          .length >
+        1
+      ) {
+        cachedRates =
+          rateMap;
+        lastCacheTime =
+          now;
+        console.log(
+          `[i] P2P Global Map Updated via P2P Army. Currencies loaded: ${
+            Object.keys(
+              rateMap,
+            )
+              .length
+          }`,
+        );
+        return cachedRates;
+      }
+    } catch (error) {
+      console.warn(
+        "[-] P2P Army batch update failed:",
+        error.message,
+      );
+    }
+  }
+
+  // TIER 2: Secondary Fallback - CoinAPI
+  const coinApiKey =
+    process.env.COINAPI_KEY?.trim();
+  if (
+    coinApiKey
+  ) {
+    try {
+      const coinApiBase =
+        process.env.COINAPI_BASE_URL?.trim() ||
+        "https://rest.coinapi.io/v1";
+      const url = `${coinApiBase}/exchangerate/USDT?filter_asset_id=${encodeURIComponent(
+        quoteAssets.join(
+          ",",
+        ),
+      )}`;
+
+      const res =
+        await axios.get(
+          url,
           {
             headers:
               {
-                api_key:
-                  monierateKey,
-                "Content-Type":
+                Authorization:
+                  coinApiKey,
+                Accept:
                   "application/json",
               },
             timeout: 5000,
           },
         );
 
-      const rateData =
-        res.data;
-      const rate =
-        rateData
-          ?.data
-          ?.rate;
-
       if (
-        rate
+        res
+          .data
+          ?.rates &&
+        Array.isArray(
+          res
+            .data
+            .rates,
+        )
       ) {
-        cachedRate =
-          parseFloat(
-            rate,
-          );
+        const rateMap =
+          {
+            USD: {
+              buy: 1,
+              sell: 1,
+              mid: 1,
+            },
+          };
+        res.data.rates.forEach(
+          (
+            item,
+          ) => {
+            if (
+              item.asset_id_quote &&
+              typeof item.rate ===
+                "number"
+            ) {
+              rateMap[
+                item.asset_id_quote
+              ] =
+                {
+                  buy: item.rate,
+                  sell: item.rate,
+                  mid: item.rate,
+                };
+            }
+          },
+        );
+
+        cachedRates =
+          rateMap;
         lastCacheTime =
           now;
         console.log(
-          `[i] P2P Rate updated via Monierate: ₦${cachedRate}`,
+          `[i] P2P Global Map Updated via CoinAPI fallback.`,
         );
-        return cachedRate;
-      } else {
-        console.warn(
-          "[?] Monierate connected, but rate could not be extracted. Payload:",
-          JSON.stringify(
-            rateData,
-          ),
-        );
+        return cachedRates;
       }
-    } catch (error) {
+    } catch (coinErr) {
       console.warn(
-        "[-] Monierate API failed. Status:",
-        error
-          .response
-          ?.status,
-      );
-      console.warn(
-        "[-] Monierate Error Details:",
-        error
-          .response
-          ?.data ||
-          error.message,
+        "[-] CoinAPI fallback failed:",
+        coinErr.message,
       );
     }
   }
 
-  // TIER 2: Secondary API - P2PArmy
-  // TEMPORARILY DISABLED until you replace the dummy URL in your .env with their actual endpoint
-  /*
-  const p2pArmyKey = process.env.P2PARMY_API_KEY?.trim();
-  const p2pArmyBase = process.env.P2PARMY_BASE_URL?.trim();
-
-  if (p2pArmyKey && p2pArmyBase && !p2pArmyBase.includes("api.p2parmy.com")) {
-    try {
-      const endpoint = "/v2/market/usdt_ngn";
-      const url = `${p2pArmyBase}${endpoint}`;
-
-      const res = await axios.get(url, {
-        headers: {
-          "Authorization": `Bearer ${p2pArmyKey}`,
-          "x-api-key": p2pArmyKey
-        },
-        timeout: 5000
-      });
-
-      const rate = res.data?.usdt_ngn || res.data?.rate || res.data?.data?.rate;
-      if (rate) {
-        cachedRate = parseFloat(rate);
-        lastCacheTime = now;
-        console.log(`[i] P2P Rate updated via P2PArmy: ₦${cachedRate}`);
-        return cachedRate;
-      }
-    } catch (error) {
-      console.warn("[-] P2PArmy API failed:", error.response?.data || error.message);
-    }
-  }
-  */
-
-  // TIER 3: Treasury Fallback
+  // TIER 3: Treasury Fallback Matrix
   console.warn(
-    "[!] All live P2P APIs failed. Engaging Treasury Fallback.",
+    "[!] All live P2P APIs failed. Engaging Global Treasury Fallback Matrix.",
   );
   return (
-    cachedRate ||
-    P2P_FALLBACK_RATES.USDT_NGN
+    cachedRates ||
+    P2P_FALLBACK_RATES
   );
 }
 
 /**
- * Calculates a liquidation quote with a protective spread (cushion)
+ * Calculates a liquidation quote dynamically using exact BUY/SELL averages from P2P Army
  */
 async function generateLiquidationQuote(
   amount,
@@ -195,34 +405,103 @@ async function generateLiquidationQuote(
     );
   }
 
-  // forceRefresh = true ensures trades never execute on stale/cached rates
-  const liveRate =
-    await getLiveP2PRates(
-      true,
+  const [
+    fromCurr,
+    toCurr,
+  ] =
+    direction.split(
+      "_TO_",
     );
+  if (
+    !fromCurr ||
+    !toCurr ||
+    (fromCurr !==
+      "USDT" &&
+      toCurr !==
+        "USDT")
+  ) {
+    throw new Error(
+      "Invalid liquidation direction format. Transaction must involve USDT.",
+    );
+  }
+
+  const fiatCurrency =
+    fromCurr ===
+    "USDT"
+      ? toCurr
+      : fromCurr;
+
+  let baseRate = 1;
+  let rawP2PRates =
+    null;
+
+  // Try direct live fetch from P2P Army for maximum accuracy
+  try {
+    rawP2PRates =
+      await fetchP2PArmyRate(
+        fiatCurrency,
+      );
+  } catch (err) {
+    console.warn(
+      `[!] Direct P2P Army rate fetch failed for ${fiatCurrency}, falling back to general map:`,
+      err.message,
+    );
+    const globalRates =
+      await getLiveP2PRates(
+        true,
+      );
+    baseRate =
+      globalRates[
+        fiatCurrency
+      ] ||
+      P2P_FALLBACK_RATES[
+        fiatCurrency
+      ] ||
+      1;
+  }
 
   let executionRate;
   let estimatedPayout;
+  let liveMarketRateUsed;
+
+  const fallbackBuy =
+    typeof baseRate ===
+    "object"
+      ? baseRate.buy
+      : baseRate;
+  const fallbackSell =
+    typeof baseRate ===
+    "object"
+      ? baseRate.sell
+      : baseRate;
 
   if (
-    direction ===
-    "USDT_TO_NGN"
+    direction.startsWith(
+      "USDT_TO_",
+    )
   ) {
-    // Bank Creator selling USDT to Nippy: We buy it CHEAPER than market
+    liveMarketRateUsed =
+      rawP2PRates
+        ? rawP2PRates.buy
+        : fallbackBuy;
     executionRate =
-      liveRate *
+      liveMarketRateUsed *
       (1 -
         spreadPercentage);
     estimatedPayout =
       parsedAmount *
       executionRate;
   } else if (
-    direction ===
-    "NGN_TO_USDT"
+    direction.endsWith(
+      "_TO_USDT",
+    )
   ) {
-    // Crypto Creator buying USDT from Nippy: We sell it HIGHER than market
+    liveMarketRateUsed =
+      rawP2PRates
+        ? rawP2PRates.sell
+        : fallbackSell;
     executionRate =
-      liveRate *
+      liveMarketRateUsed *
       (1 +
         spreadPercentage);
     estimatedPayout =
@@ -230,7 +509,7 @@ async function generateLiquidationQuote(
       executionRate;
   } else {
     throw new Error(
-      "Invalid liquidation direction.",
+      "Failed to resolve dynamic liquidation direction.",
     );
   }
 
@@ -238,8 +517,9 @@ async function generateLiquidationQuote(
     amount:
       parsedAmount,
     direction,
+    fiatCurrency,
     liveMarketRate:
-      liveRate,
+      liveMarketRateUsed,
     executionRate:
       Math.round(
         executionRate *
@@ -259,7 +539,7 @@ async function generateLiquidationQuote(
       Date.now() +
       5 *
         60 *
-        1000, // Quote strictly expires in 5 minutes
+        1000, // Quote expires in 5 minutes
   };
 }
 

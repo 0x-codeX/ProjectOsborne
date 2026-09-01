@@ -10,7 +10,11 @@ import {
   ShieldCheck,
   Gift,
   Camera,
-  Monitor,
+  Megaphone,
+  ImagePlus,
+  X,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 const CreatorLiveSetup =
@@ -37,7 +41,36 @@ const CreatorLiveSetup =
         "",
       );
     const navigate =
-      useNavigate(); // FIXED: Initialized navigate
+      useNavigate();
+
+    const [
+      showPromo,
+      setShowPromo,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      promoText,
+      setPromoText,
+    ] =
+      useState(
+        "",
+      );
+    const [
+      promoFile,
+      setPromoFile,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      promoPreview,
+      setPromoPreview,
+    ] =
+      useState(
+        null,
+      );
 
     const handleCreateStream =
       async (
@@ -52,7 +85,7 @@ const CreatorLiveSetup =
         );
 
         try {
-          // Provision the stream securely via the interceptor
+          // 1. Provision the stream securely via the interceptor
           const res =
             await api.post(
               "/streams/create",
@@ -60,11 +93,73 @@ const CreatorLiveSetup =
                 title,
               },
             );
+          const streamId =
+            res
+              .data
+              .streamId;
 
-          // ONE-CLICK GATEWAY: Instantly push them into the dual-mode studio.
-          // We don't make them wait on an intermediate screen anymore.
+          // 2. Fire the Promo Post if they opted in (Parallel Execution)
+          if (
+            showPromo &&
+            promoFile
+          ) {
+            const formData =
+              new FormData();
+            formData.append(
+              "media",
+              promoFile,
+            );
+            formData.append(
+              "title",
+              "🔴 LIVE NOW",
+            );
+            formData.append(
+              "description",
+              promoText.trim() ||
+                "Dropping into a live right now! Come hang out.",
+            );
+
+            // EXACT MATCH: Aligning with the backend requirements
+            formData.append(
+              "price",
+              0, // Triggers the free content flow
+            );
+            formData.append(
+              "priceCurrency",
+              "USD",
+            );
+            formData.append(
+              "isNsfw",
+              false,
+            );
+
+            // EXACT MATCH: Using the verified endpoint from MediaUploader.jsx
+            api
+              .post(
+                "/content/upload",
+                formData,
+                {
+                  headers:
+                    {
+                      "Content-Type":
+                        "multipart/form-data",
+                    },
+                },
+              )
+              .catch(
+                (
+                  err,
+                ) =>
+                  console.error(
+                    "Promo post upload failed:",
+                    err,
+                  ),
+              );
+          }
+
+          // 3. ONE-CLICK GATEWAY: Instantly push them into the dual-mode studio.
           navigate(
-            `/creator/studio/${res.data.streamId}`,
+            `/creator/studio/${streamId}`,
           );
         } catch (err) {
           setError(
@@ -76,7 +171,29 @@ const CreatorLiveSetup =
           );
           setLoading(
             false,
-          ); // Only stop loading if there is an error, otherwise let it ride to the next page
+          );
+        }
+      };
+
+    const handleImageSelection =
+      (
+        e,
+      ) => {
+        const file =
+          e
+            .target
+            .files[0];
+        if (
+          file
+        ) {
+          setPromoFile(
+            file,
+          );
+          setPromoPreview(
+            URL.createObjectURL(
+              file,
+            ),
+          );
         }
       };
 
@@ -158,6 +275,154 @@ const CreatorLiveSetup =
             />
           </div>
 
+          {/* INJECTED: Feed Promo Toggle */}
+          <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden transition-all duration-300">
+            <button
+              type="button"
+              onClick={() =>
+                setShowPromo(
+                  !showPromo,
+                )
+              }
+              className="w-full p-4 flex items-center justify-between hover:bg-slate-900 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-500/10 rounded-lg">
+                  <Megaphone
+                    className="text-blue-500"
+                    size={
+                      18
+                    }
+                  />
+                </div>
+                <div className="text-left">
+                  <h4 className="text-sm font-bold text-slate-200">
+                    Broadcast
+                    to
+                    FanFeed
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Drop
+                    a
+                    post
+                    to
+                    push
+                    your
+                    profile
+                    to
+                    the
+                    top
+                  </p>
+                </div>
+              </div>
+              {showPromo ? (
+                <ChevronUp
+                  size={
+                    20
+                  }
+                  className="text-slate-500"
+                />
+              ) : (
+                <ChevronDown
+                  size={
+                    20
+                  }
+                  className="text-slate-500"
+                />
+              )}
+            </button>
+
+            {showPromo && (
+              <div className="p-4 border-t border-slate-800 space-y-4 bg-slate-900/50 animate-in slide-in-from-top-2">
+                {/* Image Uploader */}
+                {!promoPreview ? (
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-700 border-dashed rounded-xl cursor-pointer hover:border-blue-500 hover:bg-blue-500/5 transition-all group">
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                      <ImagePlus className="w-8 h-8 text-slate-500 mb-2 group-hover:text-blue-500 transition-colors" />
+                      <p className="text-sm text-slate-400">
+                        <span className="font-bold text-slate-200">
+                          Click
+                          to
+                          upload
+                        </span>{" "}
+                        a
+                        teaser
+                        image
+                      </p>
+                    </div>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={
+                        handleImageSelection
+                      }
+                    />
+                  </label>
+                ) : (
+                  <div className="relative w-full h-48 rounded-xl overflow-hidden border border-slate-700">
+                    <img
+                      src={
+                        promoPreview
+                      }
+                      alt="Promo preview"
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPromoPreview(
+                          null,
+                        );
+                        setPromoFile(
+                          null,
+                        );
+                      }}
+                      className="absolute top-2 right-2 p-1.5 bg-black/60 text-white rounded-full hover:bg-red-500 transition-colors backdrop-blur-md"
+                    >
+                      <X
+                        size={
+                          16
+                        }
+                      />
+                    </button>
+                  </div>
+                )}
+
+                {/* Caption */}
+                <div>
+                  <textarea
+                    value={
+                      promoText
+                    }
+                    onChange={(
+                      e,
+                    ) =>
+                      setPromoText(
+                        e
+                          .target
+                          .value,
+                      )
+                    }
+                    placeholder="Dropping into a live stream right now! Come hang out."
+                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-colors text-sm min-h-[80px] resize-none"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    If
+                    left
+                    blank,
+                    a
+                    default
+                    message
+                    will
+                    be
+                    used.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Dynamic Capability Previews */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
             <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex items-start gap-3">
@@ -231,34 +496,21 @@ const CreatorLiveSetup =
                   }
                 />
                 <span className="text-[10px] font-bold uppercase">
-                  Webcam
-                </span>
-              </div>
-              <span className="text-slate-600 font-bold">
-                OR
-              </span>
-              <div className="flex flex-col items-center gap-1">
-                <Monitor
-                  size={
-                    20
-                  }
-                />
-                <span className="text-[10px] font-bold uppercase">
-                  OBS
-                  /
-                  vMix
+                  Camera
+                  Access
                 </span>
               </div>
             </div>
             <p className="text-xs text-slate-400 text-right max-w-[200px]">
-              You
+              Your
+              camera
               will
-              select
-              your
-              broadcast
-              method
+              be
+              securely
+              initialized
               inside
               the
+              live
               studio.
             </p>
           </div>

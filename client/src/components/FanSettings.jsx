@@ -29,6 +29,8 @@ const COUNTRY_TO_CURRENCY =
       "GHS",
     default:
       "USD",
+    World:
+      "USDT",
   };
 
 const FanSettings =
@@ -169,23 +171,12 @@ const FanSettings =
         );
       };
 
-    // WEB2 UPDATE: Profile Settings
-    const handleStandardUpdate =
+    // 1. UPDATE PREFERENCES (No Password Required)
+    const handlePreferencesUpdate =
       async (
         e,
       ) => {
         e.preventDefault();
-        if (
-          !formData.currentPassword
-        ) {
-          return setMessage(
-            {
-              type: "error",
-              text: "Current password is required to authorize updates.",
-            },
-          );
-        }
-
         setLoading(
           true,
         );
@@ -200,6 +191,121 @@ const FanSettings =
           const token =
             localStorage.getItem(
               "nippy_token",
+            ) ||
+            localStorage.getItem(
+              "token",
+            );
+          // Routes to the profile endpoint which handles currency and country
+          const response =
+            await fetch(
+              "http://localhost:5000/api/users/profile",
+              {
+                method:
+                  "PUT",
+                headers:
+                  {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type":
+                      "application/json",
+                  },
+                body: JSON.stringify(
+                  {
+                    country:
+                      formData.country,
+                    preferredCurrency:
+                      formData.preferredCurrency,
+                  },
+                ),
+              },
+            );
+
+          const data =
+            await response.json();
+          if (
+            response.ok
+          ) {
+            setMessage(
+              {
+                type: "success",
+                text: "Preferences saved successfully.",
+              },
+            );
+            if (
+              user
+            ) {
+              const updatedUser =
+                {
+                  ...user,
+                  country:
+                    formData.country,
+                  preferredCurrency:
+                    formData.preferredCurrency,
+                };
+              setUser(
+                updatedUser,
+              );
+              localStorage.setItem(
+                "nippy_user",
+                JSON.stringify(
+                  updatedUser,
+                ),
+              );
+            }
+          } else {
+            setMessage(
+              {
+                type: "error",
+                text: data.message,
+              },
+            );
+          }
+        } catch (error) {
+          setMessage(
+            {
+              type: "error",
+              text: "A network error occurred.",
+            },
+          );
+        } finally {
+          setLoading(
+            false,
+          );
+        }
+      };
+
+    // 2. UPDATE SECURITY (Requires Current Password)
+    const handleSecurityUpdate =
+      async (
+        e,
+      ) => {
+        e.preventDefault();
+        if (
+          !formData.currentPassword
+        ) {
+          return setMessage(
+            {
+              type: "error",
+              text: "Current password is required to authorize updates.",
+            },
+          );
+        }
+        setLoading(
+          true,
+        );
+        setMessage(
+          {
+            type: "",
+            text: "",
+          },
+        );
+
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            ) ||
+            localStorage.getItem(
+              "token",
             );
           const response =
             await fetch(
@@ -214,7 +320,14 @@ const FanSettings =
                       "application/json",
                   },
                 body: JSON.stringify(
-                  formData,
+                  {
+                    currentPassword:
+                      formData.currentPassword,
+                    newEmail:
+                      formData.newEmail,
+                    newPassword:
+                      formData.newPassword,
+                  },
                 ),
               },
             );
@@ -230,25 +343,16 @@ const FanSettings =
                 text: data.message,
               },
             );
-
-            // Update local storage user safely
             if (
-              user
+              user &&
+              formData.newEmail
             ) {
               const updatedUser =
                 {
                   ...user,
-                  country:
-                    formData.country,
-                  preferredCurrency:
-                    formData.preferredCurrency,
+                  email:
+                    formData.newEmail,
                 };
-              if (
-                formData.newEmail
-              )
-                updatedUser.email =
-                  formData.newEmail;
-
               setUser(
                 updatedUser,
               );
@@ -259,7 +363,6 @@ const FanSettings =
                 ),
               );
             }
-
             setFormData(
               (
                 prev,
@@ -623,246 +726,280 @@ const FanSettings =
           </div>
         )}
 
+        {/* PREFERENCES SECTION */}
         <form
           onSubmit={
-            handleStandardUpdate
+            handlePreferencesUpdate
           }
+          className="bg-nippy-obsidian border border-slate-800 rounded-2xl p-6 shadow-xl mb-8"
         >
-          {/* PREFERENCES SECTION */}
-          <div className="bg-nippy-obsidian border border-slate-800 rounded-2xl p-6 shadow-xl mb-8">
-            <h2 className="text-white font-bold mb-6">
-              General
-              Preferences
-            </h2>
+          <h2 className="text-white font-bold mb-6">
+            General
+            Preferences
+          </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
-                  <MapPin
-                    size={
-                      16
-                    }
-                  />{" "}
-                  Location
-                  (Country)
-                </label>
-                <input
-                  type="text"
-                  name="country"
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
+                <MapPin
+                  size={
+                    16
+                  }
+                />{" "}
+                Location
+                (Country)
+              </label>
+              <input
+                type="text"
+                name="country"
+                value={
+                  formData.country
+                }
+                onChange={
+                  handleChange
+                }
+                className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
+                placeholder="e.g. Nigeria"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
+                <Globe
+                  size={
+                    16
+                  }
+                  className="text-amber-500"
+                />{" "}
+                Display
+                Currency
+              </label>
+              <div className="relative">
+                <select
+                  name="preferredCurrency"
                   value={
-                    formData.country
+                    formData.preferredCurrency
                   }
                   onChange={
                     handleChange
                   }
-                  className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
-                  placeholder="e.g. Nigeria"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
-                  <Globe
-                    size={
-                      16
-                    }
-                    className="text-amber-500"
-                  />{" "}
-                  Display
-                  Currency
-                </label>
-                <div className="relative">
-                  <select
-                    name="preferredCurrency"
-                    value={
-                      formData.preferredCurrency
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    className="w-full bg-black border border-gray-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-nippy-coral transition-colors appearance-none font-medium"
+                  className="w-full bg-black border border-gray-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-nippy-coral transition-colors appearance-none font-medium"
+                >
+                  <option value="USD">
+                    USD
+                    -
+                    US
+                    Dollar
+                  </option>
+                  <option value="NGN">
+                    NGN
+                    -
+                    Nigerian
+                    Naira
+                  </option>
+                  <option value="GHS">
+                    GHS
+                    -
+                    Ghanaian
+                    Cedi
+                  </option>
+                  <option value="GBP">
+                    GBP
+                    -
+                    British
+                    Pound
+                  </option>
+                  <option value="KES">
+                    KES
+                    -
+                    Kenyan
+                    Shilling
+                  </option>
+                  <option value="USDT">
+                    USDT
+                    -
+                    Tether
+                    (Crypto)
+                  </option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
+                  <svg
+                    className="fill-current h-4 w-4"
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
                   >
-                    <option value="USD">
-                      USD
-                      -
-                      US
-                      Dollar
-                    </option>
-                    <option value="NGN">
-                      NGN
-                      -
-                      Nigerian
-                      Naira
-                    </option>
-                    <option value="GHS">
-                      GHS
-                      -
-                      Ghanaian
-                      Cedi
-                    </option>
-                    <option value="GBP">
-                      GBP
-                      -
-                      British
-                      Pound
-                    </option>
-                    <option value="KES">
-                      KES
-                      -
-                      Kenyan
-                      Shilling
-                    </option>
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
-                    <svg
-                      className="fill-current h-4 w-4"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                    >
-                      <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
-                    </svg>
-                  </div>
+                    <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
+                  </svg>
                 </div>
               </div>
             </div>
-            <p className="text-xs text-slate-500 mt-4 leading-relaxed">
-              Content
-              prices
-              across
-              the
-              platform
-              will
-              automatically
-              be
-              displayed
-              in
-              your
-              preferred
-              currency.
-              Changing
-              your
-              location
-              will
-              automatically
-              update
-              your
-              currency
-              default.
-            </p>
+          </div>
+          <p className="text-xs text-slate-500 mt-4 leading-relaxed">
+            Content
+            prices
+            across
+            the
+            platform
+            will
+            automatically
+            be
+            displayed
+            in
+            your
+            preferred
+            currency.
+            Changing
+            your
+            location
+            will
+            automatically
+            update
+            your
+            currency
+            default.
+          </p>
+
+          <button
+            type="submit"
+            disabled={
+              loading
+            }
+            className="w-full bg-nippy-coral text-white font-bold py-3 rounded-xl hover:bg-nippy-coralHover transition-all flex justify-center items-center gap-2 disabled:opacity-50 mt-6"
+          >
+            {loading ? (
+              <Loader2
+                size={
+                  20
+                }
+                className="animate-spin"
+              />
+            ) : (
+              <Save
+                size={
+                  20
+                }
+              />
+            )}
+            Save
+            Preferences
+          </button>
+        </form>
+
+        {/* WEB2 CREDENTIALS */}
+        <form
+          onSubmit={
+            handleSecurityUpdate
+          }
+          className="bg-nippy-obsidian border border-red-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden mb-8"
+        >
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-orange-500"></div>
+          <h2 className="text-white font-bold mb-4">
+            Web2
+            Credentials
+          </h2>
+
+          <div className="bg-red-500/5 border border-red-500/20 p-4 rounded-xl mb-6">
+            <label className="block text-sm font-bold text-red-400 mb-2 flex items-center gap-2">
+              <Lock
+                size={
+                  16
+                }
+              />{" "}
+              Current
+              Password
+              (Required)
+            </label>
+            <input
+              type="password"
+              name="currentPassword"
+              value={
+                formData.currentPassword
+              }
+              onChange={
+                handleChange
+              }
+              className="w-full bg-black border border-red-900 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-red-500 transition-colors"
+              placeholder="Enter current password to authorize changes"
+            />
           </div>
 
-          {/* WEB2 CREDENTIALS */}
-          <div className="bg-nippy-obsidian border border-red-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden mb-8">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-orange-500"></div>
-            <h2 className="text-white font-bold mb-4">
-              Web2
-              Credentials
-            </h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
+                <Mail
+                  size={
+                    16
+                  }
+                />{" "}
+                Update
+                Email
+                Address
+              </label>
+              <input
+                type="email"
+                name="newEmail"
+                value={
+                  formData.newEmail
+                }
+                onChange={
+                  handleChange
+                }
+                className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
+                placeholder="New email address"
+              />
+            </div>
 
-            <div className="bg-red-500/5 border border-red-500/20 p-4 rounded-xl mb-6">
-              <label className="block text-sm font-bold text-red-400 mb-2 flex items-center gap-2">
+            <div>
+              <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
                 <Lock
                   size={
                     16
                   }
                 />{" "}
-                Current
+                Update
                 Password
-                (Required)
               </label>
               <input
                 type="password"
-                name="currentPassword"
+                name="newPassword"
                 value={
-                  formData.currentPassword
+                  formData.newPassword
                 }
                 onChange={
                   handleChange
                 }
-                className="w-full bg-black border border-red-900 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-red-500 transition-colors"
-                placeholder="Enter current password to authorize changes"
-                required
+                className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
+                placeholder="New password (min 6 characters)"
               />
             </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
-                  <Mail
-                    size={
-                      16
-                    }
-                  />{" "}
-                  Update
-                  Email
-                  Address
-                </label>
-                <input
-                  type="email"
-                  name="newEmail"
-                  value={
-                    formData.newEmail
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
-                  placeholder="New email address"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
-                  <Lock
-                    size={
-                      16
-                    }
-                  />{" "}
-                  Update
-                  Password
-                </label>
-                <input
-                  type="password"
-                  name="newPassword"
-                  value={
-                    formData.newPassword
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
-                  placeholder="New password (min 6 characters)"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={
-                loading ||
-                !formData.currentPassword
-              }
-              className="w-full bg-nippy-coral text-white font-bold py-3 rounded-xl hover:bg-nippy-coralHover transition-all flex justify-center items-center gap-2 disabled:opacity-50 mt-6"
-            >
-              {loading ? (
-                <Loader2
-                  size={
-                    20
-                  }
-                  className="animate-spin"
-                />
-              ) : (
-                <Save
-                  size={
-                    20
-                  }
-                />
-              )}
-              Save
-              Profile
-              Settings
-            </button>
           </div>
+
+          <button
+            type="submit"
+            disabled={
+              loading ||
+              !formData.currentPassword
+            }
+            className="w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-all flex justify-center items-center gap-2 disabled:opacity-50 mt-6"
+          >
+            {loading ? (
+              <Loader2
+                size={
+                  20
+                }
+                className="animate-spin"
+              />
+            ) : (
+              <Save
+                size={
+                  20
+                }
+              />
+            )}
+            Save
+            Security
+            Settings
+          </button>
         </form>
 
         {/* WEB3 INTEGRATION */}
@@ -1031,6 +1168,6 @@ const FanSettings =
         </div>
       </div>
     );
-  };
+  };;
 
 export default FanSettings;

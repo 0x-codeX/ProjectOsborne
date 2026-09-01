@@ -378,100 +378,139 @@ exports.getFeed = async (req, res) => {
     const viewerId = req.user._id;
     const viewerWallet = req.user.walletAddress ? req.user.walletAddress.toLowerCase() : null;
 
-    const posts = await Content.find()
-      .populate("creator", "username monetizationSettings profileImage walletAddress")
-      .populate("comments.user", "username")
-      .sort({ createdAt: -1 })
-      .lean();
+    const posts =
+      await Content.find()
+        .populate(
+          "creator",
+          "username monetizationSettings profileImage walletAddress isLive currentStreamId",
+        )
+        .populate(
+          "comments.user",
+          "username",
+        )
+        .sort(
+          {
+            createdAt:
+              -1,
+          },
+        )
+        .lean();
 
-    const activeStreams = await Stream.find({ status: "ACTIVE" })
-      .populate("creatorId", "username profileImage walletAddress monetizationSettings")
-      .lean();
+    const activeStreams =
+      await Stream.find(
+        {
+          status:
+            "LIVE",
+        },
+      )
+        .populate(
+          "creatorId",
+          "username profileImage walletAddress monetizationSettings",
+        )
+        .lean();
 
     const userPurchases = await Purchase.find({ user: viewerId })
-      .select("content creator purchaseType createdAt")
+      .select("content creator purchaseType createdAt expiresAt status")
       .lean();
 
     const viewer = await User.findById(viewerId).select("bookmarks following").lean();
 
     const unlockedContentMap = new Map();
+    const subPurchasesByCreator = new Map();
     const subscribedCreatorMap = new Map();
     const bookmarkedSet = new Set(viewer?.bookmarks?.map((id) => id.toString()) || []);
     const followingSet = new Set(viewer?.following?.map((id) => id.toString()) || []);
+    const now = new Date().getTime();
 
+    // 1. Group all purchases
     userPurchases.forEach((p) => {
-      if (p.purchaseType === "PPV" && p.content)
+      const isCompleted = !p.status || p.status === "completed";
+      if (p.purchaseType === "PPV" && p.content && isCompleted) {
         unlockedContentMap.set(p.content.toString(), new Date(p.createdAt).getTime());
-      if (p.purchaseType === "SUBSCRIPTION" && p.creator)
-        subscribedCreatorMap.set(p.creator.toString(), new Date(p.createdAt).getTime());
+      }
+      if (p.purchaseType === "SUBSCRIPTION" && p.creator && isCompleted) {
+        const cId = p.creator.toString();
+        if (!subPurchasesByCreator.has(cId)) subPurchasesByCreator.set(cId, []);
+        subPurchasesByCreator.get(cId).push(p);
+      }
+    });
+
+    // 2. Calculate Unbroken Streak per Creator
+    subPurchasesByCreator.forEach((subs, creatorId) => {
+      subs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      if (subs.length > 0) {
+        const latestSub = subs[0];
+        const latestExp = latestSub.expiresAt ? new Date(latestSub.expiresAt).getTime() : Infinity;
+        
+        if (latestExp > now) {
+          let streakStart = new Date(latestSub.createdAt).getTime();
+          for (let i = 1; i < subs.length; i++) {
+            const prevSub = subs[i];
+            const prevExp = prevSub.expiresAt ? new Date(prevSub.expiresAt).getTime() : 0;
+            const prevStart = new Date(prevSub.createdAt).getTime();
+            
+            const gap = streakStart - prevExp;
+            if (gap <= 172800000) { // 48-hour grace period for auto-renews
+              streakStart = prevStart;
+            } else {
+              break;
+            }
+          }
+          subscribedCreatorMap.set(creatorId, streakStart);
+        }
+      }
     });
 
     const secureFeed = [];
 
-    // --- ACTIVE STREAMS ---
-    for (const stream of activeStreams) {
-      const creatorIdStr = stream.creatorId?._id.toString();
-      const hasActiveSub = !!subscribedCreatorMap.get(creatorIdStr);
-      const isCreator = creatorIdStr === viewerId.toString();
-
-      secureFeed.push({
-        _id: stream._id,
-        type: "LIVE_STREAM",
-        title: stream.title,
-        status: stream.status,
-        createdAt: stream.createdAt,
-        creator: {
-          ...stream.creatorId,
-          isFollowed: followingSet.has(creatorIdStr),
-        },
-        hasAccess: hasActiveSub || isCreator,
-        subscriptionPriceNGN: stream.creatorId?.monetizationSettings?.monthlySubscription || 0,
-        likesCount: 0,
-        commentsCount: 0,
-        isLiked: false,
-        isBookmarked: false,
-      });
-    }
-
-    // --- STANDARD POSTS ---
     for (const post of posts) {
       const settings = post.creator?.monetizationSettings || {};
       const globalPPV = settings.defaultPPVPrice || 0;
       const creatorCurrency = settings.priceCurrency || settings.baseCurrency || "USD";
 
-      // THE FIX: Bulletproof Raw Price Extraction (Checks legacy keys)
       let rawBasePrice = 0;
       if (post.price !== undefined && post.price !== null) {
         rawBasePrice = post.price;
       } else if (post.priceInUSDT !== undefined && post.priceInUSDT !== null) {
         rawBasePrice = post.priceInUSDT;
       } else {
-        rawBasePrice = globalPPV; 
+        rawBasePrice = globalPPV;
       }
 
-      // THE FIX: Guaranteed Free Identification
       const isFree = rawBasePrice <= 0;
       const isCreator = post.creator?._id.toString() === viewerId.toString();
 
       const ppvDate = unlockedContentMap.get(post._id.toString());
-      const subDate = subscribedCreatorMap.get(post.creator?._id.toString());
+      const streakStartDate = subscribedCreatorMap.get(post.creator?._id.toString());
       const hasPurchasedFiatPPV = !!ppvDate;
-      const hasActiveSub = !!subDate;
+      const hasActiveSub = !!streakStartDate;
 
       let hasPurchasedCrypto = false;
       if (viewerWallet && post.unlockedFor && post.unlockedFor.length > 0) {
-        hasPurchasedCrypto = post.unlockedFor.some((address) => address.toLowerCase() === viewerWallet);
+        hasPurchasedCrypto = post.unlockedFor.some(
+          (address) => address.toLowerCase() === viewerWallet
+        );
       }
 
-      // THE FIX: If isFree is true, hasAccess becomes true automatically.
       const hasAccess = isCreator || isFree || hasPurchasedFiatPPV || hasPurchasedCrypto || hasActiveSub;
 
+      // --- THE LIFETIME SUNSET ENGINE (WITH SUBSCRIBER GRACE PERIOD) ---
       if (post.status === "sunset") {
-        let isGrandfathered = isCreator;
-        const sunsetTime = new Date(post.sunsetAt).getTime();
-        if (hasPurchasedFiatPPV && ppvDate < sunsetTime) isGrandfathered = true;
-        if (hasActiveSub && subDate < sunsetTime) isGrandfathered = true;
-        if (hasPurchasedCrypto) isGrandfathered = true;
+        let isGrandfathered = false;
+        if (isCreator) {
+          isGrandfathered = true;
+        } else {
+          // 1. Lifetime access strictly granted to direct PPV buyers
+          if (hasPurchasedFiatPPV) isGrandfathered = true;
+          if (hasPurchasedCrypto) isGrandfathered = true;
+
+          // 2. Active Subscriber Grace Period
+          const sunsetTime = post.sunsetAt ? new Date(post.sunsetAt).getTime() : 0;
+          if (hasActiveSub && streakStartDate && streakStartDate < sunsetTime) {
+            isGrandfathered = true;
+          }
+        }
+
         if (!isGrandfathered) continue;
       }
 
@@ -479,7 +518,6 @@ exports.getFeed = async (req, res) => {
         ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
         : "https://placehold.co/600x400/111111/555555?text=Locked";
 
-      // Lock Enforcement
       if (!hasAccess) {
         delete post.fileKey;
         post.mediaUrl = null;
@@ -493,29 +531,57 @@ exports.getFeed = async (req, res) => {
           });
           post.mediaUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
           post.isLocked = false;
+          delete post.fileKey;
         } catch (err) {
           post.mediaUrl = null;
           post.isLocked = true;
         }
       }
 
-      const likesArray = post.likes || [];
-      secureFeed.push({
-        ...post,
-        type: "POST",
-        creator: {
-          ...post.creator,
-          isFollowed: followingSet.has(post.creator?._id.toString()),
+      const likesArray =
+        post.likes ||
+        [];
+      secureFeed.push(
+        {
+          ...post,
+          type: "POST",
+          hasActiveSub,
+          creator:
+            {
+              ...post.creator,
+              isFollowed:
+                followingSet.has(
+                  post.creator?._id.toString(),
+                ),
+            },
+          actualPrice:
+            rawBasePrice,
+          priceCurrency:
+            creatorCurrency,
+          isPaywalled:
+            !isFree,
+          isLiked:
+            likesArray.some(
+              (
+                id,
+              ) =>
+                id.toString() ===
+                viewerId.toString(),
+            ),
+          isBookmarked:
+            bookmarkedSet.has(
+              post._id.toString(),
+            ),
+          likesCount:
+            likesArray.length,
+          commentsCount:
+            post.comments
+              ? post
+                  .comments
+                  .length
+              : 0,
         },
-        // Pass the RAW prices securely to the frontend pricing engine
-        actualPrice: rawBasePrice, 
-        priceCurrency: creatorCurrency,
-        isPaywalled: !isFree, 
-        isLiked: likesArray.some((id) => id.toString() === viewerId.toString()),
-        isBookmarked: bookmarkedSet.has(post._id.toString()),
-        likesCount: likesArray.length,
-        commentsCount: post.comments ? post.comments.length : 0,
-      });
+      );
     }
 
     res.status(200).json(secureFeed);
@@ -1161,7 +1227,6 @@ exports.addComment =
 exports.getBookmarks = async (req, res) => {
   try {
     const viewerId = req.user._id;
-    // Grab the viewer's wallet for Web3 crypto purchase validation
     const viewerWallet = req.user.walletAddress ? req.user.walletAddress.toLowerCase() : null;
     
     const viewer = await User.findById(viewerId).select("bookmarks following").lean();
@@ -1170,28 +1235,76 @@ exports.getBookmarks = async (req, res) => {
       return res.status(200).json([]);
     }
 
-    const bookmarkedPosts = await Content.find({
-      _id: { $in: viewer.bookmarks },
-    })
-      .populate("creator", "username monetizationSettings profileImage walletAddress")
-      .populate("comments.user", "username")
-      .sort({ createdAt: -1 })
-      .lean();
+    const bookmarkedPosts =
+      await Content.find(
+        {
+          _id: {
+            $in: viewer.bookmarks,
+          },
+        },
+      )
+        .populate(
+          "creator",
+          "username monetizationSettings profileImage walletAddress isLive currentStreamId",
+        )
+        .populate(
+          "comments.user",
+          "username",
+        )
+        .sort(
+          {
+            createdAt:
+              -1,
+          },
+        )
+        .lean();
 
     const userPurchases = await Purchase.find({ user: viewerId })
-      .select("content creator purchaseType createdAt")
+      .select("content creator purchaseType createdAt expiresAt status")
       .lean();
       
     const unlockedContentMap = new Map();
+    const subPurchasesByCreator = new Map();
     const subscribedCreatorMap = new Map();
     const followingSet = new Set(viewer.following?.map((id) => id.toString()) || []);
+    const now = new Date().getTime();
 
+    // 1. Group all purchases
     userPurchases.forEach((p) => {
-      if (p.purchaseType === "PPV" && p.content) {
+      const isCompleted = !p.status || p.status === "completed";
+      if (p.purchaseType === "PPV" && p.content && isCompleted) {
         unlockedContentMap.set(p.content.toString(), new Date(p.createdAt).getTime());
       }
-      if (p.purchaseType === "SUBSCRIPTION" && p.creator) {
-        subscribedCreatorMap.set(p.creator.toString(), new Date(p.createdAt).getTime());
+      if (p.purchaseType === "SUBSCRIPTION" && p.creator && isCompleted) {
+        const cId = p.creator.toString();
+        if (!subPurchasesByCreator.has(cId)) subPurchasesByCreator.set(cId, []);
+        subPurchasesByCreator.get(cId).push(p);
+      }
+    });
+
+    // 2. Calculate Unbroken Streak per Creator
+    subPurchasesByCreator.forEach((subs, creatorId) => {
+      subs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      if (subs.length > 0) {
+        const latestSub = subs[0];
+        const latestExp = latestSub.expiresAt ? new Date(latestSub.expiresAt).getTime() : Infinity;
+        
+        if (latestExp > now) {
+          let streakStart = new Date(latestSub.createdAt).getTime();
+          for (let i = 1; i < subs.length; i++) {
+            const prevSub = subs[i];
+            const prevExp = prevSub.expiresAt ? new Date(prevSub.expiresAt).getTime() : 0;
+            const prevStart = new Date(prevSub.createdAt).getTime();
+            
+            const gap = streakStart - prevExp;
+            if (gap <= 172800000) { // 48-hour grace period for auto-renews
+              streakStart = prevStart;
+            } else {
+              break;
+            }
+          }
+          subscribedCreatorMap.set(creatorId, streakStart);
+        }
       }
     });
 
@@ -1202,7 +1315,6 @@ exports.getBookmarks = async (req, res) => {
       const globalPPV = settings.defaultPPVPrice || 0;
       const creatorCurrency = settings.priceCurrency || settings.baseCurrency || "USD";
 
-      // THE FIX: Bulletproof Raw Price Extraction (Checks legacy keys)
       let rawBasePrice = 0;
       if (post.price !== undefined && post.price !== null) {
         rawBasePrice = post.price;
@@ -1212,34 +1324,40 @@ exports.getBookmarks = async (req, res) => {
         rawBasePrice = globalPPV;
       }
 
-      // THE FIX: Guaranteed Free Identification
       const isFree = rawBasePrice <= 0;
       const isCreator = post.creator?._id.toString() === viewerId.toString();
 
       const ppvDate = unlockedContentMap.get(post._id.toString());
-      const subDate = subscribedCreatorMap.get(post.creator?._id.toString());
-      const hasPurchasedPPV = !!ppvDate;
-      const hasActiveSub = !!subDate;
-      
-      // Enforce Web3 purchase access
+      const streakStartDate = subscribedCreatorMap.get(post.creator?._id.toString());
+      const hasPurchasedFiatPPV = !!ppvDate;
+      const hasActiveSub = !!streakStartDate;
+
       let hasPurchasedCrypto = false;
       if (viewerWallet && post.unlockedFor && post.unlockedFor.length > 0) {
-        hasPurchasedCrypto = post.unlockedFor.some((address) => address.toLowerCase() === viewerWallet);
+        hasPurchasedCrypto = post.unlockedFor.some(
+          (address) => address.toLowerCase() === viewerWallet
+        );
       }
 
-      // THE FIX: If isFree is true, hasAccess becomes true automatically.
-      const hasAccess = isCreator || isFree || hasPurchasedPPV || hasPurchasedCrypto || hasActiveSub;
+      const hasAccess = isCreator || isFree || hasPurchasedFiatPPV || hasPurchasedCrypto || hasActiveSub;
 
+      // --- THE LIFETIME SUNSET ENGINE (WITH SUBSCRIBER GRACE PERIOD) ---
       if (post.status === "sunset") {
         let isGrandfathered = false;
         if (isCreator) {
           isGrandfathered = true;
         } else {
-          const sunsetTime = new Date(post.sunsetAt).getTime();
-          if (hasPurchasedPPV && ppvDate < sunsetTime) isGrandfathered = true;
-          else if (hasActiveSub && subDate < sunsetTime) isGrandfathered = true;
-          else if (hasPurchasedCrypto) isGrandfathered = true;
+          // 1. Lifetime access strictly granted to direct PPV buyers
+          if (hasPurchasedFiatPPV) isGrandfathered = true;
+          if (hasPurchasedCrypto) isGrandfathered = true;
+
+          // 2. Active Subscriber Grace Period
+          const sunsetTime = post.sunsetAt ? new Date(post.sunsetAt).getTime() : 0;
+          if (hasActiveSub && streakStartDate && streakStartDate < sunsetTime) {
+            isGrandfathered = true;
+          }
         }
+
         if (!isGrandfathered) continue;
       }
 
@@ -1247,7 +1365,6 @@ exports.getBookmarks = async (req, res) => {
         ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
         : "https://placehold.co/600x400/111111/555555?text=Locked";
 
-      // Lock Enforcement
       if (!hasAccess) {
         delete post.fileKey;
         post.mediaUrl = null;
@@ -1260,28 +1377,53 @@ exports.getBookmarks = async (req, res) => {
           });
           post.mediaUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
           post.isLocked = false;
+          delete post.fileKey;
         } catch (err) {
           post.mediaUrl = null;
           post.isLocked = true;
         }
       }
 
-      const likesArray = post.likes || [];
-      secureBookmarks.push({
-        ...post,
-        creator: {
-          ...post.creator,
-          isFollowed: followingSet.has(post.creator?._id.toString()),
+      const likesArray =
+        post.likes ||
+        [];
+      secureBookmarks.push(
+        {
+          ...post,
+          hasActiveSub,
+          creator:
+            {
+              ...post.creator,
+              isFollowed:
+                followingSet.has(
+                  post.creator?._id.toString(),
+                ),
+            },
+          actualPrice:
+            rawBasePrice,
+          priceCurrency:
+            creatorCurrency,
+          isPaywalled:
+            !isFree,
+          isLiked:
+            likesArray.some(
+              (
+                id,
+              ) =>
+                id.toString() ===
+                viewerId.toString(),
+            ),
+          isBookmarked: true,
+          likesCount:
+            likesArray.length,
+          commentsCount:
+            post.comments
+              ? post
+                  .comments
+                  .length
+              : 0,
         },
-        // THE FIX: Pass the RAW prices securely to the frontend pricing engine
-        actualPrice: rawBasePrice,
-        priceCurrency: creatorCurrency,
-        isPaywalled: !isFree,
-        isLiked: likesArray.some((id) => id.toString() === viewerId.toString()),
-        isBookmarked: true,
-        likesCount: likesArray.length,
-        commentsCount: post.comments ? post.comments.length : 0,
-      });
+      );
     }
     
     res.status(200).json(secureBookmarks);
@@ -1291,128 +1433,458 @@ exports.getBookmarks = async (req, res) => {
   }
 };
 
-// GET /api/content/creator/:id
+// GET /api/content/creator/:id 
 exports.getCreatorPublicProfile = async (req, res) => {
   try {
-    const creatorId = req.params.id;
-    const viewerId = req.user._id;
-    const viewerWallet = req.user.walletAddress ? req.user.walletAddress.toLowerCase() : null;
+    const creatorId =
+      req
+        .params
+        .id;
+    const viewerId =
+      req
+        .user
+        ._id;
+    const viewerWallet =
+      req
+        .user
+        .walletAddress
+        ? req.user.walletAddress.toLowerCase()
+        : null;
 
-    const creator = await User.findById(creatorId)
-      .select("username profileImage monetizationSettings walletAddress")
-      .lean();
+    const creator =
+      await User.findById(
+        creatorId,
+      )
+        .select(
+          "username profileImage bannerImage monetizationSettings walletAddress isLive currentStreamId",
+        )
+        .lean();
 
-    if (!creator) return res.status(404).json({ message: "Creator not found" });
+    if (
+      !creator
+    )
+      return res
+        .status(
+          404,
+        )
+        .json(
+          {
+            message:
+              "Creator not found",
+          },
+        );
 
-    const creatorContent = await Content.find({
-      creator: creatorId,
-      status: { $in: ["active", "sunset"] },
-    })
-      .populate("comments.user", "username")
-      .sort({ createdAt: -1 })
-      .lean();
+    const creatorContent =
+      await Content.find(
+        {
+          creator:
+            creatorId,
+          status:
+            {
+              $in: [
+                "active",
+                "sunset",
+              ],
+            },
+        },
+      )
+        .populate(
+          "comments.user",
+          "username",
+        )
+        .sort(
+          {
+            createdAt:
+              -1,
+          },
+        )
+        .lean();
 
-    const viewer = await User.findById(viewerId).select("following").lean();
-    const viewerPurchases = await Purchase.find({
-      user: viewerId,
-      creator: creatorId,
-    }).lean();
-    
-    const isFollowed = viewer?.following?.map((id) => id.toString()).includes(creatorId.toString()) || false;
+    const viewer =
+      await User.findById(
+        viewerId,
+      )
+        .select(
+          "following",
+        )
+        .lean();
+    const viewerPurchases =
+      await Purchase.find(
+        {
+          user: viewerId,
+          creator:
+            creatorId,
+        },
+      ).lean();
+
+    const isFollowed =
+      viewer?.following
+        ?.map(
+          (
+            id,
+          ) =>
+            id.toString(),
+        )
+        .includes(
+          creatorId.toString(),
+        ) ||
+      false;
 
     let hasActiveSub = false;
-    const unlockedPPV = new Set();
-    const now = new Date().getTime();
+    let streakStartDate = 0; // The correct variable is now declared
+    const unlockedPPV =
+      new Set();
+    const now =
+      new Date().getTime();
 
-    viewerPurchases.forEach((p) => {
-      if (p.purchaseType === "SUBSCRIPTION" && p.status === "completed") {
-        const expirationTime = p.expiresAt ? new Date(p.expiresAt).getTime() : Infinity;
-        if (expirationTime > now) hasActiveSub = true;
-      }
-      if (p.purchaseType === "PPV" && p.content && p.status === "completed") {
-        unlockedPPV.add(p.content.toString());
-      }
-    });
+    // 1. Separate and sort subscriptions newest to oldest
+    const subPurchases =
+      viewerPurchases
+        .filter(
+          (
+            p,
+          ) =>
+            p.purchaseType ===
+              "SUBSCRIPTION" &&
+            p.status ===
+              "completed",
+        )
+        .sort(
+          (
+            a,
+            b,
+          ) =>
+            new Date(
+              b.createdAt,
+            ).getTime() -
+            new Date(
+              a.createdAt,
+            ).getTime(),
+        );
 
-    const chatRecord = await Conversation.findOne({
-      fan: viewerId,
-      creator: creatorId,
-    }).select("bubblesLeft").lean();
-    
-    const chatBubblesLeft = chatRecord ? chatRecord.bubblesLeft : 0;
-    const hasActiveChat = chatBubblesLeft > 0;
+    // 2. Calculate the Unbroken Streak
+    if (
+      subPurchases.length >
+      0
+    ) {
+      const latestSub =
+        subPurchases[0];
+      const latestExp =
+        latestSub.expiresAt
+          ? new Date(
+              latestSub.expiresAt,
+            ).getTime()
+          : Infinity;
 
-    const secureContent = await Promise.all(
-      creatorContent.map(async (post) => {
-        const settings = creator.monetizationSettings || {};
-        const globalPPV = settings.defaultPPVPrice || 0;
-        const creatorCurrency = settings.priceCurrency || settings.baseCurrency || "USD";
+      if (
+        latestExp >
+        now
+      ) {
+        hasActiveSub = true;
+        streakStartDate =
+          new Date(
+            latestSub.createdAt,
+          ).getTime();
 
-        // THE FIX: Bulletproof Raw Price Extraction
-        let rawBasePrice = 0;
-        if (post.price !== undefined && post.price !== null) {
-          rawBasePrice = post.price;
-        } else if (post.priceInUSDT !== undefined && post.priceInUSDT !== null) {
-          rawBasePrice = post.priceInUSDT;
-        } else {
-          rawBasePrice = globalPPV;
-        }
+        // Walk backwards to find the true origin of this continuous streak
+        for (
+          let i = 1;
+          i <
+          subPurchases.length;
+          i++
+        ) {
+          const prevSub =
+            subPurchases[
+              i
+            ];
+          const prevExp =
+            prevSub.expiresAt
+              ? new Date(
+                  prevSub.expiresAt,
+                ).getTime()
+              : 0;
+          const prevStart =
+            new Date(
+              prevSub.createdAt,
+            ).getTime();
 
-        const isCreator = creatorId === viewerId.toString();
-        const isFree = rawBasePrice <= 0;
-        const hasPurchasedFiatPPV = unlockedPPV.has(post._id.toString());
-
-        let hasPurchasedCrypto = false;
-        if (viewerWallet && post.unlockedFor && post.unlockedFor.length > 0) {
-          hasPurchasedCrypto = post.unlockedFor.some((address) => address.toLowerCase() === viewerWallet);
-        }
-
-        // THE FIX: isFree strictly grants hasAccess
-        const hasAccess = isCreator || isFree || hasPurchasedFiatPPV || hasPurchasedCrypto || hasActiveSub;
-        
-        post.teaserUrl = post.teaserKey
-          ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
-          : "https://placehold.co/600x400/111111/555555?text=Locked";
-
-        if (!hasAccess) {
-          delete post.fileKey;
-          post.mediaUrl = null;
-          post.isLocked = true;
-        } else {
-          try {
-            const command = new GetObjectCommand({
-              Bucket: process.env.S3_BUCKET_NAME,
-              Key: post.fileKey,
-            });
-            post.mediaUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-            post.isLocked = false;
-          } catch (err) {
-            post.mediaUrl = null;
-            post.isLocked = true;
+          const gap =
+            streakStartDate -
+            prevExp;
+          if (
+            gap <=
+            172800000
+          ) {
+            streakStartDate =
+              prevStart;
+          } else {
+            break;
           }
         }
+      }
+    }
 
-        const likesArray = post.likes || [];
-        return {
-          ...post,
-          actualPrice: rawBasePrice, // Pass exact raw price
-          priceCurrency: creatorCurrency,
-          isPaywalled: !isFree, // Flag for the frontend
-          isLiked: likesArray.some((id) => id.toString() === viewerId.toString()),
-          likesCount: likesArray.length,
-          commentsCount: post.comments ? post.comments.length : 0,
-        };
-      })
+    // 3. Process PPV (The duplicate subscription loop is truly dead)
+    viewerPurchases.forEach(
+      (
+        p,
+      ) => {
+        if (
+          p.purchaseType ===
+            "PPV" &&
+          p.content &&
+          p.status ===
+            "completed"
+        ) {
+          unlockedPPV.add(
+            p.content.toString(),
+          );
+        }
+      },
     );
 
-    res.status(200).json({
-      creator,
-      isSubscribed: hasActiveSub,
-      chatBubblesLeft,
-      hasActiveChat,
-      isFollowed,
-      content: secureContent,
-    });
+    const chatRecord =
+      await Conversation.findOne(
+        {
+          fan: viewerId,
+          creator:
+            creatorId,
+        },
+      )
+        .select(
+          "bubblesLeft",
+        )
+        .lean();
+
+    const chatBubblesLeft =
+      chatRecord
+        ? chatRecord.bubblesLeft
+        : 0;
+    const hasActiveChat =
+      chatBubblesLeft >
+      0;
+
+    const secureContentRaw =
+      await Promise.all(
+        creatorContent.map(
+          async (
+            post,
+          ) => {
+            const settings =
+              creator.monetizationSettings ||
+              {};
+            const globalPPV =
+              settings.defaultPPVPrice ||
+              0;
+            const creatorCurrency =
+              settings.priceCurrency ||
+              settings.baseCurrency ||
+              "USD";
+
+            let rawBasePrice = 0;
+            if (
+              post.price !==
+                undefined &&
+              post.price !==
+                null
+            ) {
+              rawBasePrice =
+                post.price;
+            } else if (
+              post.priceInUSDT !==
+                undefined &&
+              post.priceInUSDT !==
+                null
+            ) {
+              rawBasePrice =
+                post.priceInUSDT;
+            } else {
+              rawBasePrice =
+                globalPPV;
+            }
+
+            const isCreator =
+              creatorId ===
+              viewerId.toString();
+            const isFree =
+              rawBasePrice <=
+              0;
+            const hasPurchasedFiatPPV =
+              unlockedPPV.has(
+                post._id.toString(),
+              );
+
+            let hasPurchasedCrypto = false;
+            if (
+              viewerWallet &&
+              post.unlockedFor &&
+              post
+                .unlockedFor
+                .length >
+                0
+            ) {
+              hasPurchasedCrypto =
+                post.unlockedFor.some(
+                  (
+                    address,
+                  ) =>
+                    address.toLowerCase() ===
+                    viewerWallet,
+                );
+            }
+
+            const hasAccess =
+              isCreator ||
+              isFree ||
+              hasPurchasedFiatPPV ||
+              hasPurchasedCrypto ||
+              hasActiveSub;
+
+            // --- THE LIFETIME SUNSET ENGINE (WITH SUBSCRIBER GRACE PERIOD) ---
+            if (
+              post.status ===
+              "sunset"
+            ) {
+              let isGrandfathered = false;
+
+              if (
+                isCreator
+              ) {
+                isGrandfathered = true;
+              } else {
+                // 1. Lifetime access strictly granted to direct PPV buyers
+                if (
+                  hasPurchasedFiatPPV
+                )
+                  isGrandfathered = true;
+                if (
+                  hasPurchasedCrypto
+                )
+                  isGrandfathered = true;
+
+                // 2. Active Subscriber Grace Period
+                const sunsetTime =
+                  post.sunsetAt
+                    ? new Date(
+                        post.sunsetAt,
+                      ).getTime()
+                    : 0;
+                if (
+                  hasActiveSub &&
+                  streakStartDate &&
+                  streakStartDate <
+                    sunsetTime
+                ) {
+                  isGrandfathered = true;
+                }
+              }
+
+              // Filter out the post completely if they are not grandfathered
+              if (
+                !isGrandfathered
+              )
+                return null;
+            }
+
+            post.teaserUrl =
+              post.teaserKey
+                ? `https://${process.env.R2_PUBLIC_DOMAIN}/${post.teaserKey}`
+                : "https://placehold.co/600x400/111111/555555?text=Locked";
+
+            if (
+              !hasAccess
+            ) {
+              delete post.fileKey;
+              post.mediaUrl =
+                null;
+              post.isLocked = true;
+            } else {
+              try {
+                const command =
+                  new GetObjectCommand(
+                    {
+                      Bucket:
+                        process
+                          .env
+                          .S3_BUCKET_NAME,
+                      Key: post.fileKey,
+                    },
+                  );
+                post.mediaUrl =
+                  await getSignedUrl(
+                    s3,
+                    command,
+                    {
+                      expiresIn: 3600,
+                    },
+                  );
+                post.isLocked = false;
+                delete post.fileKey;
+              } catch (err) {
+                post.mediaUrl =
+                  null;
+                post.isLocked = true;
+              }
+            }
+
+            const likesArray =
+              post.likes ||
+              [];
+            return {
+              ...post,
+              actualPrice:
+                rawBasePrice,
+              priceCurrency:
+                creatorCurrency,
+              isPaywalled:
+                !isFree,
+              isLiked:
+                likesArray.some(
+                  (
+                    id,
+                  ) =>
+                    id.toString() ===
+                    viewerId.toString(),
+                ),
+              likesCount:
+                likesArray.length,
+              commentsCount:
+                post.comments
+                  ? post
+                      .comments
+                      .length
+                  : 0,
+            };
+          },
+        ),
+      );
+
+    // Strip out the nulls (hidden sunset posts)
+    const secureContent =
+      secureContentRaw.filter(
+        (
+          post,
+        ) =>
+          post !==
+          null,
+      );
+
+    res
+      .status(
+        200,
+      )
+      .json(
+        {
+          creator,
+          isSubscribed:
+            hasActiveSub,
+          chatBubblesLeft,
+          hasActiveChat,
+          isFollowed,
+          content:
+            secureContent,
+        },
+      );
   } catch (error) {
     res.status(500).json({ message: "Failed to load creator profile" });
   }

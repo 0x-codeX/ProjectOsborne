@@ -18,7 +18,7 @@ exports.getNotifications =
         )
           .populate(
             "sender",
-            "username profileImage",
+            "username profileImage isLive currentStreamId",
           )
           .sort(
             {

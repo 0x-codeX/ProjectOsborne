@@ -119,6 +119,19 @@ const userSchema =
           type: Boolean,
           default: false,
         },
+      // --- VISUAL BRANDING ---
+      profileImage:
+        {
+          type: String,
+          default:
+            "",
+        },
+      bannerImage:
+        {
+          type: String,
+          default:
+            "",
+        },
 
       // --- WEB3 / PAYMENTS ---
       walletAddress:
@@ -248,6 +261,22 @@ const userSchema =
         {
           type: Boolean,
           default: false,
+        },
+      // --- LIVE STREAMING TRACKING ---
+      isLive:
+        {
+          type: Boolean,
+          default: false,
+        },
+      currentStreamId:
+        {
+          type: mongoose
+            .Schema
+            .Types
+            .ObjectId,
+          ref: "Stream",
+          default:
+            null,
         },
 
       // --- CREATOR SPECIFIC FIELDS ---

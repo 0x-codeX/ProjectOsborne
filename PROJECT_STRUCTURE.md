@@ -1250,8 +1250,8 @@ If a future agent needs to continue development, the best places to start are:
 
 This document should be treated as the compact memory of the current Nippy implementation state. It is the fastest way for a future LLM to understand the project without re-reading the entire repository from scratch.
 
-**Last Updated:** 2026-08-17
-**Status:** Feature-complete for public beta; CRITICAL production issues must be addressed before mainnet launch
+**Last Updated:** 2026-08-23
+**Status:** Feature-complete for public beta payment testing; payment-to-settlement reconciliation and critical production controls must be addressed before mainnet launch
 **Key Blockers (Fix in This Order):**
 1. 🔴 Web3 event listener reliability (Section 12.1)
 2. 🔴 Fiat chargeback handling (Section 12.2)
@@ -2975,6 +2975,155 @@ PURCHASE_VERIFIED_AND_UNLOCKED
 - A verified fan can complete subsequent restricted purchases without repeating verification until the configured expiry/reverification policy requires it.
 - All NSFW entry points use one shared guard; there are no bypasses in bookmarks, chat, profiles, streams, or alternate payment buttons.
 - Verification events and restricted purchases are auditable without storing unnecessary identity documents.
+
+---
+
+## 19. Payment Methods and Creator Settlement Architecture
+
+**Implementation status (2026-08-23):** The payment entry points support both `FIAT` and `CRYPTO` verification. The creator dashboard now presents separate fiat ledgers, floating clearing balances, Web3 lifetime earnings, P2P liquidation, and payout-claim flows. The four payment/settlement combinations below are the product model that future LLM sessions must preserve. The cross-rail conversion steps are not yet fully automated in the current code.
+
+### 19.1 Core vocabulary
+
+- **Fan payment rail:** how the fan pays Nippy for access: `FIAT` through Paystack or `CRYPTO` through the Polygon gateway.
+- **Creator settlement rail:** how the creator receives value: fiat balance for bank settlement or crypto balance/direct wallet settlement.
+- **Base price:** the creator's configured price used for the creator revenue split. It is loaded from `Content`, `User.monetizationSettings`, or `Message`; the client must not be trusted to define it.
+- **Charge amount:** the amount and currency actually presented to and paid by the fan. `chargeAmount` and `chargeCurrency` are verified against Paystack for fiat purchases.
+- **Raw amount:** the creator/base amount used for the dual-ledger split. `rawAmount` is checked against the database price before fulfillment.
+- **Purchase record:** the audit record connecting fan, creator, resource, payment method, transaction/reference, amount paid, currency, purchase type, and fulfillment status.
+- **Floating balance:** creator funds awaiting clearing, such as fiat funds awaiting Paystack/platform settlement.
+- **Withdrawable balance:** creator funds that may be withdrawn or liquidated.
+
+### 19.2 Shared purchase verification sequence
+
+All four flows should follow this sequence:
+
+1. The frontend obtains the authoritative creator/resource price and opens the appropriate payment method.
+2. The backend resolves the authenticated fan from the JWT and loads the creator, content, message, subscription tier, or stream.
+3. `purchaseController.verifyPayment()` normalizes `purchaseType` and performs an idempotency check using the Paystack `reference` for fiat or the blockchain `txHash` for crypto.
+4. The controller derives `dbBasePrice` from the database and rejects a `rawAmount` below the accepted threshold. The client cannot lower the creator's base price.
+5. For restricted content, the controller reloads the fan and blocks fulfillment unless `isAgeVerified` is true.
+6. For `FIAT`, Paystack transaction status, amount, and currency are checked. Paystack amounts are converted from minor units by dividing by 100.
+7. For `CRYPTO`, the Polygon transaction receipt, gateway address, token address, decoded gateway function, recipient wallet, and transferred USDT amount are checked.
+8. A completed `Purchase` is created, the content/message/conversation is fulfilled, and the creator ledger is updated.
+9. The fan and creator receive notifications. Duplicate callbacks return the existing purchase instead of fulfilling twice.
+
+The payment controller currently supports `SUBSCRIPTION`, `PPV`, `DM_UNLOCK`, `CHAT_BUNDLE`, and `LIVE_GIFT`. A purchase is not complete merely because a wallet transaction exists; it is complete only after backend verification and fulfillment.
+
+### 19.3 Flow 1: Fiat to Fiat
+
+**Meaning:** A fan pays with fiat and the creator accepts fiat settlement, usually to a bank account.
+
+```text
+Fan selects content
+  -> client starts Paystack checkout in chargeCurrency
+  -> Paystack returns reference
+  -> POST /api/purchases/verify { paymentMethod: "FIAT", reference, chargeAmount, chargeCurrency, rawAmount }
+  -> purchaseController verifies Paystack success, amount, and currency
+  -> Purchase stores fiatReference, amountPaid, currency, and basePriceNGN
+  -> creator ledger receives fiat value
+  -> fiat amount is floating until clearing
+  -> cleared amount moves to fiatBalances.withdrawable
+  -> creator requests bank payout through Paystack transfer
+```
+
+The dashboard represents this state with `wallet.fiatBalances.floating` and `wallet.fiatBalances.withdrawable`. `paystackService.processFiatPayout()` creates a NUBAN transfer recipient and submits an NGN transfer in kobo. The payout currently assumes a Nigerian bank account and an amount in NGN.
+
+### 19.4 Flow 2: Fiat to Crypto
+
+**Meaning:** The fan pays fiat, but the creator wants crypto settlement.
+
+```text
+Fan pays Paystack in fiat
+  -> backend verifies the fiat reference and charge currency
+  -> platform records the creator's base-price earnings
+  -> platform converts/allocates the value to a crypto ledger
+  -> creator withdraws or claims USDT to a Web3 address
+```
+
+The current dashboard has the crypto-side destination for this model: a creator with a non-bank payout method can liquidate a withdrawable fiat balance through `POST /api/earnings/quote` and `POST /api/earnings/liquidate`. The liquidation direction is `NGN_TO_USDT`; `p2pLiquidity.generateLiquidationQuote()` obtains a live USDT/NGN rate, applies a 3% spread, and expires the quote after five minutes.
+
+This flow is not yet a complete automatic fiat-to-crypto conversion. The current liquidation executor moves values between `wallet.fiatBalances.withdrawable.NGN` and `wallet.fiatBalances.floating.USDT`; it does not itself broadcast a USDT purchase or transfer. A production implementation needs a real conversion provider/treasury execution step, settlement confirmation, and reconciliation record.
+
+### 19.5 Flow 3: Crypto to Crypto
+
+**Meaning:** A fan pays USDT and the creator receives crypto directly, without Nippy holding the payment.
+
+```text
+Fan selects content
+  -> useWeb3Transfer approves USDT and calls the gateway contract
+  -> gateway receives token and routes the creator/skim amount
+  -> client sends txHash and the dual-ledger payload to /api/purchases/verify
+  -> purchaseController verifies Polygon receipt and decoded gateway arguments
+  -> backend unlocks the resource and records the crypto purchase
+  -> creator receives direct Web3 value; dashboard shows lifetimeWeb3EarnedUSDT analytics
+```
+
+The crypto verifier requires the transaction to target `NIPPY_GATEWAY_ADDRESS`, use `MOCK_USDT_ADDRESS` in the current testnet configuration, name the creator's wallet as the recipient, and carry the expected charge amount in the gateway call. The creator dashboard labels this as `Lifetime Web3 Direct Earnings` and states that Nippy holds zero custody for direct crypto sales.
+
+This path is the closest to a working crypto-to-crypto flow. It still depends on the disabled/restart-fragile Web3 listener and must be tested with the deployed contract ABI and production token before mainnet.
+
+### 19.6 Flow 4: Crypto to Fiat
+
+**Meaning:** A fan pays crypto, but the creator wants fiat settlement to a bank.
+
+```text
+Fan pays USDT through the Polygon gateway
+  -> backend verifies the crypto transaction and records the purchase
+  -> platform credits/recognizes a crypto balance for the creator
+  -> creator requests USDT_TO_NGN liquidation
+  -> backend creates a five-minute quote with the live P2P rate and 3% protective spread
+  -> liquidation moves USDT out of withdrawable crypto and credits floating NGN
+  -> NGN clears and becomes withdrawable
+  -> Paystack transfer pays the creator's Nigerian bank account
+```
+
+In `EarningsDashboard.jsx`, this path is selected when `storedUser.payoutMethod === "bank"`. The `USDT` card displays the preview rate and calls the quote endpoint. Confirmation calls `/api/earnings/liquidate` with the amount and returned quote. The executor validates quote expiry and sufficient USDT before moving the amount to floating NGN.
+
+The current code stops at the internal ledger swap. It does not yet invoke an external P2P counterparty or Paystack bank transfer as part of `executeLiquidation`; the subsequent bank payout must be completed by the withdrawal/treasury process.
+
+### 19.7 EarningsDashboard contract
+
+`EarningsDashboard.jsx` is a read-and-act treasury UI, not the source of truth for balances. On load it requests:
+
+- `GET /api/earnings/dashboard` for the wallet, withdrawals, recent completed sales, subscriber count, and PPV count.
+- `GET /api/users/settings/monetization` for the creator's active/base currency.
+- `GET /api/earnings/p2p-rate` for a cached dashboard preview rate.
+
+It renders three distinct areas:
+
+1. **Web2 Fiat Balances:** one card per active currency, with withdrawable and floating amounts. Bank creators can liquidate USDT to NGN; non-bank creators can liquidate fiat to USDT.
+2. **Web3 Instant Settlements:** `lifetimeWeb3EarnedUSDT`, which is analytics for direct crypto earnings rather than a fiat withdrawal balance.
+3. **Withdrawal history:** pending claims can call the Polygon payout contract's `claimPayout(amount, nonce, deadline, signature)` using voucher metadata; other records show their status.
+
+The dashboard uses local storage only for display preferences and payout destination selection. It must never be treated as authoritative for payment amount, age verification, balance, quote expiry, or payout eligibility.
+
+### 19.8 Current ledger mismatch to fix
+
+The documentation and UI now describe the newer multi-currency wallet shape:
+
+```javascript
+wallet.fiatBalances.withdrawable[currency]
+wallet.fiatBalances.floating[currency]
+wallet.fiatTotalEarned[currency]
+wallet.lifetimeWeb3EarnedUSDT
+```
+
+However, the purchase fulfillment block in `purchaseController.js` still increments legacy fields named `balanceUSDT` and `totalEarnedUSDT`, while `Wallet.js` currently defines the fiat maps and `lifetimeWeb3EarnedUSDT` but not those legacy fields. This means a verified sale can succeed while the amount is not visible in the dashboard's fiat cards. Before production, choose one canonical ledger, update the purchase crediting logic and schema together, and add an integration test for each payment/settlement flow.
+
+Likewise, `Withdrawal.js` currently stores `amount` and `payoutAddress` but not an explicit currency or settlement rail. A withdrawal must include both, for example `{ amount: 100, currency: "USDT", settlementRail: "CRYPTO" }` or `{ amount: 100000, currency: "NGN", settlementRail: "FIAT" }`, so the dashboard and worker cannot interpret the same number inconsistently.
+
+### 19.9 Payment and settlement acceptance checklist
+
+- The fan sees the same charge amount and currency that the selected gateway verifies.
+- The backend derives the creator base price from the database and stores both base and charged values.
+- Fiat purchases are idempotent by Paystack reference; crypto purchases are idempotent by transaction hash.
+- NSFW eligibility is checked before payment fulfillment and again on the backend.
+- Every completed purchase credits exactly one canonical creator ledger.
+- Fiat balances distinguish floating/clearing funds from withdrawable funds.
+- Crypto-to-fiat liquidation validates quote expiry, direction, amount, spread, and sufficient balance.
+- Every withdrawal declares currency, settlement rail, destination, status, and transaction/reference.
+- Direct crypto earnings are separated from custodial/platform-held balances.
+- Tests cover all four matrix flows, duplicate callbacks, payment/currency mismatch, stale quotes, insufficient balances, and failed payouts.
 
 
 

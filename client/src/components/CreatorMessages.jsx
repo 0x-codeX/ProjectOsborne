@@ -3,7 +3,8 @@ import React, {
   useEffect,
   useRef,
 } from "react";
-import api from "../utils/api"; // <-- IRONCLAD FIX: Imported the global API interceptor
+import { useNavigate } from "react-router-dom";
+import api from "../utils/api";
 import {
   Search,
   Filter,
@@ -22,8 +23,16 @@ import {
   Loader2,
   Square,
   Film,
+  Wallet,
+  CreditCard,
+  Plus,
+  Minus, // <-- NEW ICONS
 } from "lucide-react";
 import { io } from "socket.io-client";
+import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
+import { usePaystackPayment } from "react-paystack";
+
+
 
 const CreatorMessages =
   () => {
@@ -38,6 +47,8 @@ const CreatorMessages =
       useRef(
         null,
       );
+    const navigate =
+      useNavigate();
 
     // --- STATE ---
     const [
@@ -178,23 +189,512 @@ const CreatorMessages =
       useRef(
         [],
       );
+    // --- NEW: BUNDLE CHECKOUT STATE ---
+    const [
+      showBundleConfig,
+      setShowBundleConfig,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      bundleQuantity,
+      setBundleQuantity,
+    ] =
+      useState(
+        1,
+      );
+    const [
+      bundlePrice,
+      setBundlePrice,
+    ] =
+      useState(
+        5,
+      );
+    const [
+      bundleSize,
+      setBundleSize,
+    ] =
+      useState(
+        5,
+      );
+    // --- NEW: DYNAMIC PRICING STATES ---
+    const [
+      bundleCurrency,
+      setBundleCurrency,
+    ] =
+      useState(
+        "USD",
+      );
+    const [
+      rawBundlePrice,
+      setRawBundlePrice,
+    ] =
+      useState(
+        5,
+      );
+    const [
+      rawBundleCurrency,
+      setRawBundleCurrency,
+    ] =
+      useState(
+        "USD",
+      );
+    const [
+      fanCurrency,
+      setFanCurrency,
+    ] =
+      useState(
+        "USD",
+      );
+    const [
+      exchangeRates,
+      setExchangeRates,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      checkoutData,
+      setCheckoutData,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      paymentMethod,
+      setPaymentMethod,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      processingId,
+      setProcessingId,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      cryptoQuote,
+      setCryptoQuote,
+    ] =
+      useState(
+        null,
+      );
+    const [
+      fetchingQuote,
+      setFetchingQuote,
+    ] =
+      useState(
+        false,
+      );
 
-    // 1. Fetch Inbox on Mount
+    const {
+      transferUSDT,
+    } =
+      useWeb3Transfer();
+    const initializePayment =
+      usePaystackPayment(
+        {
+          publicKey:
+            import.meta
+              .env
+              .VITE_PAYSTACK_PUBLIC_KEY,
+        },
+      );
+
+    const closeCheckoutModal =
+      () => {
+        setCheckoutData(
+          null,
+        );
+        setPaymentMethod(
+          null,
+        );
+        setCryptoQuote(
+          null,
+        );
+      };
+
+    const handleSelectCrypto =
+      async () => {
+        setPaymentMethod(
+          "CRYPTO",
+        );
+        setFetchingQuote(
+          true,
+        );
+        setCryptoQuote(
+          null,
+        );
+
+        try {
+          // --- IRONCLAD FIX: Universal Crypto Pricing ---
+          // Convert the Creator's true raw price to USD
+          const toRawRate =
+            exchangeRates[
+              checkoutData
+                .rawCurrency
+            ] ||
+            1;
+          const rawPriceInUSD =
+            checkoutData.raw /
+            toRawRate;
+
+          // Completely ignore the Fan's local fiat display currency.
+          // Apply a universal crypto rounding (e.g., nearest $0.10) so the
+          // charge is identical worldwide regardless of their UI settings.
+          const universalFanPriceUSD =
+            Math.ceil(
+              rawPriceInUSD *
+                10,
+            ) /
+            10;
+
+          const {
+            data,
+          } =
+            await api.post(
+              "/purchases/crypto-quote",
+              {
+                amountUSD:
+                  universalFanPriceUSD,
+                rawAmountUSD:
+                  rawPriceInUSD,
+              },
+            );
+
+          setCryptoQuote(
+            data,
+          );
+        } catch (error) {
+          alert(
+            "Failed to get live crypto rates. Please try again.",
+          );
+          setPaymentMethod(
+            null,
+          );
+        } finally {
+          setFetchingQuote(
+            false,
+          );
+        }
+      };
+
+    const executePayment =
+      async () => {
+        if (
+          !checkoutData ||
+          !paymentMethod ||
+          !selectedChat
+        )
+          return;
+
+        if (
+          paymentMethod ===
+          "CARD"
+        ) {
+          // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
+          const fanRate =
+            exchangeRates[
+              checkoutData
+                .currency
+            ] ||
+            1;
+          const ngnRate =
+            exchangeRates[
+              "NGN"
+            ] ||
+            1500;
+
+          // Reverse engineer the USD base price, then convert to NGN
+          const priceInUSD =
+            checkoutData.amount /
+            fanRate;
+          const priceInNGN =
+            priceInUSD *
+            ngnRate;
+          const amountInSubunits =
+            Math.round(
+              priceInNGN *
+                100,
+            );
+
+          initializePayment(
+            {
+              config:
+                {
+                  reference:
+                    new Date()
+                      .getTime()
+                      .toString(),
+                  email:
+                    currentUser?.email ||
+                    "fan@nippy.com",
+                  amount:
+                    amountInSubunits,
+                  currency:
+                    "NGN", // Paystack strict currency
+                },
+              onSuccess:
+                async (
+                  reference,
+                ) => {
+                  setProcessingId(
+                    "card_payment",
+                  );
+                  try {
+                    const safeReference =
+                      typeof reference ===
+                      "string"
+                        ? reference
+                        : reference?.reference ||
+                          reference?.trxref;
+                    await api.post(
+                      "/purchases/verify",
+                      {
+                        reference:
+                          safeReference,
+                        paymentMethod:
+                          "FIAT",
+                        creatorId:
+                          selectedChat
+                            .otherUser
+                            ._id,
+                        purchaseType:
+                          "CHAT_BUNDLE",
+                        chargeAmount:
+                          priceInNGN,
+                        chargeCurrency:
+                          "NGN",
+                        rawAmount:
+                          checkoutData.raw,
+                        rawCurrency:
+                          checkoutData.rawCurrency,
+                      },
+                    );
+
+                    // Instantly restock local bubbles
+                    setSelectedChat(
+                      (
+                        prev,
+                      ) => ({
+                        ...prev,
+                        bubblesLeft:
+                          prev.bubblesLeft +
+                          checkoutData.bubbles,
+                      }),
+                    );
+                    setInbox(
+                      (
+                        prev,
+                      ) =>
+                        prev.map(
+                          (
+                            c,
+                          ) =>
+                            c._id ===
+                            selectedChat._id
+                              ? {
+                                  ...c,
+                                  bubblesLeft:
+                                    c.bubblesLeft +
+                                    checkoutData.bubbles,
+                                }
+                              : c,
+                        ),
+                    );
+                    closeCheckoutModal();
+                  } catch (error) {
+                    alert(
+                      "Verification failed: " +
+                        (error
+                          .response
+                          ?.data
+                          ?.message ||
+                          error.message),
+                    );
+                  } finally {
+                    setProcessingId(
+                      null,
+                    );
+                  }
+                },
+              onClose:
+                () =>
+                  alert(
+                    "Payment window closed.",
+                  ),
+            },
+          );
+          return;
+        }
+
+        try {
+          setProcessingId(
+            "crypto_payment",
+          );
+          const creatorWallet =
+            selectedChat
+              .otherUser
+              ?.walletAddress;
+          if (
+            !creatorWallet
+          )
+            throw new Error(
+              "This creator is missing a Web3 payout wallet.",
+            );
+          if (
+            !cryptoQuote?.requiredUSDT ||
+            !cryptoQuote?.rawUSDT
+          )
+            throw new Error(
+              "Missing crypto quote.",
+            );
+
+          const txHash =
+            await transferUSDT(
+              creatorWallet,
+              cryptoQuote.requiredUSDT,
+              cryptoQuote.rawUSDT,
+              null,
+            );
+          if (
+            !txHash
+          )
+            throw new Error(
+              "Transaction failed or was rejected.",
+            );
+
+          await api.post(
+            "/purchases/verify",
+            {
+              txHash:
+                txHash,
+              paymentMethod:
+                "CRYPTO",
+              creatorId:
+                selectedChat
+                  .otherUser
+                  ._id,
+              purchaseType:
+                "CHAT_BUNDLE",
+              chargeAmount:
+                checkoutData.amount,
+              chargeCurrency:
+                "USD",
+              rawAmount:
+                checkoutData.amount,
+              rawCurrency:
+                "USD",
+            },
+          );
+
+          // Instantly restock local bubbles
+          setSelectedChat(
+            (
+              prev,
+            ) => ({
+              ...prev,
+              bubblesLeft:
+                prev.bubblesLeft +
+                checkoutData.bubbles,
+            }),
+          );
+          setInbox(
+            (
+              prev,
+            ) =>
+              prev.map(
+                (
+                  c,
+                ) =>
+                  c._id ===
+                  selectedChat._id
+                    ? {
+                        ...c,
+                        bubblesLeft:
+                          c.bubblesLeft +
+                          checkoutData.bubbles,
+                      }
+                    : c,
+              ),
+          );
+          closeCheckoutModal();
+        } catch (error) {
+          alert(
+            error
+              .response
+              ?.data
+              ?.message ||
+              error.message ||
+              "Transaction failed.",
+          );
+        } finally {
+          setProcessingId(
+            null,
+          );
+        }
+      };
+
+    // 1. Fetch Inbox & Exchange Rates on Mount
+    const FALLBACK_RATES =
+      {
+        USD: 1,
+        NGN: 1500,
+        EUR: 0.92,
+        GBP: 0.79,
+        GHS: 14.5,
+      };
+
     useEffect(() => {
-      const fetchInbox =
+      const fetchInitialData =
         async () => {
           try {
-            // IRONCLAD FIX: Used global api instance. Stripped manual headers & token.
-            const res =
-              await api.get(
-                "/messages/inbox",
+            const storedUser =
+              JSON.parse(
+                localStorage.getItem(
+                  "nippy_user",
+                ) ||
+                  "{}",
               );
+            setFanCurrency(
+              storedUser.preferredCurrency ||
+                "USD",
+            );
+
+            const [
+              inboxRes,
+              ratesRes,
+            ] =
+              await Promise.all(
+                [
+                  api.get(
+                    "/messages/inbox",
+                  ),
+                  api
+                    .get(
+                      "/purchases/exchange-rates",
+                    )
+                    .catch(
+                      () => ({
+                        data: FALLBACK_RATES,
+                      }),
+                    ),
+                ],
+              );
+
             setInbox(
-              res.data,
+              inboxRes.data,
+            );
+            setExchangeRates(
+              ratesRes.data ||
+                FALLBACK_RATES,
             );
           } catch (error) {
             console.error(
-              "Failed to fetch inbox:",
+              "Failed to fetch initial data:",
               error,
             );
           } finally {
@@ -203,8 +703,67 @@ const CreatorMessages =
             );
           }
         };
-      fetchInbox();
+      fetchInitialData();
     }, []);
+
+    // --- THE PROFIT ENGINE ---
+    const getFanPrice =
+      (
+        creatorPrice,
+        creatorCurrency = "USD",
+      ) => {
+        if (
+          !creatorPrice ||
+          creatorPrice <=
+            0 ||
+          !exchangeRates
+        ) {
+          return {
+            price: 0,
+            currency:
+              fanCurrency,
+            raw: 0,
+            rawCurrency:
+              creatorCurrency,
+          };
+        }
+        const toUSD =
+          exchangeRates[
+            creatorCurrency
+          ] ||
+          1;
+        const toFan =
+          exchangeRates[
+            fanCurrency
+          ] ||
+          1;
+        const exactUSD = creatorPrice / toUSD;
+        const exactFanPrice = exactUSD * toFan;
+        
+        // --- IRONCLAD FIX: Denomination-Aware Rounding ---
+        let roundedPrice;
+        
+        if (fanCurrency === "NGN") {
+          // Skim NGN to the nearest 50 block (e.g., 1202.46 -> 1250.00)
+          roundedPrice = Math.ceil(exactFanPrice / 50) * 50;
+        } else if (fanCurrency === "KES") {
+          // Skim KES to the nearest 10 block (e.g., 142.10 -> 150.00)
+          roundedPrice = Math.ceil(exactFanPrice / 10) * 10;
+        } else if (fanCurrency === "GHS") {
+          // Skim GHS to the nearest whole number (e.g., 14.10 -> 15.00)
+          roundedPrice = Math.ceil(exactFanPrice);
+        } else {
+          // Skim USD, EUR, GBP to the nearest 0.50 interval (e.g., 3.10 -> 3.50)
+          roundedPrice = Math.ceil(exactFanPrice * 2) / 2;
+        }
+
+        return {
+          price: roundedPrice,
+          currency: fanCurrency,
+          raw: creatorPrice,
+          rawCurrency: creatorCurrency,
+        };
+      };
 
     // 2. Fetch Chat History & Socket Connection
     useEffect(() => {
@@ -647,6 +1206,47 @@ const CreatorMessages =
               formData,
             );
 
+          // --- NEW: LIVE BUBBLE COUNTDOWN ENGINE ---
+          if (
+            res
+              .data
+              .bubblesLeft !==
+            undefined
+          ) {
+            setSelectedChat(
+              (
+                prev,
+              ) => ({
+                ...prev,
+                bubblesLeft:
+                  res
+                    .data
+                    .bubblesLeft,
+              }),
+            );
+            setInbox(
+              (
+                prev,
+              ) =>
+                prev.map(
+                  (
+                    c,
+                  ) =>
+                    c._id ===
+                    selectedChat._id
+                      ? {
+                          ...c,
+                          bubblesLeft:
+                            res
+                              .data
+                              .bubblesLeft,
+                        }
+                      : c,
+                ),
+            );
+          }
+          // --- END LIVE COUNTDOWN ---
+
           setChatHistory(
             [
               ...chatHistory,
@@ -711,10 +1311,10 @@ const CreatorMessages =
           }`}
         >
           <div className="p-4 border-b border-slate-800">
-            <h1 className="text-2xl font-bold text-white mb-4">
+            <h2 className="text-2xl font-bold text-white mb-4">
               CRM
               Inbox
-            </h1>
+            </h2>
             <div className="relative mb-4">
               <Search
                 className="absolute left-3 top-2.5 text-slate-500"
@@ -724,7 +1324,7 @@ const CreatorMessages =
               />
               <input
                 type="text"
-                placeholder="Search fans..."
+                placeholder="Search users..."
                 value={
                   searchQuery
                 }
@@ -825,7 +1425,7 @@ const CreatorMessages =
                           {chat
                             .otherUser
                             ?.username ||
-                            "Unknown Fan"}
+                            "Unknown User"}
                         </h3>
                         <span
                           className={`text-xs ${chat.unreadCount > 0 ? "text-[#FF5757] font-bold" : "text-slate-500"}`}
@@ -935,7 +1535,7 @@ const CreatorMessages =
                     {selectedChat
                       .otherUser
                       ?.username ||
-                      "Unknown Fan"}
+                      "Unknown User"}
                   </h2>
                   <div className="flex gap-2 text-xs font-mono">
                     <span className="text-emerald-400 font-bold">
@@ -1132,182 +1732,285 @@ const CreatorMessages =
 
             {/* INPUT AREA */}
             <div className="p-4 border-t border-slate-800 bg-slate-950/50 pb-safe flex flex-col">
-              {pendingAttachment && (
-                <div className="mb-3 flex items-center justify-between bg-[#FF5757]/10 border border-[#FF5757]/30 rounded-lg p-2 px-3 self-start">
-                  <div className="flex items-center gap-3 text-[#FF5757] text-sm font-bold">
-                    {pendingAttachment.type ===
-                    "audio" ? (
-                      <audio
-                        src={
-                          pendingAttachment.localUrl
-                        }
-                        controls
-                        className="h-8 max-w-[200px]"
-                      />
-                    ) : (
-                      <>
-                        <Lock
-                          size={
-                            14
-                          }
-                        />
-                        <span className="truncate max-w-[200px]">
+              {/* --- NEW: CONTEXTUAL FAN GATEKEEPER --- */}
+              {selectedChat &&
+              (selectedChat
+                .fan
+                ?._id ===
+                (currentUser._id ||
+                  currentUser.id) ||
+                selectedChat.fan ===
+                  (currentUser._id ||
+                    currentUser.id)) &&
+              selectedChat.bubblesLeft <=
+                0 ? (
+                <div className="p-4 bg-slate-900 border border-[#FF5757]/30 rounded-2xl flex items-center justify-between shadow-lg">
+                  <div>
+                    <p className="text-sm font-bold text-white">
+                      Chat
+                      Bubbles
+                      Exhausted
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      Get
+                      more
+                      messages
+                      to
+                      continue
+                      chatting
+                      with{" "}
+                      {selectedChat
+                        .otherUser
+                        ?.username ||
+                        "this creator"}
+
+                      .
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const rawPrice =
+                        selectedChat
+                          .otherUser
+                          ?.monetizationSettings
+                          ?.messageBundlePrice ||
+                        5;
+
+                      // --- IRONCLAD FIX ---
+                      // Match the purchaseController.js fallback chain exactly.
+                      // This ensures 1,208 is treated as NGN, not USD.
+                      const rawCurrency =
+                        selectedChat
+                          .otherUser
+                          ?.monetizationSettings
+                          ?.priceCurrency ||
+                        selectedChat
+                          .otherUser
+                          ?.monetizationSettings
+                          ?.baseCurrency ||
+                        selectedChat
+                          .otherUser
+                          ?.preferredCurrency ||
+                        "USD";
+
+                      const convertedBundle =
+                        getFanPrice(
+                          rawPrice,
+                          rawCurrency,
+                        );
+
+                      setBundlePrice(
+                        convertedBundle.price,
+                      );
+                      setBundleCurrency(
+                        convertedBundle.currency,
+                      );
+                      setRawBundlePrice(
+                        convertedBundle.raw,
+                      );
+                      setRawBundleCurrency(
+                        convertedBundle.rawCurrency,
+                      );
+                      setBundleSize(
+                        selectedChat
+                          .otherUser
+                          ?.monetizationSettings
+                          ?.messageBundleSize ||
+                          5,
+                      );
+                      setBundleQuantity(
+                        1,
+                      );
+                      setShowBundleConfig(
+                        true,
+                      );
+                    }}
+                    className="px-4 py-2 bg-[#FF5757] hover:bg-rose-600 text-white font-bold rounded-xl text-xs transition-colors shadow-lg"
+                  >
+                    Buy
+                    Bundle
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {pendingAttachment && (
+                    <div className="mb-3 flex items-center justify-between bg-[#FF5757]/10 border border-[#FF5757]/30 rounded-lg p-2 px-3 self-start">
+                      <div className="flex items-center gap-3 text-[#FF5757] text-sm font-bold">
+                        {pendingAttachment.type ===
+                        "audio" ? (
+                          <audio
+                            src={
+                              pendingAttachment.localUrl
+                            }
+                            controls
+                            className="h-8 max-w-[200px]"
+                          />
+                        ) : (
+                          <>
+                            <Lock
+                              size={
+                                14
+                              }
+                            />
+                            <span className="truncate max-w-[200px]">
+                              {
+                                pendingAttachment.title
+                              }
+                            </span>
+                          </>
+                        )}
+                        <span className="bg-[#FF5757] text-white px-1.5 py-0.5 rounded text-[10px] font-mono ml-2">
+                          $
                           {
-                            pendingAttachment.title
+                            customPrice
                           }
                         </span>
-                      </>
-                    )}
-                    <span className="bg-[#FF5757] text-white px-1.5 py-0.5 rounded text-[10px] font-mono ml-2">
-                      $
-                      {
-                        customPrice
-                      }
-                    </span>
-                  </div>
-                  <button
-                    onClick={() =>
-                      setPendingAttachment(
-                        null,
-                      )
-                    }
-                    className="text-slate-400 hover:text-white ml-4"
-                  >
-                    <X
-                      size={
-                        16
-                      }
-                    />
-                  </button>
-                </div>
-              )}
-
-              <div className="flex items-end gap-2 bg-slate-900 border border-slate-800 p-2 rounded-2xl focus-within:border-[#FF5757] transition-colors relative">
-                <div className="flex gap-1 pb-1 pl-1">
-                  <button
-                    onClick={
-                      handleOpenVault
-                    }
-                    disabled={
-                      isRecording
-                    }
-                    className="p-2 text-slate-400 hover:text-[#FF5757] disabled:opacity-50 transition-colors rounded-full"
-                  >
-                    <Lock
-                      size={
-                        20
-                      }
-                    />
-                  </button>
-                </div>
-
-                {isRecording ? (
-                  <div className="flex-1 flex items-center justify-between px-4 py-2.5 bg-rose-500/10 rounded-xl border border-rose-500/30">
-                    <div className="flex items-center gap-3 text-[#FF5757]">
-                      <div className="w-2 h-2 bg-[#FF5757] rounded-full animate-pulse"></div>
-                      <span className="font-mono text-sm font-bold tracking-wider">
-                        RECORDING{" "}
-                        {formatTime(
-                          recordingTime,
-                        )}{" "}
-                        /
-                        0:20
-                      </span>
+                      </div>
+                      <button
+                        onClick={() =>
+                          setPendingAttachment(
+                            null,
+                          )
+                        }
+                        className="text-slate-400 hover:text-white ml-4"
+                      >
+                        <X
+                          size={
+                            16
+                          }
+                        />
+                      </button>
                     </div>
-                  </div>
-                ) : (
-                  <textarea
-                    rows="1"
-                    placeholder={
-                      pendingAttachment
-                        ? "Add a description..."
-                        : "Type a message..."
-                    }
-                    value={
-                      messageInput
-                    }
-                    onChange={(
-                      e,
-                    ) =>
-                      setMessageInput(
-                        e
-                          .target
-                          .value,
-                      )
-                    }
-                    onKeyDown={(
-                      e,
-                    ) => {
-                      if (
-                        e.key ===
-                          "Enter" &&
-                        !e.shiftKey
-                      ) {
-                        e.preventDefault();
-                        handleSend();
-                      }
-                    }}
-                    className="flex-1 bg-transparent border-none outline-none text-sm text-white resize-none max-h-32 py-2.5 px-2"
-                  />
-                )}
+                  )}
 
-                {messageInput.trim() ||
-                pendingAttachment ? (
-                  <button
-                    onClick={
-                      handleSend
-                    }
-                    disabled={
-                      isSending
-                    }
-                    className="p-2.5 rounded-xl transition-all mb-0.5 bg-[#FF5757] text-white shadow-lg"
-                  >
-                    {isSending ? (
-                      <Loader2
-                        size={
-                          18
+                  <div className="flex items-end gap-2 bg-slate-900 border border-slate-800 p-2 rounded-2xl focus-within:border-[#FF5757] transition-colors relative">
+                    <div className="flex gap-1 pb-1 pl-1">
+                      <button
+                        onClick={
+                          handleOpenVault
                         }
-                        className="animate-spin"
-                      />
-                    ) : (
-                      <Send
-                        size={
-                          18
+                        disabled={
+                          isRecording
                         }
-                        className="ml-0.5"
-                      />
-                    )}
-                  </button>
-                ) : (
-                  <button
-                    onMouseDown={
-                      isRecording
-                        ? stopRecording
-                        : startRecording
-                    }
-                    className={`p-2.5 rounded-xl transition-all mb-0.5 ${
-                      isRecording
-                        ? "bg-rose-600 text-white animate-pulse"
-                        : "bg-slate-800 text-slate-400 hover:text-white"
-                    }`}
-                  >
+                        className="p-2 text-slate-400 hover:text-[#FF5757] disabled:opacity-50 transition-colors rounded-full"
+                      >
+                        <Lock
+                          size={
+                            20
+                          }
+                        />
+                      </button>
+                    </div>
+
                     {isRecording ? (
-                      <Square
-                        size={
-                          18
-                        }
-                        fill="currentColor"
-                      />
+                      <div className="flex-1 flex items-center justify-between px-4 py-2.5 bg-rose-500/10 rounded-xl border border-rose-500/30">
+                        <div className="flex items-center gap-3 text-[#FF5757]">
+                          <div className="w-2 h-2 bg-[#FF5757] rounded-full animate-pulse"></div>
+                          <span className="font-mono text-sm font-bold tracking-wider">
+                            RECORDING{" "}
+                            {formatTime(
+                              recordingTime,
+                            )}{" "}
+                            /
+                            0:20
+                          </span>
+                        </div>
+                      </div>
                     ) : (
-                      <Mic
-                        size={
-                          18
+                      <textarea
+                        rows="1"
+                        placeholder={
+                          pendingAttachment
+                            ? "Add a description..."
+                            : "Type a message..."
                         }
+                        value={
+                          messageInput
+                        }
+                        onChange={(
+                          e,
+                        ) =>
+                          setMessageInput(
+                            e
+                              .target
+                              .value,
+                          )
+                        }
+                        onKeyDown={(
+                          e,
+                        ) => {
+                          if (
+                            e.key ===
+                              "Enter" &&
+                            !e.shiftKey
+                          ) {
+                            e.preventDefault();
+                            handleSend();
+                          }
+                        }}
+                        className="flex-1 bg-transparent border-none outline-none text-sm text-white resize-none max-h-32 py-2.5 px-2"
                       />
                     )}
-                  </button>
-                )}
-              </div>
+
+                    {messageInput.trim() ||
+                    pendingAttachment ? (
+                      <button
+                        onClick={
+                          handleSend
+                        }
+                        disabled={
+                          isSending
+                        }
+                        className="p-2.5 rounded-xl transition-all mb-0.5 bg-[#FF5757] text-white shadow-lg"
+                      >
+                        {isSending ? (
+                          <Loader2
+                            size={
+                              18
+                            }
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <Send
+                            size={
+                              18
+                            }
+                            className="ml-0.5"
+                          />
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        onMouseDown={
+                          isRecording
+                            ? stopRecording
+                            : startRecording
+                        }
+                        className={`p-2.5 rounded-xl transition-all mb-0.5 ${
+                          isRecording
+                            ? "bg-rose-600 text-white animate-pulse"
+                            : "bg-slate-800 text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        {isRecording ? (
+                          <Square
+                            size={
+                              18
+                            }
+                            fill="currentColor"
+                          />
+                        ) : (
+                          <Mic
+                            size={
+                              18
+                            }
+                          />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         ) : (
@@ -1624,6 +2327,387 @@ const CreatorMessages =
           </div>
         )}
 
+        {/* ================= BUNDLE CONFIGURATION MODAL ================= */}
+        {showBundleConfig && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                <h3 className="text-xl font-bold text-white">
+                  Buy
+                  Chat
+                  Bundle
+                </h3>
+                <button
+                  onClick={() =>
+                    setShowBundleConfig(
+                      false,
+                    )
+                  }
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  <X
+                    size={
+                      24
+                    }
+                  />
+                </button>
+              </div>
+
+              <div className="p-6 flex flex-col items-center">
+                <MessageSquare
+                  size={
+                    48
+                  }
+                  className="text-[#FF5757] mb-4 opacity-80"
+                />
+                <p className="text-sm text-slate-300 text-center mb-6">
+                  <span className="font-bold text-white">
+                    {
+                      selectedChat
+                        .otherUser
+                        ?.username
+                    }
+                  </span>{" "}
+                  is
+                  offering{" "}
+                  <span className="font-bold text-[#FF5757]">
+                    {
+                      bundleSize
+                    }{" "}
+                    messages
+                  </span>{" "}
+                  per
+                  bundle
+                  for{" "}
+                  <span className="font-bold text-[#FF5757]">
+                    {bundlePrice.toFixed(
+                      2,
+                    )}{" "}
+                    {
+                      bundleCurrency
+                    }
+                  </span>
+
+                  .
+                </p>
+
+                <div className="flex items-center gap-6 mb-8 bg-slate-950 p-2 rounded-2xl border border-slate-800">
+                  <button
+                    onClick={() =>
+                      setBundleQuantity(
+                        (
+                          prev,
+                        ) =>
+                          Math.max(
+                            1,
+                            prev -
+                              1,
+                          ),
+                      )
+                    }
+                    disabled={
+                      bundleQuantity <=
+                      1
+                    }
+                    className="p-3 bg-slate-800 rounded-xl text-white hover:bg-slate-700 disabled:opacity-50"
+                  >
+                    <Minus
+                      size={
+                        20
+                      }
+                    />
+                  </button>
+                  <div className="flex flex-col items-center min-w-[60px]">
+                    <span className="text-3xl font-black text-white">
+                      {
+                        bundleQuantity
+                      }
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
+                      Bundles
+                    </span>
+                  </div>
+                  <button
+                    onClick={() =>
+                      setBundleQuantity(
+                        (
+                          prev,
+                        ) =>
+                          prev +
+                          1,
+                      )
+                    }
+                    className="p-3 bg-slate-800 rounded-xl text-white hover:bg-slate-700"
+                  >
+                    <Plus
+                      size={
+                        20
+                      }
+                    />
+                  </button>
+                </div>
+
+                <div className="w-full bg-[#FF5757]/10 border border-[#FF5757]/20 rounded-xl p-4 flex justify-between items-center mb-6">
+                  <div>
+                    <p className="text-xs text-[#FF5757] font-bold uppercase">
+                      Total
+                      Messages
+                    </p>
+                    <p className="text-2xl font-black text-rose-400">
+                      {bundleQuantity *
+                        bundleSize}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-[#FF5757] font-bold uppercase">
+                      Total
+                      Cost
+                    </p>
+                    <p className="text-2xl font-black text-rose-400">
+                      {(
+                        bundleQuantity *
+                        bundlePrice
+                      ).toFixed(
+                        2,
+                      )}{" "}
+                      {
+                        bundleCurrency
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setShowBundleConfig(
+                      false,
+                    );
+                    setCheckoutData(
+                      {
+                        type: "CHAT_BUNDLE",
+                        amount:
+                          bundleQuantity *
+                          bundlePrice,
+                        currency:
+                          bundleCurrency,
+                        raw:
+                          bundleQuantity *
+                          rawBundlePrice,
+                        rawCurrency:
+                          rawBundleCurrency,
+                        bubbles:
+                          bundleQuantity *
+                          bundleSize,
+                      },
+                    );
+                  }}
+                  className="w-full bg-[#FF5757] hover:bg-rose-600 text-white font-bold py-3.5 rounded-xl shadow-lg transition-colors"
+                >
+                  Continue
+                  to
+                  Payment
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= PAYMENT CHECKOUT MODAL ================= */}
+        {checkoutData && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+              <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                <h3 className="text-lg font-bold text-white">
+                  Select
+                  Payment
+                  Method
+                </h3>
+                <button
+                  onClick={
+                    closeCheckoutModal
+                  }
+                  disabled={
+                    processingId !==
+                    null
+                  }
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  <X
+                    size={
+                      24
+                    }
+                  />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-gray-400 text-center">
+                  You
+                  are
+                  buying{" "}
+                  {
+                    checkoutData.bubbles
+                  }{" "}
+                  messages
+                  from{" "}
+                  <span className="text-white font-bold">
+                    {
+                      selectedChat
+                        .otherUser
+                        ?.username
+                    }
+                  </span>{" "}
+                  for{" "}
+                  <span className="text-[#FF5757] font-bold">
+                    {checkoutData.amount.toFixed(
+                      2,
+                    )}{" "}
+                    {
+                      checkoutData.currency
+                    }
+                  </span>
+                </p>
+
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <button
+                    onClick={
+                      handleSelectCrypto
+                    }
+                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
+                      paymentMethod ===
+                      "CRYPTO"
+                        ? "border-[#FF5757] bg-[#FF5757]/10 text-[#FF5757]"
+                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                    }`}
+                  >
+                    <Wallet
+                      size={
+                        28
+                      }
+                      className="mb-2"
+                    />
+                    <span className="font-bold text-sm">
+                      Crypto
+                    </span>
+                    <span className="text-[10px] opacity-70">
+                      MetaMask
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      setPaymentMethod(
+                        "CARD",
+                      )
+                    }
+                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
+                      paymentMethod ===
+                      "CARD"
+                        ? "border-[#FF5757] bg-[#FF5757]/10 text-[#FF5757]"
+                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                    }`}
+                  >
+                    <CreditCard
+                      size={
+                        28
+                      }
+                      className="mb-2"
+                    />
+                    <span className="font-bold text-sm">
+                      Card
+                    </span>
+                    <span className="text-[10px] opacity-70">
+                      Paystack
+                      /
+                      Fiat
+                    </span>
+                  </button>
+                </div>
+
+                {paymentMethod ===
+                  "CRYPTO" &&
+                  fetchingQuote && (
+                    <div className="mt-2 p-3 text-center text-sm text-[#FF5757] animate-pulse">
+                      Fetching
+                      live
+                      USDT
+                      rates...
+                    </div>
+                  )}
+                {paymentMethod ===
+                  "CRYPTO" &&
+                  cryptoQuote && (
+                    <div className="mt-2 p-4 bg-[#FF5757]/10 border border-[#FF5757]/20 rounded-xl text-center">
+                      <p className="text-sm text-gray-400 mb-1">
+                        Total:{" "}
+                        <span className="text-white">
+                          $
+                          {cryptoQuote.amountUSD.toFixed(
+                            2,
+                          )}{" "}
+                          USD
+                        </span>
+                      </p>
+                      <p className="text-xl font-bold text-rose-400">
+                        Due:{" "}
+                        {
+                          cryptoQuote.requiredUSDT
+                        }{" "}
+                        USDT
+                      </p>
+                      <p className="text-xs text-[#FF5757]/70 mt-2 flex items-center justify-center gap-1">
+                        <Lock
+                          size={
+                            12
+                          }
+                        />{" "}
+                        Rate
+                        locked
+                        for
+                        10:00
+                      </p>
+                    </div>
+                  )}
+
+                <button
+                  onClick={
+                    executePayment
+                  }
+                  disabled={
+                    !paymentMethod ||
+                    fetchingQuote ||
+                    (paymentMethod ===
+                      "CRYPTO" &&
+                      !cryptoQuote) ||
+                    processingId !==
+                      null
+                  }
+                  className="w-full mt-4 bg-[#FF5757] hover:bg-rose-600 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-lg shadow-[#FF5757]/20"
+                >
+                  {processingId !==
+                  null ? (
+                    <span className="animate-pulse">
+                      Processing...
+                    </span>
+                  ) : (
+                    <>
+                      <Lock
+                        size={
+                          18
+                        }
+                        className="opacity-70"
+                      />{" "}
+                      Confirm
+                      &
+                      Pay
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <style
           dangerouslySetInnerHTML={{
             __html: `.hide-scrollbar::-webkit-scrollbar { display: none; } .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`,
@@ -1631,6 +2715,6 @@ const CreatorMessages =
         />
       </div>
     );
-  };
+  };;;
 
 export default CreatorMessages;

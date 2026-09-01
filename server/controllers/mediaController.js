@@ -38,100 +38,46 @@ const s3Client =
     },
   );
 
-// @desc    Generate a Pre-signed S3 Upload URL
+
+  // @desc    Generate a Pre-signed S3 Upload URL
 // @route   POST /api/media/upload-ticket
-// exports.generateUploadTicket =
-//   async (
-//     req,
-//     res,
-//   ) => {
-//     try {
-//       const {
-//         fileName,
-//         fileType,
-//       } =
-//         req.body;
+exports.generateUploadTicket = async (req, res) => {
+  try {
+    const { fileName, fileType } = req.body;
 
-//       if (
-//         !fileName ||
-//         !fileType
-//       ) {
-//         return res
-//           .status(
-//             400,
-//           )
-//           .json(
-//             {
-//               message:
-//                 "File name and type are required",
-//             },
-//           );
-//       }
+    if (!fileName || !fileType) {
+      return res.status(400).json({ message: "File name and type are required" });
+    }
 
-//       // 1. Generate a secure, randomized file key so users don't overwrite each other's files
-//       const fileExtension =
-//         fileName
-//           .split(
-//             ".",
-//           )
-//           .pop();
-//       const secureFileName = `${req.user._id}/${crypto.randomBytes(16).toString("hex")}.${fileExtension}`;
+    // 1. Generate a secure, randomized file key
+    const fileExtension = fileName.split(".").pop();
+    const secureFileName = `${req.user._id}/${crypto.randomBytes(16).toString("hex")}.${fileExtension}`;
 
-//       // 2. Define the exact parameters of what the frontend is allowed to upload
-//       const command =
-//         new PutObjectCommand(
-//           {
-//             Bucket:
-//               process
-//                 .env
-//                 .S3_BUCKET_NAME,
-//             Key: secureFileName,
-//             ContentType:
-//               fileType,
-//           },
-//         );
+    // 2. Define the exact parameters
+    const command = new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: secureFileName,
+      ContentType: fileType,
+    });
 
-//       // 3. Generate a temporary URL that expires in exactly 15 minutes (900 seconds)
-//       const uploadUrl =
-//         await getSignedUrl(
-//           s3Client,
-//           command,
-//           {
-//             expiresIn: 900,
-//           },
-//         );
+    // 3. Generate a temporary URL that expires in exactly 15 minutes (900 seconds)
+    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
 
-//       // Return the ticket and the final file path to the frontend
-//       res
-//         .status(
-//           200,
-//         )
-//         .json(
-//           {
-//             uploadUrl,
-//             fileKey:
-//               secureFileName,
-//             message:
-//               "Ticket valid for 15 minutes.",
-//           },
-//         );
-//     } catch (error) {
-//       console.error(
-//         "Presigned URL Error:",
-//         error,
-//       );
-//       res
-//         .status(
-//           500,
-//         )
-//         .json(
-//           {
-//             message:
-//               "Failed to generate upload ticket.",
-//           },
-//         );
-//     }
-//   };
+    // 4. Construct the final public URL based on your R2 domain
+    const publicUrl = `https://${process.env.R2_PUBLIC_DOMAIN}/${secureFileName}`;
+
+    // Return the ticket and the final file path to the frontend
+    res.status(200).json({
+      uploadUrl,
+      fileKey: secureFileName,
+      publicUrl, // <--- ADDED: Frontend needs this to save to the profile
+      message: "Ticket valid for 15 minutes.",
+    });
+  } catch (error) {
+    console.error("Presigned URL Error:", error);
+    res.status(500).json({ message: "Failed to generate upload ticket." });
+  }
+};
 
 // GET /api/media/stream/:contentId
 exports.getSecureStreamUrl = async (req, res) => {

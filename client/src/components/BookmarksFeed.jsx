@@ -20,9 +20,11 @@ import {
   UserPlus,
   UserCheck,
   Loader2,
+  Radio,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import AgeVerificationGate from "./AgeVerificationGate"; // <-- 1. IMPORTED THE GATE
+import AgeVerificationGate from "./AgeVerificationGate";
+import { io } from "socket.io-client";
 
 // --- SUB-COMPONENT ---
 const FeedPostItem =
@@ -40,6 +42,7 @@ const FeedPostItem =
     submitComment,
     submittingComment,
     openPaymentModal,
+    liveCreatorsMap,
   }) => {
     const isFreeContent =
       ppvPriceData.raw <=
@@ -98,6 +101,39 @@ const FeedPostItem =
           </Link>
 
           <div className="flex items-center gap-3">
+            {/* DYNAMIC LIVE BADGE: Checks the dynamic map OR native creator object */}
+            {(liveCreatorsMap?.has(
+              post
+                .creator
+                ?._id,
+            ) ||
+              (post
+                .creator
+                ?.isLive &&
+                post
+                  .creator
+                  ?.currentStreamId)) && (
+              <Link
+                to={
+                  post.hasActiveSub ||
+                  currentUserId ===
+                    post
+                      .creator
+                      ?._id
+                    ? `/live/${liveCreatorsMap?.get(post.creator?._id) || post.creator?.currentStreamId}`
+                    : `/creator/${post.creator?._id}`
+                }
+                className="flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-black tracking-wider transition-all shadow-[0_0_15px_rgba(220,38,38,0.4)] animate-pulse"
+              >
+                <Radio
+                  size={
+                    14
+                  }
+                />{" "}
+                LIVE
+              </Link>
+            )}
+
             {post.isPaywalled &&
               !isFreeContent && (
                 <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
@@ -620,6 +656,64 @@ const BookmarksFeed =
 
     useEffect(() => {
       fetchBookmarksAndRates();
+
+      // FIXED: Real-time socket listener to instantly kill the live badge in Bookmarks
+      const socket =
+        io(
+          import.meta.env.VITE_API_URL?.replace(
+            "/api",
+            "",
+          ) ||
+            "http://localhost:5000",
+        );
+      socket.on(
+        "live_stream_ended",
+        (
+          data,
+        ) => {
+          if (
+            data.streamId
+          ) {
+            setFeed(
+              (
+                prevFeed,
+              ) =>
+                prevFeed.map(
+                  (
+                    post,
+                  ) => {
+                    // FIXED: Force string comparison
+                    if (
+                      String(
+                        post
+                          .creator
+                          ?.currentStreamId,
+                      ) ===
+                      String(
+                        data.streamId,
+                      )
+                    ) {
+                      return {
+                        ...post,
+                        creator:
+                          {
+                            ...post.creator,
+                            isLive: false,
+                            currentStreamId:
+                              null,
+                          },
+                      };
+                    }
+                    return post;
+                  },
+                ),
+            );
+          }
+        },
+      );
+
+      return () =>
+        socket.disconnect();
     }, []);
 
     const fetchBookmarksAndRates =
@@ -718,13 +812,49 @@ const BookmarksFeed =
           exactUSD *
           toFan;
 
-        // THE SKIM: Unconditionally round UP to the nearest $0.50 interval
-        const roundedPrice =
-          Math.ceil(
-            exactFanPrice *
-              2,
-          ) /
-          2;
+        // --- IRONCLAD FIX: Denomination-Aware Rounding ---
+        let roundedPrice;
+
+        if (
+          fanCurrency ===
+          "NGN"
+        ) {
+          // Skim NGN to the nearest 50 block (e.g., 1202.46 -> 1250.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice /
+                50,
+            ) *
+            50;
+        } else if (
+          fanCurrency ===
+          "KES"
+        ) {
+          // Skim KES to the nearest 10 block (e.g., 142.10 -> 150.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice /
+                10,
+            ) *
+            10;
+        } else if (
+          fanCurrency ===
+          "GHS"
+        ) {
+          // Skim GHS to the nearest whole number (e.g., 14.10 -> 15.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice,
+            );
+        } else {
+          // Skim USD, EUR, GBP to the nearest 0.50 interval (e.g., 3.10 -> 3.50)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice *
+                2,
+            ) /
+            2;
+        }
 
         return {
           price:
@@ -997,27 +1127,27 @@ const BookmarksFeed =
         );
 
         try {
-          // Convert Fan's padded price back to USD for the quote
-          const toFanRate =
-            exchangeRates[
-              paymentModalPost
-                .fanCurrency
-            ] ||
-            1;
-          const fanPriceInUSD =
-            paymentModalPost.fanPrice /
-            toFanRate;
-
-          // Convert Creator's true raw price to USD for the quote
+          // --- IRONCLAD FIX: Universal Crypto Pricing ---
+          // Convert the Creator's true raw price to USD
           const toRawRate =
             exchangeRates[
-              paymentModalPost
-                .creatorCurrency
+              checkoutData
+                .rawCurrency
             ] ||
             1;
           const rawPriceInUSD =
-            paymentModalPost.creatorRawPrice /
+            checkoutData.raw /
             toRawRate;
+
+          // Completely ignore the Fan's local fiat display currency.
+          // Apply a universal crypto rounding (e.g., nearest $0.10) so the
+          // charge is identical worldwide regardless of their UI settings.
+          const universalFanPriceUSD =
+            Math.ceil(
+              rawPriceInUSD *
+                10,
+            ) /
+            10;
 
           const {
             data,
@@ -1026,9 +1156,9 @@ const BookmarksFeed =
               "/purchases/crypto-quote",
               {
                 amountUSD:
-                  fanPriceInUSD,
+                  universalFanPriceUSD,
                 rawAmountUSD:
-                  rawPriceInUSD, // <--- We send the raw amount here
+                  rawPriceInUSD,
               },
             );
 
@@ -1061,32 +1191,30 @@ const BookmarksFeed =
           paymentMethod ===
           "CARD"
         ) {
-          // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
-          // THE FIX: Gateway strictly requires the native merchant currency (NGN).
-          // We calculate the exact NGN equivalent of the Fan's dynamic display price.
-          const fanRate =
+          // THE FIX: Calculate fiat based on the padded fan price, so the platform keeps the spread!
+          const toFanRate =
             exchangeRates[
               paymentModalPost
                 .fanCurrency
             ] ||
             1;
-          const ngnRate =
+          const toNGNRate =
             exchangeRates[
               "NGN"
             ] ||
-            1500; // Fallback rate safeguard
+            1500;
 
-          // Reverse engineer the USD base price, then convert to NGN
-          const priceInUSD =
+          // 1. Convert the padded Fan price (e.g., $0.50) back to USD
+          const paddedPriceInUSD =
             paymentModalPost.fanPrice /
-            fanRate;
-          const priceInNGN =
-            priceInUSD *
-            ngnRate;
+            toFanRate;
 
-          // Gateway expects subunits (Kobo)
+          // 2. Convert to NGN for Paystack (e.g., $0.50 * 1390 = 695 NGN)
+          const priceInNGN =
+            paddedPriceInUSD *
+            toNGNRate;
           const amountInSubunits =
-            Math.round(
+            Math.ceil(
               priceInNGN *
                 100,
             );
@@ -1105,7 +1233,7 @@ const BookmarksFeed =
                   amount:
                     amountInSubunits,
                   currency:
-                    "NGN", // Hardcoded to match your merchant gateway compliance
+                    "NGN",
                 },
               onSuccess:
                 async (
@@ -1115,12 +1243,18 @@ const BookmarksFeed =
                     paymentModalPost._id,
                   );
                   try {
-                    // The backend verifyPayment expects the exact currency/amount you just charged
+                    const safeReference =
+                      typeof reference ===
+                      "string"
+                        ? reference
+                        : reference?.reference ||
+                          reference?.trxref;
+
                     await api.post(
                       "/purchases/verify",
                       {
                         reference:
-                          reference.reference,
+                          safeReference,
                         paymentMethod:
                           "FIAT",
                         creatorId:
@@ -1130,17 +1264,13 @@ const BookmarksFeed =
                         contentId:
                           paymentModalPost._id,
                         purchaseType:
-                          "PPV", // Feed items are always PPV
+                          "PPV",
                         subscriptionTier:
                           null,
-
-                        // Aligning charge payload with actual Gateway execution to pass fraud checks
                         chargeAmount:
-                          priceInNGN,
+                          paymentModalPost.fanPrice, // Send what the fan actually saw
                         chargeCurrency:
-                          "NGN",
-
-                        // Creator ledger relies strictly on raw amounts for the 80% platform split
+                          paymentModalPost.fanCurrency,
                         rawAmount:
                           paymentModalPost.creatorRawPrice,
                         rawCurrency:
@@ -1148,8 +1278,7 @@ const BookmarksFeed =
                       },
                     );
 
-                    // Refresh the feed to show the unlocked content
-                    await pollForNewPosts();
+                    await fetchBookmarksAndRates(); // Re-fetch the feed to unlock the content
                     closeModal();
                   } catch (error) {
                     alert(
@@ -1277,6 +1406,33 @@ const BookmarksFeed =
       );
     }
 
+    // FIXED: Build the map cleanly from standard creator objects
+    const liveCreatorsMap =
+      new Map();
+    feed.forEach(
+      (
+        p,
+      ) => {
+        if (
+          p
+            .creator
+            ?.isLive &&
+          p
+            .creator
+            ?.currentStreamId
+        ) {
+          liveCreatorsMap.set(
+            p
+              .creator
+              ._id,
+            p
+              .creator
+              .currentStreamId,
+          );
+        }
+      },
+    );
+
     return (
       <div className="max-w-2xl mx-auto py-8 px-4">
         <div className="flex items-center gap-3 mb-8 border-b border-gray-800 pb-4">
@@ -1392,6 +1548,9 @@ const BookmarksFeed =
                   }
                   openPaymentModal={
                     openPaymentModal
+                  }
+                  liveCreatorsMap={
+                    liveCreatorsMap
                   }
                 />
               );
@@ -1605,6 +1764,6 @@ const BookmarksFeed =
         )}
       </div>
     );
-  };
+  };;;
 
 export default BookmarksFeed;

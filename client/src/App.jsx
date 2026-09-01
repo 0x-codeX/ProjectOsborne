@@ -30,7 +30,6 @@ import FanInbox from "./components/FanInbox";
 import FanChatWindow from "./components/FanChatWindow";
 import CreatorPublicProfile from "./components/CreatorPublicProfile";
 import LivePlayer from "./components/LivePlayer";
-
 // Creator Pages
 import CreatorDashboard from "./pages/CreatorDashboard";
 import CreatorVault from "./pages/CreatorVault";
@@ -148,7 +147,7 @@ function App() {
               }
             />
             <Route
-              path="/stream/:id"
+              path="/live/:id"
               element={
                 <LivePlayer />
               }
@@ -269,6 +268,12 @@ function App() {
                 path="/creator/monetization"
                 element={
                   <MonetizationSettings />
+                }
+              />
+              <Route
+                path="/creator/c/:id"
+                element={
+                  <CreatorPublicProfile />
                 }
               />
             </Route>

@@ -6,13 +6,16 @@ import {
   PlayCircle,
   Loader2,
   AlertCircle,
+  Radio,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { ethers } from "ethers";
 import api from "../utils/api"; // The Ironclad Interceptor
 
 const FeedPost =
   ({
     post,
+    liveCreatorsMap,
   }) => {
     // 1. Props Destructuring
     const {
@@ -193,21 +196,64 @@ const FeedPost =
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl mb-8">
         {/* Header */}
-        <div className="p-4 flex items-center border-b border-slate-800/50">
-          <div className="w-10 h-10 bg-slate-700 rounded-full mr-3"></div>
-          <div>
-            <h3 className="text-white font-bold">
-              @
-              {
-                creator.username
-              }
-            </h3>
-            <p className="text-xs text-slate-400">
-              2
-              hours
-              ago
-            </p>
+        <div className="p-4 flex items-center justify-between border-b border-slate-800/50">
+          <div className="flex items-center">
+            <div className="w-10 h-10 bg-slate-700 rounded-full mr-3 overflow-hidden flex items-center justify-center border border-slate-600">
+              {creator?.profileImage ? (
+                <img
+                  src={
+                    creator.profileImage
+                  }
+                  alt={
+                    creator.username
+                  }
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-slate-400 font-bold text-sm">
+                  {creator?.username
+                    ?.charAt(
+                      0,
+                    )
+                    .toUpperCase() ||
+                    "U"}
+                </span>
+              )}
+            </div>
+            <div>
+              <h3 className="text-white font-bold">
+                @
+                {creator?.username ||
+                  "Unknown"}
+              </h3>
+              <p className="text-xs text-slate-400">
+                {post.createdAt
+                  ? new Date(
+                      post.createdAt,
+                    ).toLocaleDateString()
+                  : "Recently"}
+              </p>
+            </div>
           </div>
+
+          {/* DYNAMIC LIVE BADGE: Checks the dynamic map OR native creator object */}
+          {(liveCreatorsMap?.has(
+            creator?._id,
+          ) ||
+            (creator?.isLive &&
+              creator?.currentStreamId)) && (
+            <Link
+              to={`/live/${liveCreatorsMap?.get(creator?._id) || creator?.currentStreamId}`}
+              className="flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-black tracking-wider transition-all shadow-[0_0_15px_rgba(220,38,38,0.4)] animate-pulse"
+            >
+              <Radio
+                size={
+                  14
+                }
+              />{" "}
+              LIVE
+            </Link>
+          )}
         </div>
 
         {/* Content Area */}

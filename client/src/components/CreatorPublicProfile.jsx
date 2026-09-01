@@ -21,9 +21,11 @@ import {
   Plus,
   Minus,
   Check,
+  Radio,
 } from "lucide-react";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import api from "../utils/api";
+import { io } from "socket.io-client";
 
 const CreatorPublicProfile =
   () => {
@@ -126,6 +128,7 @@ const CreatorPublicProfile =
       useState(
         false,
       );
+
     // --- AGE VERIFICATION GATE STATES ---
     const [
       showAgeGate,
@@ -141,6 +144,7 @@ const CreatorPublicProfile =
       useState(
         null,
       );
+
     const currentUser =
       JSON.parse(
         localStorage.getItem(
@@ -187,6 +191,103 @@ const CreatorPublicProfile =
     }, [
       id,
     ]);
+
+    // INJECTED: Real-time socket connection for the Creator Profile
+    useEffect(() => {
+      const socket =
+        io(
+          import.meta.env.VITE_API_URL?.replace(
+            "/api",
+            "",
+          ) ||
+            "http://localhost:5000",
+        );
+
+      socket.on(
+        "live_stream_started",
+        (
+          data,
+        ) => {
+          setProfileData(
+            (
+              prev,
+            ) => {
+              if (
+                !prev ||
+                !prev.creator
+              )
+                return prev;
+              if (
+                String(
+                  prev
+                    .creator
+                    ._id,
+                ) ===
+                String(
+                  data.creatorId,
+                )
+              ) {
+                return {
+                  ...prev,
+                  creator:
+                    {
+                      ...prev.creator,
+                      isLive: true,
+                      currentStreamId:
+                        data.streamId,
+                    },
+                };
+              }
+              return prev;
+            },
+          );
+        },
+      );
+
+      socket.on(
+        "live_stream_ended",
+        (
+          data,
+        ) => {
+          setProfileData(
+            (
+              prev,
+            ) => {
+              if (
+                !prev ||
+                !prev.creator
+              )
+                return prev;
+              if (
+                String(
+                  prev
+                    .creator
+                    .currentStreamId,
+                ) ===
+                String(
+                  data.streamId,
+                )
+              ) {
+                return {
+                  ...prev,
+                  creator:
+                    {
+                      ...prev.creator,
+                      isLive: false,
+                      currentStreamId:
+                        null,
+                    },
+                };
+              }
+              return prev;
+            },
+          );
+        },
+      );
+
+      return () =>
+        socket.disconnect();
+    }, []);
 
     const FALLBACK_RATES =
       {
@@ -297,13 +398,49 @@ const CreatorPublicProfile =
           exactUSD *
           toFan;
 
-        // The Skim: Round UP to the nearest 0.50 interval
-        const roundedPrice =
-          Math.ceil(
-            exactFanPrice *
-              2,
-          ) /
-          2;
+        // --- IRONCLAD FIX: Denomination-Aware Rounding ---
+        let roundedPrice;
+
+        if (
+          fanCurrency ===
+          "NGN"
+        ) {
+          // Skim NGN to the nearest 50 block (e.g., 1202.46 -> 1250.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice /
+                50,
+            ) *
+            50;
+        } else if (
+          fanCurrency ===
+          "KES"
+        ) {
+          // Skim KES to the nearest 10 block (e.g., 142.10 -> 150.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice /
+                10,
+            ) *
+            10;
+        } else if (
+          fanCurrency ===
+          "GHS"
+        ) {
+          // Skim GHS to the nearest whole number (e.g., 14.10 -> 15.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice,
+            );
+        } else {
+          // Skim USD, EUR, GBP to the nearest 0.50 interval (e.g., 3.10 -> 3.50)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice *
+                2,
+            ) /
+            2;
+        }
 
         return {
           price:
@@ -383,18 +520,8 @@ const CreatorPublicProfile =
         );
 
         try {
-          // Convert Fan's padded price back to USD for the quote
-          const toFanRate =
-            exchangeRates[
-              checkoutData
-                .currency
-            ] ||
-            1;
-          const fanPriceInUSD =
-            checkoutData.amount /
-            toFanRate;
-
-          // Convert Creator's true raw price to USD for the quote
+          // --- IRONCLAD FIX: Universal Crypto Pricing ---
+          // Convert the Creator's true raw price to USD
           const toRawRate =
             exchangeRates[
               checkoutData
@@ -405,6 +532,16 @@ const CreatorPublicProfile =
             checkoutData.raw /
             toRawRate;
 
+          // Completely ignore the Fan's local fiat display currency.
+          // Apply a universal crypto rounding (e.g., nearest $0.10) so the
+          // charge is identical worldwide regardless of their UI settings.
+          const universalFanPriceUSD =
+            Math.ceil(
+              rawPriceInUSD *
+                10,
+            ) /
+            10;
+
           const {
             data,
           } =
@@ -412,9 +549,9 @@ const CreatorPublicProfile =
               "/purchases/crypto-quote",
               {
                 amountUSD:
-                  fanPriceInUSD,
+                  universalFanPriceUSD,
                 rawAmountUSD:
-                  rawPriceInUSD, // <--- We send the raw amount here
+                  rawPriceInUSD,
               },
             );
 
@@ -476,7 +613,6 @@ const CreatorPublicProfile =
               priceInNGN *
                 100,
             );
-
           initializePayment(
             {
               config:
@@ -491,13 +627,12 @@ const CreatorPublicProfile =
                   amount:
                     amountInSubunits,
                   currency:
-                    "NGN", // Hardcoded to match your merchant gateway compliance
+                    "NGN",
                 },
               onSuccess:
                 async (
                   reference,
                 ) => {
-                  // Target checkoutData.post or fallback to the purchase type string
                   setProcessingId(
                     checkoutData.post
                       ? checkoutData
@@ -506,16 +641,23 @@ const CreatorPublicProfile =
                       : checkoutData.type,
                   );
                   try {
-                    // The backend verifyPayment expects the exact currency/amount you just charged
+                    // THE FIX: Robustly extracts the reference regardless of react-paystack API quirks
+                    const safeReference =
+                      typeof reference ===
+                      "string"
+                        ? reference
+                        : reference?.reference ||
+                          reference?.trxref;
+
                     await api.post(
                       "/purchases/verify",
                       {
                         reference:
-                          reference.reference,
+                          safeReference,
                         paymentMethod:
                           "FIAT",
                         creatorId:
-                          id, // Extracted from useParams at the top of the file
+                          id,
                         contentId:
                           checkoutData.post
                             ? checkoutData
@@ -527,14 +669,10 @@ const CreatorPublicProfile =
                         subscriptionTier:
                           checkoutData.tier ||
                           null,
-
-                        // Aligning charge payload with actual Gateway execution to pass fraud checks
                         chargeAmount:
                           priceInNGN,
                         chargeCurrency:
                           "NGN",
-
-                        // Creator ledger relies strictly on raw amounts for the 80% platform split
                         rawAmount:
                           checkoutData.raw,
                         rawCurrency:
@@ -762,167 +900,226 @@ const CreatorPublicProfile =
       );
 
     return (
-      <div className="max-w-4xl mx-auto pb-12 relative">
-        <div className="h-48 bg-gradient-to-r from-gray-900 to-black border-b border-gray-800 relative">
-          <div className="absolute -bottom-12 left-4 sm:left-8 flex items-end gap-4">
-            <div className="relative">
-              <div className="w-24 h-24 bg-gray-800 rounded-full border-4 border-black flex items-center justify-center overflow-hidden">
-                {creator.profileImage ? (
-                  <img
-                    src={
-                      creator.profileImage
-                    }
-                    alt={
-                      creator.username
-                    }
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="text-3xl font-bold text-gray-400">
-                    {creator.username
-                      .charAt(
-                        0,
-                      )
-                      .toUpperCase()}
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={
-                  handleFollowToggle
-                }
-                className={`absolute -bottom-2 left-1/2 -translate-x-1/2 p-1.5 rounded-full border-2 border-black transition-all ${
-                  isFollowed
-                    ? "bg-gray-700 text-white hover:bg-gray-600"
-                    : "bg-rose-500 text-white hover:bg-rose-600"
-                }`}
-              >
-                {isFollowed ? (
-                  <Check
-                    size={
-                      16
-                    }
-                    strokeWidth={
-                      3
-                    }
-                  />
-                ) : (
-                  <Plus
-                    size={
-                      16
-                    }
-                    strokeWidth={
-                      3
-                    }
-                  />
-                )}
-              </button>
-            </div>
+      <div className="max-w-4xl mx-auto pb-12 relative shadow-2xl bg-black min-h-screen">
+        {/* THE BANNER (Twitter/Facebook Style) */}
+        <div className="h-48 md:h-72 w-full bg-gray-900 relative">
+          {creator.bannerImage ? (
+            <img
+              src={
+                creator.bannerImage
+              }
+              alt="Profile Banner"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-r from-gray-900 via-slate-800 to-black"></div>
+          )}
+        </div>
+        {/* ^^^ THIS WAS THE MISSING CLOSING DIV THAT CAUSED YOUR RED SQUIGGLIES ^^^ */}
 
-            <div className="mb-2">
-              <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                {
-                  creator.username
-                }{" "}
-                <ShieldCheck
-                  size={
-                    20
+        {/* PROFILE HEADER SECTION */}
+        <div className="px-4 sm:px-8 relative mb-2">
+          <div className="flex justify-between items-start -mt-14 md:-mt-20 relative z-10">
+            {/* LEFT COLUMN: Avatar + Username Group */}
+            <div className="flex flex-col">
+              {/* THE ENLARGED AVATAR */}
+              <div className="relative w-max">
+                <div className="w-28 h-28 md:w-40 md:h-40 bg-gray-800 rounded-full border-4 border-black flex items-center justify-center overflow-hidden shadow-xl">
+                  {creator.profileImage ? (
+                    <img
+                      src={
+                        creator.profileImage
+                      }
+                      alt={
+                        creator.username
+                      }
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-4xl md:text-5xl font-bold text-gray-400">
+                      {creator.username
+                        .charAt(
+                          0,
+                        )
+                        .toUpperCase()}
+                    </span>
+                  )}
+                </div>
+
+                {/* FOLLOW BUTTON */}
+                <button
+                  onClick={
+                    handleFollowToggle
                   }
-                  className="text-blue-400"
-                />
-              </h1>
-              <p className="text-gray-400 font-medium">
-                {
-                  content.length
-                }{" "}
-                Exclusive
-                Posts
-              </p>
-            </div>
-          </div>
+                  className={`absolute bottom-0 right-0 md:bottom-2 md:right-2 p-2 rounded-full border-4 border-black transition-all ${
+                    isFollowed
+                      ? "bg-gray-700 text-white hover:bg-gray-600"
+                      : "bg-emerald-500 text-white hover:bg-emerald-600"
+                  }`}
+                >
+                  {isFollowed ? (
+                    <Check
+                      size={
+                        18
+                      }
+                      strokeWidth={
+                        3
+                      }
+                    />
+                  ) : (
+                    <Plus
+                      size={
+                        18
+                      }
+                      strokeWidth={
+                        3
+                      }
+                    />
+                  )}
+                </button>
+              </div>
 
-          <div className="absolute -bottom-5 right-4 sm:right-8 flex items-center gap-2">
-            {settings.messageBundlePrice >
-              0 &&
-              (hasActiveChat ? (
+              {/* CREATOR INFO (Snapped exactly below the avatar, right aligned) */}
+              <div className="-mt-7 md:-mt-10 flex flex-col items-end w-max relative z-20">
+                <h1 className="text-2xl md:text-3xl font-black text-white flex items-center gap-2 leading-none">
+                  {
+                    creator.username
+                  }{" "}
+                  <ShieldCheck
+                    size={
+                      24
+                    }
+                    className="text-blue-400"
+                  />
+                </h1>
+                {/* -mt-2 pulls the text up tightly against the username. w-full and text-right strictly anchor it to the right edge */}
+                <p className="text-red-400 font-medium text-sm -mt-9 w-full text-right pr-1">
+                  {
+                    content.length
+                  }{" "}
+                  Exclusive
+                  Posts
+                </p>
+              </div>
+            </div>
+
+            {/* RIGHT COLUMN: ACTION BUTTONS (Straddling the banner edge) */}
+            <div className="flex flex-wrap justify-end items-center gap-2 mt-9 md:mt-[3.75rem]">
+              {/* INJECTED: Glowing Live Button with Sub-Gate Logic */}
+              {creator?.isLive &&
+                creator?.currentStreamId && (
+                  <button
+                    onClick={() => {
+                      if (
+                        isSubscribed ||
+                        availableTiers.length ===
+                          0
+                      ) {
+                        navigate(
+                          `/live/${creator.currentStreamId}`,
+                        );
+                      } else {
+                        setShowSubModal(
+                          true,
+                        );
+                      }
+                    }}
+                    className="bg-red-600 text-white border border-red-500 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-red-500 transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(220,38,38,0.6)] animate-pulse"
+                  >
+                    <Radio
+                      size={
+                        16
+                      }
+                    />
+                    <span className="hidden sm:inline text-sm">
+                      LIVE
+                      NOW
+                    </span>
+                  </button>
+                )}
+
+              {settings.messageBundlePrice >
+                0 &&
+                (hasActiveChat ? (
+                  <button
+                    onClick={() =>
+                      navigate(
+                        "/messages",
+                      )
+                    }
+                    className="bg-blue-600 text-white border border-blue-500 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-500/20"
+                  >
+                    <MessageSquare
+                      size={
+                        16
+                      }
+                    />
+                    <span className="hidden sm:inline text-sm">
+                      DM
+                      Now
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setBundleQuantity(
+                        1,
+                      );
+                      setShowBundleConfig(
+                        true,
+                      );
+                    }}
+                    className="bg-slate-900 text-gray-400 border border-gray-600 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-slate-800 hover:text-white transition-all flex items-center gap-2 shadow-lg"
+                  >
+                    <MessageSquare
+                      size={
+                        16
+                      }
+                    />
+                    <span className="hidden sm:inline text-sm">
+                      Buy
+                      DM
+                    </span>
+                  </button>
+                ))}
+
+              {isSubscribed ? (
+                <button className="bg-gray-800 text-emerald-400 px-4 py-2 rounded-full font-bold flex items-center gap-1.5 border border-gray-700 cursor-default text-sm">
+                  <Unlock
+                    size={
+                      16
+                    }
+                  />{" "}
+                  Subscribed
+                </button>
+              ) : availableTiers.length >
+                0 ? (
                 <button
                   onClick={() =>
-                    navigate(
-                      "/messages",
+                    setShowSubModal(
+                      true,
                     )
                   }
-                  className="bg-blue-600 text-white border border-blue-500 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-500/20"
+                  className="bg-white text-black px-4 py-2 rounded-full font-bold hover:bg-gray-200 transition-all flex items-center gap-1.5 shadow-lg text-sm"
                 >
-                  <MessageSquare
+                  <Star
                     size={
                       16
                     }
-                  />
-                  <span className="hidden sm:inline text-sm">
-                    DM
-                    Now
-                  </span>
+                  />{" "}
+                  Subscribe
                 </button>
               ) : (
-                <button
-                  onClick={() => {
-                    setBundleQuantity(
-                      1,
-                    );
-                    setShowBundleConfig(
-                      true,
-                    );
-                  }}
-                  className="bg-slate-900 text-gray-400 border border-gray-600 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-slate-800 hover:text-white transition-all flex items-center gap-2 shadow-lg"
-                >
-                  <MessageSquare
-                    size={
-                      16
-                    }
-                  />
-                  <span className="hidden sm:inline text-sm">
-                    Buy
-                    DM
-                  </span>
+                <button className="bg-gray-800 text-white px-4 py-2 rounded-full font-bold border border-gray-700 text-sm">
+                  Free
+                  Profile
                 </button>
-              ))}
-
-            {isSubscribed ? (
-              <button className="bg-gray-800 text-emerald-400 px-4 py-2 rounded-full font-bold flex items-center gap-1.5 border border-gray-700 cursor-default text-sm">
-                <Unlock
-                  size={
-                    16
-                  }
-                />{" "}
-                Subscribed
-              </button>
-            ) : availableTiers.length >
-              0 ? (
-              <button
-                onClick={() =>
-                  setShowSubModal(
-                    true,
-                  )
-                }
-                className="bg-white text-black px-4 py-2 rounded-full font-bold hover:bg-gray-200 transition-all flex items-center gap-1.5 shadow-lg text-sm"
-              >
-                <Star
-                  size={
-                    16
-                  }
-                />{" "}
-                Subscribe
-              </button>
-            ) : (
-              <button className="bg-gray-800 text-white px-4 py-2 rounded-full font-bold border border-gray-700 text-sm">
-                Free
-                Profile
-              </button>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="px-4 mt-20">
+        <div className="px-4 mt-12 md:mt-16">
           <h2 className="text-xl font-bold text-white mb-6 border-b border-gray-800 pb-2">
             Creator
             Vault
@@ -1371,6 +1568,7 @@ const CreatorPublicProfile =
             </div>
           </div>
         )}
+
         {/* THE NEW AGE GATE */}
         <AgeVerificationGate
           isOpen={
@@ -1578,6 +1776,6 @@ const CreatorPublicProfile =
         )}
       </div>
     );
-  };;
+  };
 
 export default CreatorPublicProfile;

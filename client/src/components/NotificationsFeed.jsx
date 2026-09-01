@@ -3,6 +3,7 @@ import React, {
   useEffect,
 } from "react";
 import { useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
 import {
   Bell,
   PlaySquare,
@@ -16,6 +17,20 @@ import {
   X, // Added the X icon for dismissal
 } from "lucide-react";
 import api from "../utils/api";
+
+
+// Helper to format time ago for ended streams
+const getTimeAgo = (date) => {
+  if (!date) return "recently";
+  const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} mins ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} days ago`;
+};
 
 const NotificationsFeed =
   () => {
@@ -54,11 +69,116 @@ const NotificationsFeed =
 
     useEffect(() => {
       fetchNotifications();
-    }, [
-      dismissedLives,
-    ]); // Re-sort if a notification is dismissed
 
-    // THE STICKY ENGINE
+      const socket =
+        io(
+          import.meta.env.VITE_API_URL?.replace(
+            "/api",
+            "",
+          ) ||
+            "http://localhost:5000",
+        );
+
+      // FIXED: Instantly light up the notification card when they go live
+      socket.on(
+        "live_stream_started",
+        (
+          data,
+        ) => {
+          if (
+            data.creatorId
+          ) {
+            setNotifications(
+              (
+                prev,
+              ) =>
+                prev.map(
+                  (
+                    n,
+                  ) => {
+                    if (
+                      n.sender &&
+                      String(
+                        n
+                          .sender
+                          ._id,
+                      ) ===
+                        String(
+                          data.creatorId,
+                        )
+                    ) {
+                      return {
+                        ...n,
+                        sender:
+                          {
+                            ...n.sender,
+                            isLive: true,
+                            currentStreamId:
+                              data.streamId,
+                          },
+                      };
+                    }
+                    return n;
+                  },
+                ),
+            );
+          }
+        },
+      );
+
+      // FIXED: Instantly kill the red styling when the stream drops
+      socket.on(
+        "live_stream_ended",
+        (
+          data,
+        ) => {
+          if (
+            data.streamId
+          ) {
+            setNotifications(
+              (
+                prev,
+              ) =>
+                prev.map(
+                  (
+                    n,
+                  ) => {
+                    if (
+                      n.sender &&
+                      String(
+                        n
+                          .sender
+                          .currentStreamId,
+                      ) ===
+                        String(
+                          data.streamId,
+                        )
+                    ) {
+                      return {
+                        ...n,
+                        sender:
+                          {
+                            ...n.sender,
+                            isLive: false,
+                            currentStreamId:
+                              null,
+                          },
+                      };
+                    }
+                    return n;
+                  },
+                ),
+            );
+          }
+        },
+      );
+
+      return () =>
+        socket.disconnect();
+    }, []);
+    // Note: removed dismissedLives from dependency array to prevent socket re-connections
+
+    // THE STICKY ENGINE (Now fully synced with real-time db status)
     const isSticky =
       (
         notif,
@@ -73,21 +193,15 @@ const NotificationsFeed =
             notif._id,
           )
         )
-          return false; // Unpin if dismissed or clicked
+          return false;
 
-        // Failsafe: Streams rarely last over 12 hours. Auto-unpin old notifications so the feed doesn't break.
-        const twelveHoursInMs =
-          12 *
-          60 *
-          60 *
-          1000;
-        const isRecent =
-          new Date() -
-            new Date(
-              notif.createdAt,
-            ) <
-          twelveHoursInMs;
-        return isRecent;
+        // IRONCLAD FIX: Relies purely on the actual creator's live status, not a timer
+        return (
+          notif
+            .sender
+            ?.isLive ===
+          true
+        );
       };
 
     const fetchNotifications =
@@ -104,9 +218,43 @@ const NotificationsFeed =
             response.data ||
             [];
 
+          // IRONCLAD FIX: Deduplicate GO_LIVE cards.
+          // Keep only the most recent GO_LIVE notification per creator.
+          const seenGoLiveCreators =
+            new Set();
+          const filteredData =
+            rawData.filter(
+              (
+                notif,
+              ) => {
+                if (
+                  notif.type ===
+                  "GO_LIVE"
+                ) {
+                  const creatorId =
+                    String(
+                      notif
+                        .sender
+                        ?._id,
+                    );
+                  if (
+                    seenGoLiveCreators.has(
+                      creatorId,
+                    )
+                  ) {
+                    return false; // Destroy older live cards from this creator
+                  }
+                  seenGoLiveCreators.add(
+                    creatorId,
+                  );
+                }
+                return true;
+              },
+            );
+
           // Sort: Sticky GO_LIVE first, then chronological
           const sortedData =
-            rawData.sort(
+            filteredData.sort(
               (
                 a,
                 b,
@@ -464,18 +612,30 @@ const NotificationsFeed =
                             notif.title
                           }
                         </h3>
-                        {sticky && (
-                          <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-sm animate-pulse tracking-wider">
-                            LIVE
-                            NOW
-                          </span>
-                        )}
+                        {notif.type ===
+                        "GO_LIVE" ? (
+                          sticky ? (
+                            <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-sm animate-pulse tracking-wider">
+                              LIVE
+                              NOW
+                            </span>
+                          ) : (
+                            <span className="bg-slate-800 text-slate-400 border border-slate-700 text-[9px] font-bold px-1.5 py-0.5 rounded-sm tracking-wider">
+                              ENDED{" "}
+                              {getTimeAgo(
+                                notif.createdAt,
+                              ).toUpperCase()}
+                            </span>
+                          )
+                        ) : null}
                       </div>
 
                       <p className="text-sm text-gray-400 mt-1 leading-snug whitespace-pre-wrap">
-                        {
-                          notif.message
-                        }
+                        {notif.type ===
+                          "GO_LIVE" &&
+                        !sticky
+                          ? `${notif.sender?.username || "Creator"}'s live stream has ended.`
+                          : notif.message}
                       </p>
 
                       <span className="text-xs text-gray-600 mt-2 block font-medium">

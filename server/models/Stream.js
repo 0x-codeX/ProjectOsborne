@@ -30,34 +30,22 @@ const StreamSchema =
           type: Boolean,
           default: false,
         },
-      livepeerStreamId:
-        {
-          type: String,
-          required: true,
-          unique: true,
-        },
-      streamKey:
-        {
-          type: String,
-          required: true,
-          select: false, // Never expose stream key by default
-        },
-      playbackId:
-        {
-          type: String,
-          required: true,
-        },
       status:
         {
           type: String,
           enum: [
             "OFFLINE",
-            "ACTIVE",
+            "LIVE",
             "ENDED",
           ],
           default:
             "OFFLINE",
           index: true,
+        },
+      isLive:
+        {
+          type: Boolean,
+          default: false,
         },
       startedAt:
         {

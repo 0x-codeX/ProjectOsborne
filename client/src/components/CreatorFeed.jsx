@@ -7,19 +7,19 @@ import {
   Activity,
   Users,
   Eye,
-  Repeat,
+  Bookmark,
   Zap,
 } from "lucide-react";
-// Assuming you have a FanFeed component already. If not, this serves as the placeholder.
-// import FanFeed from "../components/FanFeed";
+import FanFeed from "./FanFeed";
+import BookmarksFeed from "./BookmarksFeed";
 
-// MOCK DATA: System-Generated Algorithm Insights (Anonymized & Actionable)
+// MOCK DATA: System-Generated Algorithm Insights matching your automated metrics request
 const SYSTEM_INSIGHTS =
   [
     {
       id: 1,
-      type: "Platform Trend",
-      icon: Activity,
+      type: "Audience Trend",
+      icon: Users,
       color:
         "text-blue-400",
       bgColor:
@@ -27,32 +27,15 @@ const SYSTEM_INSIGHTS =
       borderColor:
         "border-blue-400/20",
       title:
-        "High Retention Posting Cadence",
+        "What Fans Are Watching",
       description:
-        "Platform data shows that creators in the Web3 & Tech niches who post 2-3 times a week retain 85% of their subscribers month-over-month, compared to 40% for daily posters.",
+        "Platform data shows a 45% increase in engagement for 'Behind-the-Scenes' and 'Process' videos this week. Fans are heavily engaging with unpolished, authentic content.",
       actionItem:
-        "Schedule your content spacing. Don't burn out your audience.",
+        "Try posting a raw, unedited behind-the-scenes clip to boost immediate views.",
     },
     {
       id: 2,
-      type: "Top Performing Format",
-      icon: Zap,
-      color:
-        "text-amber-400",
-      bgColor:
-        "bg-amber-400/10",
-      borderColor:
-        "border-amber-400/20",
-      title:
-        "The 'Cliffhanger' Teaser",
-      description:
-        "A public post format is currently converting at 12% across the platform. It involves a 15-second free video that cuts off right before the core solution, with a CTA to unlock the Vault.",
-      actionItem:
-        "Try cutting your next free tutorial in half and paywalling the resolution.",
-    },
-    {
-      id: 3,
-      type: "Monetization Alert",
+      type: "Conversion Tactic",
       icon: TrendingUp,
       color:
         "text-emerald-400",
@@ -61,17 +44,34 @@ const SYSTEM_INSIGHTS =
       borderColor:
         "border-emerald-400/20",
       title:
-        "1-on-1 Chat Revenue Spikes",
+        "How to Get More Subscriptions",
       description:
-        "The top 10% of earners this week generated over 40% of their total revenue solely through pay-per-message interactions rather than standard subscriptions.",
+        "Creators who offer a 7-day automated PPV discount immediately after a user follows them are seeing a 30% higher conversion rate into full monthly subscriptions.",
       actionItem:
-        "Engage your high-tier fans in direct messages with exclusive advisory offers.",
+        "Bundle your top 3 posts and pin them to the top of your profile for new followers.",
+    },
+    {
+      id: 3,
+      type: "Algorithm Alert",
+      icon: Zap,
+      color:
+        "text-amber-400",
+      bgColor:
+        "bg-amber-400/10",
+      borderColor:
+        "border-amber-400/20",
+      title:
+        "Maximizing Feed Views",
+      description:
+        "The algorithm is currently prioritizing posts with active comment threads. Posts that receive at least 5 comments in the first hour are pushed to 3x more fan feeds.",
+      actionItem:
+        "End your next free teaser post with a direct question to encourage immediate comments.",
     },
   ];
 
 const CreatorFeed =
   () => {
-    // Toggle state: 'insights' (Creator Analytics) or 'marketplace' (Fan View)
+    // Toggle state: 'insights', 'marketplace', or 'bookmarks'
     const [
       feedMode,
       setFeedMode,
@@ -82,48 +82,17 @@ const CreatorFeed =
 
     return (
       <div className="min-h-screen bg-transparent text-slate-200 p-4 md:p-8 max-w-4xl mx-auto">
-        {/* HEADER & MASTER TOGGLE */}
-        <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div>
-            <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
-              <Lightbulb
-                className="text-[#FF5757]"
-                size={
-                  32
-                }
-              />
-              Creator
-              Hub
-            </h1>
-            <p className="text-slate-400 text-sm md:text-base max-w-md">
-              Monitor
-              platform
-              trends
-              or
-              switch
-              to
-              the
-              marketplace
-              view
-              to
-              see
-              how
-              fans
-              experience
-              your
-              content.
-            </p>
-          </div>
-
-          {/* The Dual-View Toggle */}
-          <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0">
+        {/* HEADER & MASTER TOGGLE (Sticky underneath main layout header) */}
+        <div className="sticky top-16 md:top-[4.5rem] z-40 mb-8 -mx-4 px-4 md:-mx-8 md:px-8 py-3 bg-[#050505]/90 backdrop-blur-md flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-slate-800/50 shadow-2xl">
+          {/* The 3-Way Tab Toggle */}
+          <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0 overflow-x-auto custom-scrollbar w-full md:w-auto">
             <button
               onClick={() =>
                 setFeedMode(
                   "insights",
                 )
               }
-              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold transition-all ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
                 feedMode ===
                 "insights"
                   ? "bg-[#FF5757] text-white shadow-lg"
@@ -134,7 +103,7 @@ const CreatorFeed =
                 size={
                   16
                 }
-              />
+              />{" "}
               Platform
               Insights
             </button>
@@ -144,7 +113,7 @@ const CreatorFeed =
                   "marketplace",
                 )
               }
-              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold transition-all ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
                 feedMode ===
                 "marketplace"
                   ? "bg-slate-700 text-white shadow-lg"
@@ -155,144 +124,131 @@ const CreatorFeed =
                 size={
                   16
                 }
-              />
+              />{" "}
               Marketplace
               View
+            </button>
+            <button
+              onClick={() =>
+                setFeedMode(
+                  "bookmarks",
+                )
+              }
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+                feedMode ===
+                "bookmarks"
+                  ? "bg-emerald-600 text-white shadow-lg"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800"
+              }`}
+            >
+              <Bookmark
+                size={
+                  16
+                }
+              />{" "}
+              Bookmarks
             </button>
           </div>
         </div>
 
         {/* RENDER CONTENT BASED ON TOGGLE */}
-        {feedMode ===
-        "marketplace" ? (
-          <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-8 text-center backdrop-blur-sm">
-            {/* If you have the FanFeed built, you would literally just render it here like: <FanFeed /> */}
-            <Eye
-              size={
-                48
-              }
-              className="mx-auto text-slate-600 mb-4"
-            />
-            <h2 className="text-xl font-bold text-white mb-2">
-              Marketplace
-              View
-            </h2>
-            <p className="text-slate-400 max-w-sm mx-auto">
-              This
-              is
-              exactly
-              what
-              the
-              fans
-              see.
-              Scroll
-              the
-              public
-              feed,
-              check
-              out
-              the
-              competition,
-              and
-              see
-              how
-              your
-              posts
-              look
-              in
-              the
-              wild.
-            </p>
-            {/* Placeholder for the actual FanFeed component injection */}
-            <div className="mt-8 border-t border-slate-800 border-dashed pt-8 text-slate-500 font-mono text-sm">
-              [
-              FanFeed.jsx
-              Component
-              Mounts
-              Here
-              ]
+        <div className="pb-10">
+          {feedMode ===
+            "marketplace" && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {/* Seamlessly injects the existing FanFeed */}
+              <FanFeed />
             </div>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {SYSTEM_INSIGHTS.map(
-              (
-                insight,
-              ) => {
-                const Icon =
-                  insight.icon;
-                return (
-                  <div
-                    key={
-                      insight.id
-                    }
-                    className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-colors backdrop-blur-sm relative overflow-hidden"
-                  >
-                    {/* Background Glow based on insight type */}
+          )}
+
+          {feedMode ===
+            "bookmarks" && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {/* Seamlessly injects the existing BookmarksFeed */}
+              <BookmarksFeed />
+            </div>
+          )}
+
+          {feedMode ===
+            "insights" && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {SYSTEM_INSIGHTS.map(
+                (
+                  insight,
+                ) => {
+                  const Icon =
+                    insight.icon;
+                  return (
                     <div
-                      className={`absolute -top-10 -right-10 w-32 h-32 ${insight.bgColor} rounded-full blur-3xl pointer-events-none`}
-                    ></div>
-
-                    <div className="flex items-start gap-4 mb-4">
-                      <div
-                        className={`p-3 rounded-xl ${insight.bgColor} ${insight.borderColor} border`}
-                      >
-                        <Icon
-                          size={
-                            24
-                          }
-                          className={
-                            insight.color
-                          }
-                        />
-                      </div>
-                      <div>
-                        <span
-                          className={`text-[10px] font-bold uppercase tracking-wider ${insight.color}`}
-                        >
-                          {
-                            insight.type
-                          }
-                        </span>
-                        <h2 className="text-xl font-bold text-white mt-1">
-                          {
-                            insight.title
-                          }
-                        </h2>
-                      </div>
-                    </div>
-
-                    <p className="text-slate-300 text-sm leading-relaxed mb-6">
-                      {
-                        insight.description
+                      key={
+                        insight.id
                       }
-                    </p>
+                      className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-colors backdrop-blur-sm relative overflow-hidden"
+                    >
+                      {/* Background Glow based on insight type */}
+                      <div
+                        className={`absolute -top-10 -right-10 w-32 h-32 ${insight.bgColor} rounded-full blur-3xl pointer-events-none`}
+                      ></div>
 
-                    <div className="bg-slate-950 rounded-xl p-4 border border-slate-800/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                      <div>
-                        <span className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1 block">
-                          Suggested
-                          Action
-                        </span>
-                        <p className="text-sm text-slate-200 font-medium">
-                          {
-                            insight.actionItem
-                          }
-                        </p>
+                      <div className="flex items-start gap-4 mb-4">
+                        <div
+                          className={`p-3 rounded-xl ${insight.bgColor} ${insight.borderColor} border`}
+                        >
+                          <Icon
+                            size={
+                              24
+                            }
+                            className={
+                              insight.color
+                            }
+                          />
+                        </div>
+                        <div>
+                          <span
+                            className={`text-[10px] font-bold uppercase tracking-wider ${insight.color}`}
+                          >
+                            {
+                              insight.type
+                            }
+                          </span>
+                          <h2 className="text-xl font-bold text-white mt-1">
+                            {
+                              insight.title
+                            }
+                          </h2>
+                        </div>
                       </div>
-                      <button className="whitespace-nowrap px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition-all border border-slate-700 hover:border-slate-500">
-                        Apply
-                        to
-                        Next
-                        Post
-                      </button>
+
+                      <p className="text-slate-300 text-sm leading-relaxed mb-6">
+                        {
+                          insight.description
+                        }
+                      </p>
+
+                      <div className="bg-slate-950 rounded-xl p-4 border border-slate-800/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                          <span className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1 block">
+                            Suggested
+                            Action
+                          </span>
+                          <p className="text-sm text-slate-200 font-medium">
+                            {
+                              insight.actionItem
+                            }
+                          </p>
+                        </div>
+                        <button className="whitespace-nowrap px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition-all border border-slate-700 hover:border-slate-500">
+                          Got
+                          it
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              },
-            )}
-          </div>
-        )}
+                  );
+                },
+              )}
+            </div>
+          )}
+        </div>
       </div>
     );
   };

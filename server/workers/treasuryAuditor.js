@@ -147,65 +147,7 @@ const runReconciliation =
         return;
       }
 
-      // 5. IF SAFE: EXECUTE VOUCHER ROLLOVER (3:05 PM Logic)
-      // Find vouchers created more than 23 hours ago
-      const twentyThreeHoursAgo =
-        new Date(
-          Date.now() -
-            23 *
-              60 *
-              60 *
-              1000,
-        );
-
-      const expiredTransactions =
-        await Transaction.find(
-          {
-            status:
-              "PENDING_CLAIM",
-            currency:
-              "USDT",
-            createdAt:
-              {
-                $lt: twentyThreeHoursAgo,
-              },
-          },
-        );
-
-      if (
-        expiredTransactions.length >
-        0
-      ) {
-        console.log(
-          `Rolling over ${expiredTransactions.length} expired vouchers...`,
-        );
-
-        for (const tx of expiredTransactions) {
-          // Void the transaction
-          tx.status =
-            "REJECTED";
-          tx.metadata =
-            {
-              ...tx.metadata,
-              voidReason:
-                "24H_TIMEOUT_ROLLOVER",
-            };
-          await tx.save();
-
-          // Push the Clearing Request back to the queue for the God Admin to re-approve
-          await ClearingRequest.findByIdAndUpdate(
-            tx.clearingRequestId,
-            {
-              status:
-                "PENDING_APPROVAL",
-              approvedBy:
-                null,
-            },
-          );
-        }
-      }
-
-      // 6. Log Success
+      // 5. Log Success
       state.lastReconciliationStatus =
         "PASS";
       state.lastReconciliationRun =

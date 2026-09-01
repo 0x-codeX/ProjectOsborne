@@ -309,6 +309,8 @@ require("./workers/treasuryAuditor");
 
 require("./workers/fiatBatchProcessor");
 
+require("./workers/voucherSweeper");
+
 server.listen(
   PORT,
   () => {

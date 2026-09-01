@@ -16,6 +16,8 @@ const {
 } = require("../utils/emailService");
 const Transaction = require("../models/Transaction");
 const SystemState = require("../models/SystemState");
+const Dispute = require("../models/Dispute");
+
 
 // =========================================================
 // HELPER FUNCTION: SYSTEM AUDIT LOGGER
@@ -366,7 +368,7 @@ exports.getUser360 =
         );
       if (
         !user
-      )
+      ) {
         return res
           .status(
             404,
@@ -377,6 +379,7 @@ exports.getUser360 =
                 "User profile not found.",
             },
           );
+      }
 
       const uploads =
         await Content.find(
@@ -390,6 +393,7 @@ exports.getUser360 =
               -1,
           },
         );
+
       const purchases =
         await Purchase.find(
           {
@@ -421,6 +425,20 @@ exports.getUser360 =
             },
           );
 
+      const disputes =
+        await Dispute.find(
+          {
+            creator:
+              userId,
+          },
+        ).sort(
+          {
+            createdAt:
+              -1,
+          },
+        );
+
+      // 1. CALCULATE METRICS FIRST
       let totalFinancialVolume = 0;
       purchases.forEach(
         (
@@ -439,17 +457,19 @@ exports.getUser360 =
               txn.creator &&
               txn.creator._id.toString() ===
                 userId
-            )
+            ) {
               totalFinancialVolume +=
                 amount;
+            }
           } else {
             if (
               txn.user &&
               txn.user._id.toString() ===
                 userId
-            )
+            ) {
               totalFinancialVolume +=
                 amount;
+            }
           }
         },
       );
@@ -470,7 +490,7 @@ exports.getUser360 =
           },
         );
 
-      // --- LOG THE USER PROFILE VIEW ---
+      // 2. LOG THE ACTION
       await exports.logAdminAction(
         req
           .user
@@ -480,6 +500,7 @@ exports.getUser360 =
         `Accessed User 360 dashboard for ${user.username || user.email}`,
       );
 
+      // 3. SEND THE RESPONSE LAST
       res
         .status(
           200,
@@ -495,7 +516,10 @@ exports.getUser360 =
                 totalPurchases:
                   purchases.length,
                 totalMessagesSent,
+                totalDisputes:
+                  disputes.length, // <-- EXPOSED FOR ADMIN AUDIT
               },
+            disputes,
             uploads:
               uploads.map(
                 (

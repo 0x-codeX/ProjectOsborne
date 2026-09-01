@@ -10,8 +10,6 @@ const Wallet = require("../models/Wallet");
 const Notification = require("../models/Notification");
 const Transaction = require("../models/Transaction");
 
-
-
 // SIMPLE IN-MEMORY / MONGO BLOCK TRACKER
 const SyncStateSchema =
   new mongoose.Schema(
@@ -56,10 +54,10 @@ const PAYOUT_ADDRESS =
     .env
     .NIPPY_TREASURY_PAYOUT;
 
-
-const GATEWAY_ABI = [
-  "event ContentPurchased(address indexed buyer, address indexed creator, bytes32 indexed contentId, address token, uint256 rawBasePrice, uint256 chargeAmount, uint256 creatorCut, uint256 treasuryCut)"
-];;
+const GATEWAY_ABI =
+  [
+    "event ContentPurchased(address indexed buyer, address indexed creator, bytes32 indexed contentId, address token, uint256 rawBasePrice, uint256 chargeAmount, uint256 creatorCut, uint256 treasuryCut)",
+  ];
 
 const PAYOUT_ABI =
   [
@@ -73,8 +71,10 @@ async function processPurchaseEvent(
   buyerWallet,
   creatorWallet,
   contentIdBytes32,
-  rawPrice,
-  rawCreatorCut, // The exact 80% cut from the smart contract
+  rawBasePrice,
+  rawChargeAmount,
+  rawCreatorCut,
+  rawTreasuryCut,
   txHash,
 ) {
   try {
@@ -146,10 +146,19 @@ async function processPurchaseEvent(
 
     const creator =
       content.creator;
-    const amountPaidUSDT =
+
+    // FORMATTING VALUES
+    const basePriceUSDT =
       Number(
         ethers.formatUnits(
-          rawPrice,
+          rawBasePrice,
+          6,
+        ),
+      );
+    const chargeAmountUSDT =
+      Number(
+        ethers.formatUnits(
+          rawChargeAmount,
           6,
         ),
       );
@@ -157,6 +166,13 @@ async function processPurchaseEvent(
       Number(
         ethers.formatUnits(
           rawCreatorCut,
+          6,
+        ),
+      );
+    const treasuryCutUSDT =
+      Number(
+        ethers.formatUnits(
+          rawTreasuryCut,
           6,
         ),
       );
@@ -211,7 +227,13 @@ async function processPurchaseEvent(
             creator,
           txHash,
           amountPaid:
-            amountPaidUSDT,
+            chargeAmountUSDT,
+          basePrice:
+            basePriceUSDT,
+          creatorEarnings:
+            creatorEarningsUSDT,
+          treasuryFee:
+            treasuryCutUSDT,
           purchaseType:
             "PPV",
           status:
@@ -230,7 +252,6 @@ async function processPurchaseEvent(
       ethers.ZeroAddress
     ) {
       // FALLBACK ROUTE: Zero-Math Escrow
-      // We save the pure USDT to their Web2 Fiat Map for Friday liquidation.
       await Wallet.findOneAndUpdate(
         {
           creator:
@@ -370,6 +391,13 @@ async function startListener() {
         GATEWAY_ABI,
         httpProvider,
       );
+    const httpPayoutContract =
+      new ethers.Contract(
+        PAYOUT_ADDRESS,
+        PAYOUT_ABI,
+        httpProvider,
+      );
+
     const currentBlock =
       await httpProvider.getBlockNumber();
 
@@ -413,30 +441,84 @@ async function startListener() {
               maxBlockRange,
             currentBlock,
           );
+
         try {
-          const pastEvents =
+          // 1. CATCH HISTORICAL CONTENT PURCHASES
+          const pastPurchases =
             await httpContract.queryFilter(
               "ContentPurchased",
               start,
               end,
             );
-          for (const event of pastEvents) {
+          for (const event of pastPurchases) {
             await processPurchaseEvent(
               event
-                .args[0], // buyerWallet
+                .args[0], // buyer
               event
-                .args[1], // creatorWallet
+                .args[1], // creator
               event
                 .args[2], // contentIdBytes32
               event
-                .args[4], // rawPrice (The Base DB Price)
+                .args[4], // rawBasePrice
               event
-                .args[6], // THE FIX: args[6] is the exact 80% creatorCut from the contract
+                .args[5], // chargeAmount
+              event
+                .args[6], // creatorCut
+              event
+                .args[7], // treasuryCut
               event.transactionHash,
             );
           }
+
+          // 2. CATCH HISTORICAL PAYOUT CLAIMS
+          const pastPayouts =
+            await httpPayoutContract.queryFilter(
+              "PayoutClaimed",
+              start,
+              end,
+            );
+          for (const event of pastPayouts) {
+            const creator =
+              event
+                .args[0];
+            const nonce =
+              event
+                .args[2];
+            const txHash =
+              event.transactionHash;
+
+            const updatedTx =
+              await Transaction.findOneAndUpdate(
+                {
+                  "metadata.nonce":
+                    nonce,
+                  status:
+                    "PENDING_CLAIM",
+                },
+                {
+                  $set: {
+                    status:
+                      "COMPLETED",
+                    "metadata.claimTxHash":
+                      txHash,
+                    "metadata.claimedAt":
+                      new Date(),
+                  },
+                },
+                {
+                  new: true,
+                },
+              );
+
+            if (
+              updatedTx
+            ) {
+              console.log(
+                `[+] SUCCESS (Catch-up): Payout voucher for ${creator} marked as COMPLETED.`,
+              );
+            }
+          }
         } catch (chunkError) {
-          // THE FIX: Stop swallowing the error so we can see the exact RPC rejection
           console.warn(
             `[WARN] Chunk ${start}-${end} sweep failed. Reason:`,
             chunkError.message ||
@@ -502,13 +584,12 @@ async function startListener() {
         chargeAmount,
         creatorCut,
         treasuryCut,
-        event, // THE FIX: Ethers v6 always injects the event payload as the LAST argument
+        event,
       ) => {
         console.log(
           `\n--- Live Purchase Detected ---`,
         );
 
-        // Now 'event' is actually the Ethers object, so this will not crash.
         const txHash =
           event
             .log
@@ -518,8 +599,10 @@ async function startListener() {
           buyer,
           creator,
           contentIdBytes32,
-          rawBasePrice, // Passing the actual base price
-          creatorCut, // Passing the exact 80% cut
+          rawBasePrice,
+          chargeAmount,
+          creatorCut,
+          treasuryCut,
           txHash,
         );
 
@@ -571,7 +654,6 @@ async function startListener() {
               .log
               .transactionHash;
 
-          // Find the PENDING_CLAIM transaction that matches the exact cryptographic nonce
           const updatedTx =
             await Transaction.findOneAndUpdate(
               {

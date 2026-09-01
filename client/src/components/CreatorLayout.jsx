@@ -121,7 +121,6 @@ const CreatorLayout =
       const fetchUnreadCount =
         async () => {
           try {
-            // Look how clean this is now. The interceptor handles the token and URL automatically.
             const res =
               await api.get(
                 "/messages/unread-count",
@@ -141,7 +140,6 @@ const CreatorLayout =
         };
 
       fetchUnreadCount();
-
       const interval =
         setInterval(
           fetchUnreadCount,
@@ -173,7 +171,6 @@ const CreatorLayout =
               message: `Contact Email: ${supportEmail}\n\n${supportMessage}`,
             };
 
-          // Bulletproof network request relying on your global interceptor
           await api.post(
             "/users/support",
             payload,
@@ -354,34 +351,37 @@ const CreatorLayout =
                         </span>
                       </Link>
 
-                      <div className="absolute top-full right-0 mt-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity invisible group-hover:visible z-50 overflow-hidden">
-                        <Link
-                          to="/creator/settings"
-                          className="flex items-center px-4 py-3 text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors border-b border-slate-800/50"
-                        >
-                          <Settings
-                            size={
-                              16
-                            }
-                            className="mr-3 text-slate-500"
-                          />{" "}
-                          Account
-                          Settings
-                        </Link>
-                        <Link
-                          to="/auth/creator/biodata"
-                          className="flex items-center px-4 py-3 text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-                        >
-                          <ShieldCheck
-                            size={
-                              16
-                            }
-                            className="mr-3 text-slate-500"
-                          />{" "}
-                          KYC
-                          &
-                          Verification
-                        </Link>
+                      {/* ✅ THE FIX: Replaced mt-2 with a pt-2 transparent wrapper to bridge the hover gap */}
+                      <div className="absolute top-full right-0 pt-2 w-48 opacity-0 group-hover:opacity-100 transition-opacity invisible group-hover:visible z-50">
+                        <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden flex flex-col">
+                          <Link
+                            to="/creator/settings"
+                            className="flex items-center px-4 py-3 text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors border-b border-slate-800/50"
+                          >
+                            <Settings
+                              size={
+                                16
+                              }
+                              className="mr-3 text-slate-500"
+                            />{" "}
+                            Account
+                            Settings
+                          </Link>
+                          <Link
+                            to="/auth/creator/biodata"
+                            className="flex items-center px-4 py-3 text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                          >
+                            <ShieldCheck
+                              size={
+                                16
+                              }
+                              className="mr-3 text-slate-500"
+                            />{" "}
+                            KYC
+                            &
+                            Verification
+                          </Link>
+                        </div>
                       </div>
                     </div>
                   );
@@ -636,10 +636,9 @@ const CreatorLayout =
           )}
         </button>
 
-        {/* --- INLINE SUPPORT WIDGET (Slides up from the bubble) --- */}
+        {/* --- INLINE SUPPORT WIDGET --- */}
         {isSupportOpen && (
           <div className="fixed z-[95] bottom-[8.5rem] right-4 md:bottom-[5.5rem] md:right-8 w-[calc(100vw-2rem)] sm:w-[380px] bg-slate-900 border border-slate-700 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] flex flex-col animate-in slide-in-from-bottom-10 fade-in duration-300 overflow-hidden">
-            {/* Widget Header */}
             <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-800/30">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <LifeBuoy
@@ -667,7 +666,6 @@ const CreatorLayout =
               </button>
             </div>
 
-            {/* Widget Body */}
             <div className="p-5 max-h-[70vh] overflow-y-auto">
               {supportStatus ===
               "success" ? (

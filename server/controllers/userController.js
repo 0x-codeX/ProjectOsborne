@@ -1,8 +1,8 @@
+// server/controllers/userController.js
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const ethers = require("ethers");
 const Ticket = require("../models/Ticket");
-// Import the new exchangeRates config to apply the Hybrid Strategy
 const exchangeConfig = require("../config/exchangeRates");
 
 // PUT /api/users/profile
@@ -19,15 +19,15 @@ exports.submitBioData =
         phone,
         gender,
         country,
-        preferredCurrency, // <-- ADDED
+        preferredCurrency,
         referredBy,
         willingNsfw,
         agreedTerms,
         confirmedAge,
-        isAgeVerified,
         subscribeEmails,
         hasCompletedBioData,
         profileImage,
+        bannerImage,
         payoutAddress,
         securityPassword,
         securitySignature,
@@ -124,7 +124,9 @@ exports.submitBioData =
             changesText.push(
               `payout address to ${payoutAddress}`,
             );
-          const expectedMessage = `CONFIRM_ACCOUNT_UPDATE: I authorize changing my ${changesText.join(" and ")}.`;
+          const expectedMessage = `CONFIRM_ACCOUNT_UPDATE: I authorize changing my ${changesText.join(
+            " and ",
+          )}.`;
           try {
             const recoveredAddress =
               ethers.verifyMessage(
@@ -265,31 +267,31 @@ exports.submitBioData =
                   "Email is already in use by another account.",
               },
             );
-            if (
-              req
-                .body
-                .isAgeVerified !==
-              undefined
-            )
-              delete req
-                .body
-                .isAgeVerified;
-            if (
-              req
-                .body
-                .ageVerification !==
-              undefined
-            )
-              delete req
-                .body
-                .ageVerification;
+
+        if (
+          req
+            .body
+            .isAgeVerified !==
+          undefined
+        )
+          delete req
+            .body
+            .isAgeVerified;
+        if (
+          req
+            .body
+            .ageVerification !==
+          undefined
+        )
+          delete req
+            .body
+            .ageVerification;
       }
 
       // --- CURRENCY HYBRID STRATEGY LOGIC ---
       let finalCurrency =
         user.preferredCurrency;
 
-      // 1. Explicit selection overrides everything
       if (
         preferredCurrency &&
         exchangeConfig.SUPPORTED_CURRENCIES.includes(
@@ -298,9 +300,7 @@ exports.submitBioData =
       ) {
         finalCurrency =
           preferredCurrency;
-      }
-      // 2. Auto-detect from Country if they don't have a specific preference yet
-      else if (
+      } else if (
         country &&
         (!user.preferredCurrency ||
           user.preferredCurrency ===
@@ -330,10 +330,10 @@ exports.submitBioData =
               willingNsfw,
               agreedTerms,
               confirmedAge,
-              // REMOVED: isAgeVerified - Fans can NEVER update this themselves
               subscribeEmails,
               hasCompletedBioData: true,
               profileImage,
+              bannerImage,
               payoutAddress,
               "creatorProfile.displayName":
                 username,
@@ -608,72 +608,173 @@ exports.getMonetizationSettings =
   };
 
 // PUT /api/users/settings/monetization
-exports.updateMonetizationSettings = async (req, res) => {
-  try {
-    let {
-      priceCurrency, 
-      defaultPPVPrice,
-      weeklySubscription,
-      monthlySubscription,
-      multiMonthDuration,
-      multiMonthPrice,
-      messageBundleSize,
-      messageBundlePrice,
-    } = req.body;
+exports.updateMonetizationSettings =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      let {
+        priceCurrency,
+        defaultPPVPrice,
+        weeklySubscription,
+        monthlySubscription,
+        multiMonthDuration,
+        multiMonthPrice,
+        messageBundleSize,
+        messageBundlePrice,
+      } =
+        req.body;
 
-    const userId = req.user._id || req.user.id;
-    if (!userId) return res.status(401).json({ message: "Unauthorized: No user ID in token." });
+      const userId =
+        req
+          .user
+          ._id ||
+        req
+          .user
+          .id;
+      if (
+        !userId
+      )
+        return res
+          .status(
+            401,
+          )
+          .json(
+            {
+              message:
+                "Unauthorized: No user ID in token.",
+            },
+          );
 
-    // Ensure it is a valid positive number, but do NOT round it up
-    const exactPrice = (price) => {
-      const raw = parseFloat(price || 0);
-      return !isNaN(raw) && raw > 0 ? raw : 0;
-    };
+      const exactPrice =
+        (
+          price,
+        ) => {
+          const raw =
+            parseFloat(
+              price ||
+                0,
+            );
+          return !isNaN(
+            raw,
+          ) &&
+            raw >
+              0
+            ? raw
+            : 0;
+        };
 
-    defaultPPVPrice = exactPrice(defaultPPVPrice);
-    weeklySubscription = exactPrice(weeklySubscription);
-    monthlySubscription = exactPrice(monthlySubscription);
-    multiMonthPrice = exactPrice(multiMonthPrice);
-    messageBundlePrice = exactPrice(messageBundlePrice);
+      defaultPPVPrice =
+        exactPrice(
+          defaultPPVPrice,
+        );
+      weeklySubscription =
+        exactPrice(
+          weeklySubscription,
+        );
+      monthlySubscription =
+        exactPrice(
+          monthlySubscription,
+        );
+      multiMonthPrice =
+        exactPrice(
+          multiMonthPrice,
+        );
+      messageBundlePrice =
+        exactPrice(
+          messageBundlePrice,
+        );
 
-    messageBundleSize = parseInt(messageBundleSize) || 5;
-    multiMonthDuration = parseInt(multiMonthDuration) || 3;
+      messageBundleSize =
+        parseInt(
+          messageBundleSize,
+        ) ||
+        5;
+      multiMonthDuration =
+        parseInt(
+          multiMonthDuration,
+        ) ||
+        3;
 
-    // Validate Price Currency
-    const finalPriceCurrency = exchangeConfig.SUPPORTED_CURRENCIES.includes(priceCurrency)
-      ? priceCurrency
-      : "NGN"; // Default fallback
+      const finalPriceCurrency =
+        exchangeConfig.SUPPORTED_CURRENCIES.includes(
+          priceCurrency,
+        )
+          ? priceCurrency
+          : "NGN";
 
-    const user = await User.findByIdAndUpdate(
-      userId,
-      {
-        $set: {
-          monetizationSettings: {
-            priceCurrency: finalPriceCurrency, 
-            defaultPPVPrice,
-            weeklySubscription,
-            monthlySubscription,
-            multiMonthDuration,
-            multiMonthPrice,
-            messageBundleSize,
-            messageBundlePrice,
+      const user =
+        await User.findByIdAndUpdate(
+          userId,
+          {
+            $set: {
+              monetizationSettings:
+                {
+                  priceCurrency:
+                    finalPriceCurrency,
+                  defaultPPVPrice,
+                  weeklySubscription,
+                  monthlySubscription,
+                  multiMonthDuration,
+                  multiMonthPrice,
+                  messageBundleSize,
+                  messageBundlePrice,
+                },
+            },
           },
-        },
-      },
-      { returnDocument: "after", runValidators: true }
-    ).select("monetizationSettings");
+          {
+            returnDocument:
+              "after",
+            runValidators: true,
+          },
+        ).select(
+          "monetizationSettings",
+        );
 
-    if (!user) return res.status(404).json({ message: "User not found." });
+      if (
+        !user
+      )
+        return res
+          .status(
+            404,
+          )
+          .json(
+            {
+              message:
+                "User not found.",
+            },
+          );
 
-    res.status(200).json({
-      message: "Monetization tiers locked in.",
-      settings: user.monetizationSettings,
-    });
-  } catch (error) {
-    console.error("Error updating settings:", error);
-    res.status(500).json({ message: "Failed to update monetization settings" });
-  }
-};
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            message:
+              "Monetization tiers locked in.",
+            settings:
+              user.monetizationSettings,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Error updating settings:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Failed to update monetization settings",
+          },
+        );
+    }
+  };
 
 // GET /api/users/profile
 exports.getProfile =
@@ -905,53 +1006,149 @@ exports.updateSettings =
   };
 
 // PUT /api/users/profile
-// Used for everyday profile edits, including optional password change
-exports.updateProfile = async (req, res) => {
-  try {
-    const { username, profileImage, newPassword, preferredCurrency } = req.body;
-
-    if (username) {
-      const existingUser = await User.findOne({
+exports.updateProfile =
+  async (
+    req,
+    res,
+  ) => {
+    try {
+      const {
         username,
-        _id: { $ne: req.user._id },
-      });
-      if (existingUser) return res.status(400).json({ message: "Username is already taken" });
-    }
+        profileImage,
+        bannerImage,
+        newPassword,
+        preferredCurrency,
+        country,
+      } =
+        req.body;
 
-    const updates = {
-      ...(username && { username }),
-      ...(profileImage && { profileImage }),
-    };
-
-    // Validate and save explicit currency preferences
-    if (preferredCurrency) {
-      if (exchangeConfig.SUPPORTED_CURRENCIES.includes(preferredCurrency)) {
-        updates.preferredCurrency = preferredCurrency;
-      } else {
-        return res.status(400).json({ message: "Invalid currency selection." });
+      if (
+        username
+      ) {
+        const existingUser =
+          await User.findOne(
+            {
+              username,
+              _id: {
+                $ne: req
+                  .user
+                  ._id,
+              },
+            },
+          );
+        if (
+          existingUser
+        )
+          return res
+            .status(
+              400,
+            )
+            .json(
+              {
+                message:
+                  "Username is already taken",
+              },
+            );
       }
+
+      const updates =
+        {
+          ...(username && {
+            username,
+          }),
+          ...(profileImage && {
+            profileImage,
+          }),
+          ...(bannerImage && {
+            bannerImage,
+          }),
+          ...(country && {
+            country,
+          }),
+        };
+
+      if (
+        preferredCurrency
+      ) {
+        if (
+          exchangeConfig.SUPPORTED_CURRENCIES.includes(
+            preferredCurrency,
+          )
+        ) {
+          updates.preferredCurrency =
+            preferredCurrency;
+        } else {
+          return res
+            .status(
+              400,
+            )
+            .json(
+              {
+                message:
+                  "Invalid currency selection.",
+              },
+            );
+        }
+      }
+
+      if (
+        newPassword
+      ) {
+        const salt =
+          await bcrypt.genSalt(
+            10,
+          );
+        updates.passwordHash =
+          await bcrypt.hash(
+            newPassword,
+            salt,
+          );
+      }
+
+      const updatedUser =
+        await User.findByIdAndUpdate(
+          req
+            .user
+            ._id,
+          {
+            $set: updates,
+          },
+          {
+            returnDocument:
+              "after",
+          },
+        ).select(
+          "-password",
+        );
+
+      res
+        .status(
+          200,
+        )
+        .json(
+          {
+            message:
+              "Profile updated successfully",
+            user: updatedUser,
+          },
+        );
+    } catch (error) {
+      console.error(
+        "Profile update error:",
+        error,
+      );
+      res
+        .status(
+          500,
+        )
+        .json(
+          {
+            message:
+              "Server error updating profile",
+          },
+        );
     }
-
-    if (newPassword) {
-      const salt = await bcrypt.genSalt(10);
-      updates.passwordHash = await bcrypt.hash(newPassword, salt);
-    }
-
-    const updatedUser = await User.findByIdAndUpdate(
-      req.user._id,
-      { $set: updates },
-      { returnDocument: "after" } // <-- THE FIX: No more Mongoose warnings
-    ).select("-password");
-
-    res.status(200).json({
-      message: "Profile updated successfully",
-      user: updatedUser,
-    });
-  } catch (error) {
-    console.error("Profile update error:", error);
-    res.status(500).json({ message: "Server error updating profile" });
-  }
-};
+  };
 
 // POST /api/users/:id/follow
 exports.toggleFollow =

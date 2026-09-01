@@ -6,16 +6,12 @@ const {
   createStream,
   getStream,
   endStream,
-  proxyWhipRequest,
-  handleLivepeerWebhook,
+  goLive,
 } = require("../controllers/streamController");
 const {
   requireAuth,
   requireVerifiedCreator,
 } = require("../middleware/authMiddleware");
-
-// Public Livepeer Webhook Endpoint
-
 
 // Protected Routes
 router.post(
@@ -23,10 +19,6 @@ router.post(
   requireAuth,
   requireVerifiedCreator,
   createStream,
-);
-router.post(
-  "/webhook",
-  handleLivepeerWebhook,
 );
 router.get(
   "/:id",
@@ -38,10 +30,10 @@ router.put(
   requireAuth,
   endStream,
 );
-router.post(
-  "/:id/whip",
+router.put(
+  "/:id/go-live",
   requireAuth,
-  proxyWhipRequest,
+  goLive,
 );
 
 module.exports =

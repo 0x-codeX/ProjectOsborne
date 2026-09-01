@@ -261,11 +261,23 @@ exports.requestWithdrawal =
 // GET /api/earnings/p2p-rate (Dashboard Preview - Uses Cache)
 exports.getP2PRatePreview = async (req, res) => {
   try {
-    const rate = await getLiveP2PRates(false); 
-    res.status(200).json({ NGN: rate });
+    const rates = await getLiveP2PRates(false); 
+    res.status(200).json(rates);
   } catch (error) {
     console.error("P2P Preview Error:", error);
-    res.status(500).json({ NGN: 1500 });
+    res
+      .status(
+        500,
+      )
+      .json(
+        {
+          USD: {
+            buy: 1,
+            sell: 1,
+            mid: 1,
+          },
+        },
+      );
   }
 };
 
@@ -290,65 +302,212 @@ exports.getLiquidationQuote = async (req, res) => {
 // POST /api/earnings/liquidate (Execution Engine)
 exports.executeLiquidation = async (req, res) => {
   try {
-    const { amount, quote } = req.body;
-    const creatorId = req.user._id;
+    const {
+      amount,
+      quote,
+    } =
+      req.body;
+    const creatorId =
+      req
+        .user
+        ._id;
 
-    if (!amount || !quote) {
-      return res.status(400).json({ message: "Missing liquidation payload." });
+    if (
+      !amount ||
+      !quote
+    ) {
+      return res
+        .status(
+          400,
+        )
+        .json(
+          {
+            message:
+              "Missing liquidation payload.",
+          },
+        );
     }
 
     // SECURITY CHECK 1: Expiration
-    if (Date.now() > quote.quoteExpiresAt) {
-      return res.status(400).json({ message: "Quote expired. Please close and request a new quote." });
+    if (
+      Date.now() >
+      quote.quoteExpiresAt
+    ) {
+      return res
+        .status(
+          400,
+        )
+        .json(
+          {
+            message:
+              "Quote expired. Please close and request a new quote.",
+          },
+        );
     }
 
     // Fetch the dedicated Wallet document
-    const wallet = await Wallet.findOne({ creator: creatorId });
-    if (!wallet) return res.status(404).json({ message: "Wallet not found." });
+    const wallet =
+      await Wallet.findOne(
+        {
+          creator:
+            creatorId,
+        },
+      );
+    if (
+      !wallet
+    )
+      return res
+        .status(
+          404,
+        )
+        .json(
+          {
+            message:
+              "Wallet not found.",
+          },
+        );
 
     // Initialize nested objects if they don't exist to prevent crashes
-    if (!wallet.fiatBalances) wallet.fiatBalances = {};
-    if (!wallet.fiatBalances.floating) wallet.fiatBalances.floating = {};
-    if (!wallet.fiatBalances.withdrawable) wallet.fiatBalances.withdrawable = {};
+    if (
+      !wallet.fiatBalances
+    )
+      wallet.fiatBalances =
+        {};
+    if (
+      !wallet
+        .fiatBalances
+        .floating
+    )
+      wallet.fiatBalances.floating =
+        {};
+    if (
+      !wallet
+        .fiatBalances
+        .withdrawable
+    )
+      wallet.fiatBalances.withdrawable =
+        {};
 
-    // --- BANK CREATOR LOGIC (USDT -> NGN) ---
-    if (quote.direction === "USDT_TO_NGN") {
-      const currentUSDT = wallet.fiatBalances.withdrawable.USDT || 0;
-      
-      // SECURITY CHECK 2: Sufficient Funds
-      if (currentUSDT < amount) {
-        return res.status(400).json({ message: "Insufficient USDT balance." });
+    // --- DYNAMIC MULTI-CURRENCY LIQUIDATION LOGIC ---
+    const [
+      fromCurr,
+      toCurr,
+    ] =
+      quote.direction.split(
+        "_TO_",
+      );
+
+    if (
+      fromCurr ===
+      "USDT"
+    ) {
+      // Selling USDT for Creator's Preferred Fiat (e.g. USDT -> GHS, USDT -> NGN)
+      const currentUSDT =
+        wallet
+          .fiatBalances
+          .withdrawable
+          .USDT ||
+        0;
+
+      if (
+        currentUSDT <
+        amount
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message:
+                "Insufficient USDT balance.",
+            },
+          );
       }
 
-      // Execute Swap
-      wallet.fiatBalances.withdrawable.USDT -= amount;
-      const currentFloatingNGN = wallet.fiatBalances.floating.NGN || 0;
-      wallet.fiatBalances.floating.NGN = currentFloatingNGN + quote.estimatedPayout;
-    } 
-    // --- CRYPTO CREATOR LOGIC (NGN -> USDT) ---
-    else if (quote.direction === "NGN_TO_USDT") {
-      const currentNGN = wallet.fiatBalances.withdrawable.NGN || 0;
-      
-      if (currentNGN < amount) {
-        return res.status(400).json({ message: "Insufficient NGN balance." });
+      wallet.fiatBalances.withdrawable.USDT -=
+        amount;
+      const currentFloating =
+        wallet
+          .fiatBalances
+          .floating[
+          toCurr
+        ] ||
+        0;
+      wallet.fiatBalances.floating[
+        toCurr
+      ] =
+        currentFloating +
+        quote.estimatedPayout;
+    } else if (
+      toCurr ===
+      "USDT"
+    ) {
+      // Selling Fiat for USDT (e.g. GHS -> USDT, NGN -> USDT)
+      const currentFiat =
+        wallet
+          .fiatBalances
+          .withdrawable[
+          fromCurr
+        ] ||
+        0;
+
+      if (
+        currentFiat <
+        amount
+      ) {
+        return res
+          .status(
+            400,
+          )
+          .json(
+            {
+              message: `Insufficient ${fromCurr} balance.`,
+            },
+          );
       }
 
-      // Execute Swap
-      wallet.fiatBalances.withdrawable.NGN -= amount;
-      const currentFloatingUSDT = wallet.fiatBalances.floating.USDT || 0;
-      wallet.fiatBalances.floating.USDT = currentFloatingUSDT + quote.estimatedPayout;
+      wallet.fiatBalances.withdrawable[
+        fromCurr
+      ] -=
+        amount;
+      const currentFloatingUSDT =
+        wallet
+          .fiatBalances
+          .floating
+          .USDT ||
+        0;
+      wallet.fiatBalances.floating.USDT =
+        currentFloatingUSDT +
+        quote.estimatedPayout;
     } else {
-      return res.status(400).json({ message: "Invalid liquidation direction." });
+      return res
+        .status(
+          400,
+        )
+        .json(
+          {
+            message:
+              "Invalid liquidation direction.",
+          },
+        );
     }
 
     // Save the updated balances atomically
     await wallet.save();
 
-    res.status(200).json({ 
-      message: "Liquidation executed successfully.",
-      wallet: wallet 
-    });
-
+    res
+      .status(
+        200,
+      )
+      .json(
+        {
+          message:
+            "Liquidation executed successfully.",
+          wallet:
+            wallet,
+        },
+      );
   } catch (error) {
     console.error("Liquidation Execution Error:", error);
     res.status(500).json({ message: "Failed to process liquidation." });

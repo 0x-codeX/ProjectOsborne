@@ -386,10 +386,10 @@ const CreatorDashboard =
     }
 
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans">
+      <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:px-8 md:py-6 font-sans max-w-7xl mx-auto">
         {/* Top Header */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 border-b border-slate-800 pb-6 gap-4">
-          <div className="flex items-center gap-4">
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-slate-800 pb-4 gap-4">
+          <div className="flex items-center gap-3">
             {/* PROFILE PICTURE AVATAR */}
             <button
               onClick={() =>
@@ -398,7 +398,7 @@ const CreatorDashboard =
                 )
               }
               title="View My Creator Vault"
-              className="relative w-14 h-14 rounded-full bg-slate-800 border-2 border-slate-700 hover:border-[#FF5757] overflow-hidden flex items-center justify-center transition-all cursor-pointer flex-shrink-0 group shadow-lg"
+              className="relative w-12 h-12 rounded-full bg-slate-800 border-2 border-slate-700 hover:border-[#FF5757] overflow-hidden flex items-center justify-center transition-all cursor-pointer flex-shrink-0 group shadow-lg"
             >
               {user?.profileImage ? (
                 <img
@@ -409,16 +409,15 @@ const CreatorDashboard =
                   className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200"
                 />
               ) : (
-                <User className="w-7 h-7 text-slate-400 group-hover:text-white transition-colors" />
+                <User className="w-6 h-6 text-slate-400 group-hover:text-white transition-colors" />
               )}
             </button>
 
-            <div>
-              <h1 className="text-3xl font-bold text-white tracking-tight">
-                Creator
+            <div className="flex flex-col justify-center mt-1">
+              <h3 className="text-2xl font-bold text-white tracking-tight leading-none mb-1">
                 Dashboard
-              </h1>
-              <p className="text-slate-500 text-sm mt-0.5">
+              </h3>
+              <p className="text-slate-500 text-xs leading-none">
                 Authenticated
                 as:{" "}
                 <button
@@ -443,7 +442,6 @@ const CreatorDashboard =
             </div>
           </div>
 
-          {/* Right Side Container: Go Live, Balance & Logout */}
           <div className="flex items-center gap-3 w-full md:w-auto flex-wrap sm:flex-nowrap">
             {/* RED GO LIVE BUTTON */}
             <button
@@ -452,9 +450,9 @@ const CreatorDashboard =
                   "/creator/live/setup",
                 )
               }
-              className="bg-red-500 hover:bg-red-600 text-white px-5 py-3 rounded-xl flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all cursor-pointer text-sm font-bold animate-pulse"
+              className="bg-red-500 hover:bg-red-600 text-white px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all cursor-pointer text-sm font-bold animate-pulse"
             >
-              <Radio className="w-5 h-5 text-white" />
+              <Radio className="w-4 h-4 text-white" />
               <span>
                 Go
                 Live
@@ -462,16 +460,16 @@ const CreatorDashboard =
             </button>
 
             {/* Balance Card */}
-            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 flex items-center shadow-lg flex-grow md:flex-grow-0">
-              <div className="bg-slate-800 p-2 rounded-lg mr-4">
-                <Wallet className="w-5 h-5 text-[#FF5757]" />
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-2.5 px-4 flex items-center shadow-lg flex-grow md:flex-grow-0">
+              <div className="bg-slate-800 p-1.5 rounded-lg mr-3">
+                <Wallet className="w-4 h-4 text-[#FF5757]" />
               </div>
               <div>
-                <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold leading-none mb-1">
                   Available
                   Balance
                 </p>
-                <p className="text-xl font-mono font-bold text-white">
+                <p className="text-lg font-mono font-bold text-white leading-none">
                   {isFetchingBalance ? (
                     <span className="animate-pulse">
                       ---
@@ -492,15 +490,15 @@ const CreatorDashboard =
                 handleLogout
               }
               title="Sign Out"
-              className="bg-slate-900 border border-slate-700 rounded-xl p-4 flex items-center justify-center shadow-lg text-slate-400 hover:text-[#FF5757] hover:border-[#FF5757] transition-all cursor-pointer"
+              className="bg-slate-900 border border-slate-700 rounded-xl p-3 flex items-center justify-center shadow-lg text-slate-400 hover:text-[#FF5757] hover:border-[#FF5757] transition-all cursor-pointer"
             >
-              <LogOut className="w-6 h-6" />
+              <LogOut className="w-5 h-5" />
             </button>
           </div>
         </header>
 
         {/* Analytics Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-slate-400 font-medium">

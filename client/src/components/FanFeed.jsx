@@ -6,6 +6,7 @@ import React, {
 import {
   Link,
   useNavigate,
+  useLocation,
 } from "react-router-dom";
 import { usePaystackPayment } from "react-paystack";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
@@ -28,6 +29,22 @@ import {
   Loader2,
 } from "lucide-react";
 import api from "../utils/api";
+import { io } from "socket.io-client";
+
+
+
+// Helper to format how long ago a stream ended
+const getTimeAgo = (date) => {
+  if (!date) return "recently";
+  const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} mins ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} days ago`;
+};
 
 // ==========================================
 // INDIVIDUAL POST COMPONENT
@@ -47,7 +64,11 @@ const FeedPostItem =
     openPaymentModal,
     exchangeRates,
     fanCurrency,
+    liveCreatorsMap,
   }) => {
+    const location =
+      useLocation();
+
     // Extract Raw Creator Data
     const creatorRawPrice =
       post.actualPrice !==
@@ -57,16 +78,82 @@ const FeedPostItem =
           0;
     const creatorCurrency =
       post.priceCurrency ||
-      post.creator?.monetizationSettings?.priceCurrency || post.creator?.preferredCurrency || "USD";
+      post
+        .creator
+        ?.monetizationSettings
+        ?.priceCurrency ||
+      post
+        .creator
+        ?.preferredCurrency ||
+      "USD";
     const isFreeContent =
       creatorRawPrice <=
       0;
+
+    // --- 1. CONSOLIDATE THE LIVE CHECK (Single source of truth) ---
+    const isCurrentlyLive =
+      Boolean(
+        liveCreatorsMap?.has(
+          post
+            .creator
+            ?._id,
+        ) ||
+        (post
+          .creator
+          ?.isLive &&
+          post
+            .creator
+            ?.currentStreamId),
+      );
+
+    // --- 2. DYNAMIC TITLE ENGINE ---
+    // If the title is exactly "🔴 LIVE NOW", evaluate if they are still live.
+    // If not, calculate the time ago based on the post creation date.
+    const displayTitle =
+      post.title?.trim() ===
+      "🔴 LIVE NOW"
+        ? isCurrentlyLive
+          ? "🔴 LIVE NOW"
+          : `Was Live ${getTimeAgo(post.createdAt)}`
+        : post.title;
+
+    // --- DYNAMIC ROUTING LOGIC ---
+    const currentUser =
+      JSON.parse(
+        localStorage.getItem(
+          "nippy_user",
+        ) ||
+          "{}",
+      );
+    const currentUserId =
+      currentUser._id ||
+      currentUser.id;
+    const isOwnContent =
+      currentUserId ===
+      post
+        .creator
+        ?._id;
+    const isCreatorContext =
+      location.pathname.startsWith(
+        "/creator",
+      );
+
+    // Route logic:
+    // 1. Own content -> Creator Dashboard
+    // 2. Viewing another creator while in Creator Hub -> /creator/c/:id (CreatorLayout)
+    // 3. Viewing another creator while in Fan Hub -> /creator/:id (FanLayout)
+    const creatorProfileRoute =
+      isOwnContent
+        ? "/creator/dashboard"
+        : isCreatorContext
+          ? `/creator/c/${post.creator?._id}`
+          : `/creator/${post.creator?._id}`;
 
     // --- THE PROFIT ENGINE (Synchronous Skim) ---
     const getFanPrice =
       (
         creatorPrice,
-        cCurr = "USD",
+        creatorCurrency = "USD",
       ) => {
         if (
           !creatorPrice ||
@@ -80,12 +167,12 @@ const FeedPostItem =
               fanCurrency,
             raw: 0,
             rawCurrency:
-              cCurr,
+              creatorCurrency,
           };
         }
         const toUSD =
           exchangeRates[
-            cCurr
+            creatorCurrency
           ] ||
           1;
         const toFan =
@@ -99,13 +186,50 @@ const FeedPostItem =
         const exactFanPrice =
           exactUSD *
           toFan;
-        // The Skim: Round UP to the nearest 0.50 interval
-        const roundedPrice =
-          Math.ceil(
-            exactFanPrice *
-              2,
-          ) /
-          2;
+
+        // --- IRONCLAD FIX: Denomination-Aware Rounding ---
+        let roundedPrice;
+
+        if (
+          fanCurrency ===
+          "NGN"
+        ) {
+          // Skim NGN to the nearest 50 block (e.g., 1202.46 -> 1250.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice /
+                50,
+            ) *
+            50;
+        } else if (
+          fanCurrency ===
+          "KES"
+        ) {
+          // Skim KES to the nearest 10 block (e.g., 142.10 -> 150.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice /
+                10,
+            ) *
+            10;
+        } else if (
+          fanCurrency ===
+          "GHS"
+        ) {
+          // Skim GHS to the nearest whole number (e.g., 14.10 -> 15.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice,
+            );
+        } else {
+          // Skim USD, EUR, GBP to the nearest 0.50 interval (e.g., 3.10 -> 3.50)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice *
+                2,
+            ) /
+            2;
+        }
 
         return {
           price:
@@ -114,7 +238,7 @@ const FeedPostItem =
             fanCurrency,
           raw: creatorPrice,
           rawCurrency:
-            cCurr,
+            creatorCurrency,
         };
       };
 
@@ -134,7 +258,9 @@ const FeedPostItem =
         {/* Creator Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
           <Link
-            to={`/creator/${post.creator?._id}`}
+            to={
+              creatorProfileRoute
+            }
             className="flex items-center gap-3 group cursor-pointer"
           >
             {post
@@ -177,17 +303,39 @@ const FeedPostItem =
           </Link>
 
           <div className="flex items-center gap-3">
-            {post.isPaywalled &&
-              !isFreeContent && (
-                <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
-                  <BadgeDollarSign
-                    size={
-                      14
-                    }
-                  />{" "}
-                  PPV
-                </div>
-              )}
+            {/* DYNAMIC LIVE BADGE: Uses our clean boolean */}
+            {isCurrentlyLive && (
+              <Link
+                to={
+                  post.hasActiveSub ||
+                  currentUserId ===
+                    post
+                      .creator
+                      ?._id
+                    ? `/live/${liveCreatorsMap?.get(post.creator?._id) || post.creator?.currentStreamId}`
+                    : `/creator/${post.creator?._id}`
+                }
+                className="flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-black tracking-wider transition-all shadow-[0_0_15px_rgba(220,38,38,0.4)] animate-pulse"
+              >
+                <Radio
+                  size={
+                    14
+                  }
+                />{" "}
+                LIVE
+              </Link>
+            )}
+
+            {post.isPaywalled && (
+              <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full border border-emerald-500/20 text-xs font-bold">
+                <BadgeDollarSign
+                  size={
+                    14
+                  }
+                />{" "}
+                PPV
+              </div>
+            )}
 
             <button
               onClick={() =>
@@ -351,7 +499,9 @@ const FeedPostItem =
                       : `Unlock for ${ppvPriceData.price.toFixed(2)} ${ppvPriceData.currency}`}
                   </button>
                   <Link
-                    to={`/creator/${post.creator?._id}`}
+                    to={
+                      creatorProfileRoute
+                    }
                     className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-gray-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
                   >
                     Subscribe
@@ -367,7 +517,7 @@ const FeedPostItem =
         <div className="p-4">
           <h2 className="text-lg font-bold text-slate-200 mb-1">
             {
-              post.title
+              displayTitle
             }
           </h2>
           <p className="text-sm text-gray-400 mb-4">
@@ -375,15 +525,6 @@ const FeedPostItem =
               post.description
             }
           </p>
-
-          {post.isPaywalled &&
-            !post.isLocked &&
-            !isFreeContent && (
-              <div className="inline-flex px-4 py-2 mb-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg font-bold text-sm">
-                Purchased
-              </div>
-            )}
-
           <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
             <div className="flex items-center gap-6">
               <button
@@ -561,7 +702,7 @@ const FeedPostItem =
         )}
       </div>
     );
-  };
+  };;
 
 // ==========================================
 // MAIN FEED COMPONENT
@@ -612,6 +753,8 @@ const FanFeed =
       useWeb3Transfer();
     const navigate =
       useNavigate();
+    const location =
+      useLocation();
 
     const currentUser =
       JSON.parse(
@@ -641,7 +784,6 @@ const FanFeed =
       useRef(
         [],
       );
-
     const [
       activeCommentPostId,
       setActiveCommentPostId,
@@ -708,12 +850,10 @@ const FanFeed =
         false,
       );
 
-    // --- THE NEW AGE VERIFICATION INTERCEPTOR (THE WIRE) ---
     const openPaymentModal =
       (
         modalData,
       ) => {
-        // Intercept NSFW content if the fan is unverified
         if (
           modalData.isNsfw &&
           !currentUser.isAgeVerified
@@ -724,10 +864,9 @@ const FanFeed =
           setShowAgeGate(
             true,
           );
-          return; // STOP! Do not open the payment modal.
+          return;
         }
 
-        // Normal execution if they are verified or it's SFW
         setPaymentModalPost(
           modalData,
         );
@@ -829,16 +968,110 @@ const FanFeed =
 
     useEffect(() => {
       fetchFeedAndRates();
+
       const pollInterval =
         setInterval(
           () =>
             pollForNewPosts(),
           15000,
         );
-      return () =>
+
+      const socket =
+        io(
+          import.meta.env.VITE_API_URL?.replace(
+            "/api",
+            "",
+          ) ||
+            "http://localhost:5000",
+        );
+
+      // FIXED: Real-time listener to instantly light up the LIVE badge
+      socket.on(
+        "live_stream_started",
+        (
+          data,
+        ) => {
+          if (
+            data.streamId &&
+            data.creatorId
+          ) {
+            setFeed(
+              (
+                prevFeed,
+              ) =>
+                prevFeed.map(
+                  (
+                    post,
+                  ) => {
+                    // FIXED: Force string comparison to prevent ObjectId mismatches
+                    if (
+                      String(post.creator?._id) === String(data.creatorId)
+                    ) {
+                      return {
+                        ...post,
+                        creator:
+                          {
+                            ...post.creator,
+                            isLive: true,
+                            currentStreamId:
+                              data.streamId,
+                          },
+                      };
+                    }
+                    return post;
+                  },
+                ),
+            );
+          }
+        },
+      );
+
+      // FIXED: Real-time socket listener to instantly kill the live badge
+      socket.on(
+        "live_stream_ended",
+        (
+          data,
+        ) => {
+          if (
+            data.streamId
+          ) {
+            setFeed(
+              (
+                prevFeed,
+              ) =>
+                prevFeed.map(
+                  (
+                    post,
+                  ) => {
+                    // FIXED: Force string comparison
+                    if (
+                      String(post.creator?.currentStreamId) === String(data.streamId)
+                    ) {
+                      return {
+                        ...post,
+                        creator:
+                          {
+                            ...post.creator,
+                            isLive: false,
+                            currentStreamId:
+                              null,
+                          },
+                      };
+                    }
+                    return post;
+                  },
+                ),
+            );
+          }
+        },
+      );
+
+      return () => {
         clearInterval(
           pollInterval,
         );
+        socket.disconnect();
+      };
     }, []);
 
     const FALLBACK_RATES =
@@ -856,13 +1089,11 @@ const FanFeed =
           true,
         );
         try {
-          // Set local currency immediately from local storage
           setFanCurrency(
             currentUser?.preferredCurrency ||
               "USD",
           );
 
-          // Fetch feed and exchange rates simultaneously
           const [
             feedRes,
             ratesRes,
@@ -872,7 +1103,6 @@ const FanFeed =
                 api.get(
                   "/content/feed",
                 ),
-                // If the API fails, it falls back to realistic rates, NOT just { USD: 1 }
                 api
                   .get(
                     "/purchases/exchange-rates",
@@ -1209,7 +1439,6 @@ const FanFeed =
         );
 
         try {
-          // Convert Fan's padded price back to USD for the quote
           const toFanRate =
             exchangeRates[
               paymentModalPost
@@ -1220,7 +1449,6 @@ const FanFeed =
             paymentModalPost.fanPrice /
             toFanRate;
 
-          // Convert Creator's true raw price to USD for the quote
           const toRawRate =
             exchangeRates[
               paymentModalPost
@@ -1240,7 +1468,7 @@ const FanFeed =
                 amountUSD:
                   fanPriceInUSD,
                 rawAmountUSD:
-                  rawPriceInUSD, // <--- We send the raw amount here
+                  rawPriceInUSD,
               },
             );
 
@@ -1273,32 +1501,26 @@ const FanFeed =
           paymentMethod ===
           "CARD"
         ) {
-          // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
-          // THE FIX: Gateway strictly requires the native merchant currency (NGN).
-          // We calculate the exact NGN equivalent of the Fan's dynamic display price.
-          const fanRate =
+          const toFanRate =
             exchangeRates[
               paymentModalPost
                 .fanCurrency
             ] ||
             1;
-          const ngnRate =
+          const toNGNRate =
             exchangeRates[
               "NGN"
             ] ||
-            1500; // Fallback rate safeguard
+            1500;
 
-          // Reverse engineer the USD base price, then convert to NGN
-          const priceInUSD =
+          const paddedPriceInUSD =
             paymentModalPost.fanPrice /
-            fanRate;
+            toFanRate;
           const priceInNGN =
-            priceInUSD *
-            ngnRate;
-
-          // Gateway expects subunits (Kobo)
+            paddedPriceInUSD *
+            toNGNRate;
           const amountInSubunits =
-            Math.round(
+            Math.ceil(
               priceInNGN *
                 100,
             );
@@ -1317,7 +1539,7 @@ const FanFeed =
                   amount:
                     amountInSubunits,
                   currency:
-                    "NGN", // Hardcoded to match your merchant gateway compliance
+                    "NGN",
                 },
               onSuccess:
                 async (
@@ -1327,12 +1549,18 @@ const FanFeed =
                     paymentModalPost._id,
                   );
                   try {
-                    // The backend verifyPayment expects the exact currency/amount you just charged
+                    const safeReference =
+                      typeof reference ===
+                      "string"
+                        ? reference
+                        : reference?.reference ||
+                          reference?.trxref;
+
                     await api.post(
                       "/purchases/verify",
                       {
                         reference:
-                          reference.reference,
+                          safeReference,
                         paymentMethod:
                           "FIAT",
                         creatorId:
@@ -1342,17 +1570,13 @@ const FanFeed =
                         contentId:
                           paymentModalPost._id,
                         purchaseType:
-                          "PPV", // Feed items are always PPV
+                          "PPV",
                         subscriptionTier:
                           null,
-
-                        // Aligning charge payload with actual Gateway execution to pass fraud checks
                         chargeAmount:
-                          priceInNGN,
+                          paymentModalPost.fanPrice,
                         chargeCurrency:
-                          "NGN",
-
-                        // Creator ledger relies strictly on raw amounts for the 80% platform split
+                          paymentModalPost.fanCurrency,
                         rawAmount:
                           paymentModalPost.creatorRawPrice,
                         rawCurrency:
@@ -1360,8 +1584,7 @@ const FanFeed =
                       },
                     );
 
-                    // Refresh the feed to show the unlocked content
-                    await pollForNewPosts();
+                    await pollForNewPosts(); // Use pollForNewPosts here!
                     closeModal();
                   } catch (error) {
                     alert(
@@ -1388,12 +1611,10 @@ const FanFeed =
           return;
         }
 
-        // --- WEB3 EXECUTION ---
         try {
           setProcessingId(
             paymentModalPost._id,
           );
-
           if (
             !paymentModalPost
               ?.creator
@@ -1410,14 +1631,13 @@ const FanFeed =
               "Missing crypto quote.",
             );
 
-          // THE FIX: We pass BOTH the Fan's bloated price and the Creator's raw base price!
           const txHash =
             await transferUSDT(
               paymentModalPost
                 .creator
                 .walletAddress,
-              cryptoQuote.requiredUSDT, // e.g., 3.50 USDT (Fan pays)
-              cryptoQuote.rawUSDT, // e.g., 3.33 USDT (Contract Skim split)
+              cryptoQuote.requiredUSDT,
+              cryptoQuote.rawUSDT,
               paymentModalPost._id,
             );
 
@@ -1428,7 +1648,6 @@ const FanFeed =
               "Transaction completed but no hash was returned.",
             );
 
-          // The backend uses rawAmount to credit the Creator's Wallet
           await api.post(
             "/purchases/verify",
             {
@@ -1443,7 +1662,7 @@ const FanFeed =
               contentId:
                 paymentModalPost._id,
               purchaseType:
-                "PPV", // Feed items are always PPV
+                "PPV",
               subscriptionTier:
                 null,
               chargeAmount:
@@ -1457,7 +1676,6 @@ const FanFeed =
             },
           );
 
-          // Pull fresh feed data to remove the lock
           await pollForNewPosts();
           closeModal();
         } catch (error) {
@@ -1486,6 +1704,46 @@ const FanFeed =
         </div>
       );
 
+    const isCreatorContext =
+      location.pathname.startsWith(
+        "/creator",
+      );
+    const hasPendingLive =
+      pendingPosts.some(
+        (
+          p,
+        ) =>
+          p.type ===
+          "LIVE_STREAM",
+      );
+
+    // FIXED: Build the map cleanly from standard creator objects
+    const liveCreatorsMap =
+      new Map();
+    feed.forEach(
+      (
+        p,
+      ) => {
+        if (
+          p
+            .creator
+            ?.isLive &&
+          p
+            .creator
+            ?.currentStreamId
+        ) {
+          liveCreatorsMap.set(
+            p
+              .creator
+              ._id,
+            p
+              .creator
+              .currentStreamId,
+          );
+        }
+      },
+    );
+
     return (
       <div className="max-w-2xl mx-auto py-8 px-4 relative">
         {pendingPosts.length >
@@ -1495,18 +1753,19 @@ const FanFeed =
               onClick={
                 injectPendingPosts
               }
-              className="bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-bold py-2.5 px-6 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] flex items-center gap-2 transition-all transform hover:scale-105 border border-emerald-400/50"
+              className={`text-white text-sm font-bold py-2.5 px-6 rounded-full flex items-center gap-2 transition-all transform hover:scale-105 border ${
+                hasPendingLive
+                  ? "bg-red-600 hover:bg-red-500 shadow-[0_0_20px_rgba(220,38,38,0.4)] border-red-500/50 animate-pulse"
+                  : "bg-emerald-500 hover:bg-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.3)] border-emerald-400/50"
+              }`}
             >
               ↑{" "}
               {
                 pendingPosts.length
               }{" "}
-              New
-              Post
-              {pendingPosts.length >
-              1
-                ? "s"
-                : ""}
+              {hasPendingLive
+                ? "Creator is LIVE!"
+                : `New Post${pendingPosts.length > 1 ? "s" : ""}`}
             </button>
           </div>
         )}
@@ -1523,128 +1782,6 @@ const FanFeed =
             (
               post,
             ) => {
-              if (
-                post.type ===
-                "LIVE_STREAM"
-              ) {
-                return (
-                  <div
-                    key={
-                      post._id
-                    }
-                    data-post-id={
-                      post._id
-                    }
-                    className="feed-post-card mb-10 bg-red-950/20 backdrop-blur-md border border-red-500/40 rounded-2xl overflow-hidden shadow-[0_0_20px_rgba(239,68,68,0.15)] relative"
-                  >
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-rose-500 animate-pulse"></div>
-                    <div className="flex items-center justify-between p-4 border-b border-red-500/20">
-                      <div className="flex items-center gap-3">
-                        <div className="relative">
-                          <img
-                            src={
-                              post
-                                .creator
-                                ?.profileImage ||
-                              "https://placehold.co/100x100"
-                            }
-                            alt={
-                              post
-                                .creator
-                                ?.username
-                            }
-                            className="w-12 h-12 rounded-full object-cover border-2 border-red-500 animate-pulse"
-                          />
-                          <div className="absolute -bottom-1 -right-1 bg-red-500 rounded-full p-1 border border-black">
-                            <Radio
-                              size={
-                                10
-                              }
-                              className="text-white"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <div className="font-bold text-white text-lg">
-                            {
-                              post
-                                .creator
-                                ?.username
-                            }
-                          </div>
-                          <div className="text-xs text-red-400 font-bold flex items-center gap-1 tracking-wider uppercase">
-                            LIVE
-                            NOW
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="p-8 text-center bg-black/40">
-                      <h2 className="text-2xl font-black text-white mb-3">
-                        {
-                          post.title
-                        }
-                      </h2>
-                      <p className="text-gray-400 mb-8 max-w-md mx-auto">
-                        {
-                          post
-                            .creator
-                            ?.username
-                        }{" "}
-                        is
-                        broadcasting
-                        live
-                        right
-                        now.
-                        Join
-                        the
-                        room
-                        to
-                        watch,
-                        chat,
-                        and
-                        send
-                        gifts.
-                      </p>
-                      {post.hasAccess ? (
-                        <button
-                          onClick={() =>
-                            navigate(
-                              `/live/${post._id}`,
-                            )
-                          }
-                          className="inline-flex items-center justify-center w-full max-w-xs gap-2 bg-red-500 hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-xl transition-all hover:scale-105 shadow-lg shadow-red-500/30"
-                        >
-                          <PlayCircle
-                            size={
-                              20
-                            }
-                          />{" "}
-                          Join
-                          Stream
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() =>
-                            navigate(
-                              `/creator/${post.creator._id}`,
-                            )
-                          }
-                          className="inline-flex items-center justify-center w-full max-w-xs gap-2 bg-white hover:bg-gray-200 text-black font-bold py-3.5 px-8 rounded-xl transition-all hover:scale-105 shadow-lg"
-                        >
-                          <Lock
-                            size={
-                              20
-                            }
-                          />{" "}
-                          Subscribe
-                          Profile
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              }
 
               return (
                 <FeedPostItem
@@ -1697,12 +1834,16 @@ const FanFeed =
                       null,
                     );
                   }}
+                  liveCreatorsMap={
+                    liveCreatorsMap
+                  }
                 />
               );
             },
           )
         )}
-        {/* THE NEW AGE GATE */}
+
+        {/* AGE GATE */}
         <AgeVerificationGate
           isOpen={
             showAgeGate
@@ -1714,7 +1855,7 @@ const FanFeed =
           }
         />
 
-        {/* REUSABLE CHECKOUT MODAL */}
+        {/* CHECKOUT MODAL */}
         {paymentModalPost && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">

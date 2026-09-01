@@ -179,12 +179,12 @@ const CreatorNotifications =
       <div className="max-w-3xl mx-auto py-8 px-4 md:px-8 animate-in fade-in duration-500">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
-            <h1 className="text-2xl font-black text-white flex items-center gap-2">
+            <h2 className="text-2xl font-black text-white flex items-center gap-2">
               <Bell className="text-[#FF5757]" />{" "}
               Alerts
               &
               Activity
-            </h1>
+            </h2>
             <p className="text-sm text-slate-400 mt-1">
               Keep
               track

@@ -138,23 +138,6 @@ exports.sendMessage =
             },
           );
 
-      let creatorId,
-        fanId;
-      if (
-        sender.role ===
-        "fan"
-      ) {
-        creatorId =
-          receiverId;
-        fanId =
-          senderId;
-      } else {
-        creatorId =
-          senderId;
-        fanId =
-          receiverId;
-      }
-
       let conversation =
         await Conversation.findOne(
           {
@@ -168,10 +151,42 @@ exports.sendMessage =
           },
         );
 
+      let creatorId,
+        fanId;
+      let actingAsFan = false;
+
+      if (
+        conversation
+      ) {
+        creatorId =
+          conversation.creator.toString();
+        fanId =
+          conversation.fan.toString();
+        actingAsFan =
+          senderId.toString() ===
+          fanId;
+      } else {
+        if (
+          sender.role ===
+          "fan"
+        ) {
+          creatorId =
+            receiverId;
+          fanId =
+            senderId;
+          actingAsFan = true;
+        } else {
+          creatorId =
+            senderId;
+          fanId =
+            receiverId;
+          actingAsFan = false;
+        }
+      }
+
       // --- THE GATEKEEPER: FAN BUSINESS RULES ---
       if (
-        sender.role ===
-        "fan"
+        actingAsFan
       ) {
         if (
           text &&
@@ -289,8 +304,7 @@ exports.sendMessage =
       }
       // --- THE GATEKEEPER: CREATOR BUSINESS RULES ---
       else if (
-        sender.role ===
-        "creator"
+        !actingAsFan
       ) {
         if (
           req.file
@@ -416,8 +430,7 @@ exports.sendMessage =
       }
 
       const isLockedPPV =
-        sender.role ===
-          "creator" &&
+        !actingAsFan &&
         price >
           0;
       const message =
@@ -469,8 +482,7 @@ exports.sendMessage =
         };
 
       if (
-        sender.role ===
-        "fan"
+        actingAsFan
       )
         updatePayload.$inc =
           {
@@ -672,42 +684,24 @@ exports.buyMessageBundle =
 
 // @desc    Get User's Inbox (List of Conversations)
 // @route   GET /api/messages/inbox
-exports.getInbox =
-  async (
-    req,
-    res,
-  ) => {
-    try {
-      const userId =
-        req
-          .user
-          ._id ||
-        req
-          .user
-          .id;
+exports.getInbox = async (req, res) => {
+  try {
+    const userId = req.user._id || req.user.id;
 
-      const conversations =
-        await Conversation.find(
-          {
-            participants:
-              userId,
-          },
-        )
-          .populate(
-            "creator",
-            "username profileImage role",
-          )
-          .populate(
-            "fan",
-            "username profileImage role",
-          )
-          .sort(
-            {
-              updatedAt:
-                -1,
-            },
-          )
-          .lean();
+    const conversations = await Conversation.find({ participants: userId })
+      // --- IRONCLAD FIX ---
+      // We MUST populate walletAddress and monetizationSettings here.
+      // If we don't, the Inbox UI falls back to 5 USD pricing and crypto payments crash.
+      .populate(
+        "creator", 
+        "username profileImage role walletAddress monetizationSettings"
+      )
+      .populate(
+        "fan", 
+        "username profileImage role walletAddress monetizationSettings"
+      )
+      .sort({ updatedAt: -1 })
+      .lean();
 
       const inbox =
         await Promise.all(
@@ -799,7 +793,7 @@ exports.getMessages =
         )
           .populate(
             "creator",
-            "username profileImage walletAddress monetizationSettings",
+            "username profileImage walletAddress monetizationSettings preferredCurrency",
           )
           .lean();
 

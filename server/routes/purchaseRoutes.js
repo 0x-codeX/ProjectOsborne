@@ -10,6 +10,7 @@ const {
   getCryptoQuote,
   getLiveExchangeRates,
   getLiquidationQuote,
+  initializeFiatPayment,
 } = require("../controllers/purchaseController");
 
 // POST /api/purchases/verify
@@ -39,6 +40,13 @@ router.post(
   "/earnings/quote",
   requireAuth,
   getLiquidationQuote,
+);
+
+
+router.post(
+  "/initialize-fiat",
+  requireAuth,
+  initializeFiatPayment,
 );
 
 module.exports =

@@ -97,6 +97,43 @@ const FanChatWindow =
         10,
       );
 
+    // --- NEW: DYNAMIC PRICING STATES ---
+    const [
+      bundleCurrency,
+      setBundleCurrency,
+    ] =
+      useState(
+        "USD",
+      );
+    const [
+      rawBundlePrice,
+      setRawBundlePrice,
+    ] =
+      useState(
+        5,
+      );
+    const [
+      rawBundleCurrency,
+      setRawBundleCurrency,
+    ] =
+      useState(
+        "USD",
+      );
+    const [
+      fanCurrency,
+      setFanCurrency,
+    ] =
+      useState(
+        "USD",
+      );
+    const [
+      exchangeRates,
+      setExchangeRates,
+    ] =
+      useState(
+        null,
+      );
+
     // Modal & Configuration States
     const [
       showBundleConfig,
@@ -201,6 +238,108 @@ const FanChatWindow =
           "{}",
       );
 
+    // --- THE PROFIT ENGINE ---
+    const FALLBACK_RATES =
+      {
+        USD: 1,
+        NGN: 1500,
+        EUR: 0.92,
+        GBP: 0.79,
+        GHS: 14.5,
+      };
+
+    const getFanPrice =
+      (
+        creatorPrice,
+        creatorCurrency = "USD",
+      ) => {
+        if (
+          !creatorPrice ||
+          creatorPrice <=
+            0 ||
+          !exchangeRates
+        ) {
+          return {
+            price: 0,
+            currency:
+              fanCurrency,
+            raw: 0,
+            rawCurrency:
+              creatorCurrency,
+          };
+        }
+        const toUSD =
+          exchangeRates[
+            creatorCurrency
+          ] ||
+          1;
+        const toFan =
+          exchangeRates[
+            fanCurrency
+          ] ||
+          1;
+        const exactUSD =
+          creatorPrice /
+          toUSD;
+        const exactFanPrice =
+          exactUSD *
+          toFan;
+
+        // --- IRONCLAD FIX: Denomination-Aware Rounding ---
+        let roundedPrice;
+
+        if (
+          fanCurrency ===
+          "NGN"
+        ) {
+          // Skim NGN to the nearest 50 block (e.g., 1202.46 -> 1250.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice /
+                50,
+            ) *
+            50;
+        } else if (
+          fanCurrency ===
+          "KES"
+        ) {
+          // Skim KES to the nearest 10 block (e.g., 142.10 -> 150.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice /
+                10,
+            ) *
+            10;
+        } else if (
+          fanCurrency ===
+          "GHS"
+        ) {
+          // Skim GHS to the nearest whole number (e.g., 14.10 -> 15.00)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice,
+            );
+        } else {
+          // Skim USD, EUR, GBP to the nearest 0.50 interval (e.g., 3.10 -> 3.50)
+          roundedPrice =
+            Math.ceil(
+              exactFanPrice *
+                2,
+            ) /
+            2;
+        }
+
+        return {
+          price:
+            roundedPrice,
+          currency:
+            fanCurrency,
+          raw: creatorPrice,
+          rawCurrency:
+            creatorCurrency,
+        };
+      };
+
     const initializePayment =
       usePaystackPayment(
         {
@@ -270,12 +409,48 @@ const FanChatWindow =
     const fetchMessages =
       async () => {
         try {
-          // 1. Refactored: Clean api call using interceptor
-          const res =
-            await api.get(
-              `/messages/${conversationId}`,
+          // 1. Get the Fan's local currency preference
+          const storedUser =
+            JSON.parse(
+              localStorage.getItem(
+                "nippy_user",
+              ) ||
+                "{}",
+            );
+          setFanCurrency(
+            storedUser.preferredCurrency ||
+              "USD",
+          );
+
+          // 2. Fetch Chat History & Live Rates concurrently for speed
+          const [
+            res,
+            ratesRes,
+          ] =
+            await Promise.all(
+              [
+                api.get(
+                  `/messages/${conversationId}`,
+                ),
+                api
+                  .get(
+                    "/purchases/exchange-rates",
+                  )
+                  .catch(
+                    () => ({
+                      data: FALLBACK_RATES,
+                    }),
+                  ),
+              ],
             );
 
+          // 3. Set the rates first so the UI can use the engine immediately
+          setExchangeRates(
+            ratesRes.data ||
+              FALLBACK_RATES,
+          );
+
+          // 4. Populate the chat
           setMessages(
             res
               .data
@@ -300,6 +475,9 @@ const FanChatWindow =
                 .conversation
                 .bubblesLeft,
             );
+
+            // Note: We don't convert the default bundle state here until the user clicks "Buy Bundle",
+            // because we want it processed dynamically at the exact moment of intent.
             setBundlePrice(
               res
                 .data
@@ -475,18 +653,8 @@ const FanChatWindow =
         );
 
         try {
-          // Convert Fan's padded price back to USD for the quote
-          const toFanRate =
-            exchangeRates[
-              checkoutData
-                .currency
-            ] ||
-            1;
-          const fanPriceInUSD =
-            checkoutData.amount /
-            toFanRate;
-
-          // Convert Creator's true raw price to USD for the quote
+          // --- IRONCLAD FIX: Universal Crypto Pricing ---
+          // Convert the Creator's true raw price to USD
           const toRawRate =
             exchangeRates[
               checkoutData
@@ -497,6 +665,16 @@ const FanChatWindow =
             checkoutData.raw /
             toRawRate;
 
+          // Completely ignore the Fan's local fiat display currency.
+          // Apply a universal crypto rounding (e.g., nearest $0.10) so the
+          // charge is identical worldwide regardless of their UI settings.
+          const universalFanPriceUSD =
+            Math.ceil(
+              rawPriceInUSD *
+                10,
+            ) /
+            10;
+
           const {
             data,
           } =
@@ -504,9 +682,9 @@ const FanChatWindow =
               "/purchases/crypto-quote",
               {
                 amountUSD:
-                  fanPriceInUSD,
+                  universalFanPriceUSD,
                 rawAmountUSD:
-                  rawPriceInUSD, // <--- We send the raw amount here
+                  rawPriceInUSD,
               },
             );
 
@@ -540,9 +718,28 @@ const FanChatWindow =
           "CARD"
         ) {
           // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
+          const fanRate =
+            exchangeRates[
+              checkoutData
+                .currency
+            ] ||
+            1;
+          const ngnRate =
+            exchangeRates[
+              "NGN"
+            ] ||
+            1500;
+
+          // Reverse engineer the USD base price, then convert to NGN
+          const priceInUSD =
+            checkoutData.amount /
+            fanRate;
+          const priceInNGN =
+            priceInUSD *
+            ngnRate;
           const amountInSubunits =
             Math.round(
-              checkoutData.amount *
+              priceInNGN *
                 100,
             );
 
@@ -560,45 +757,38 @@ const FanChatWindow =
                   amount:
                     amountInSubunits,
                   currency:
-                    checkoutData.currency,
+                    "NGN", // Paystack strict currency
                 },
               onSuccess:
                 async (
                   reference,
                 ) => {
                   setProcessingId(
-                    checkoutData.post
-                      ? checkoutData
-                          .post
-                          ._id
-                      : checkoutData.type,
+                    "card_payment",
                   );
                   try {
-                    // The backend verifyPayment function uses checkoutData.raw to credit the Creator's Wallet
+                    const safeReference =
+                      typeof reference ===
+                      "string"
+                        ? reference
+                        : reference?.reference ||
+                          reference?.trxref;
                     await api.post(
                       "/purchases/verify",
                       {
                         reference:
-                          reference.reference,
+                          safeReference,
                         paymentMethod:
                           "FIAT",
+                        // THE FIX: Use chatInfo._id
                         creatorId:
-                          id,
-                        contentId:
-                          checkoutData.post
-                            ? checkoutData
-                                .post
-                                ._id
-                            : null,
+                          chatInfo?._id,
                         purchaseType:
-                          checkoutData.type,
-                        subscriptionTier:
-                          checkoutData.tier ||
-                          null,
+                          "CHAT_BUNDLE",
                         chargeAmount:
-                          checkoutData.amount,
+                          priceInNGN,
                         chargeCurrency:
-                          checkoutData.currency,
+                          "NGN",
                         rawAmount:
                           checkoutData.raw,
                         rawCurrency:
@@ -606,7 +796,49 @@ const FanChatWindow =
                       },
                     );
 
-                    await fetchProfileAndRates();
+                    // THE FIX: Instantly restock local bubbles for THIS component
+                    setBubblesLeft(
+                      (
+                        prev,
+                      ) =>
+                        prev +
+                        checkoutData.bubbles,
+                    );
+                    setRequiresBundle(
+                      false,
+                    );
+                    closeCheckoutModal();
+
+                    // Instantly restock local bubbles
+                    setSelectedChat(
+                      (
+                        prev,
+                      ) => ({
+                        ...prev,
+                        bubblesLeft:
+                          prev.bubblesLeft +
+                          checkoutData.bubbles,
+                      }),
+                    );
+                    setInbox(
+                      (
+                        prev,
+                      ) =>
+                        prev.map(
+                          (
+                            c,
+                          ) =>
+                            c._id ===
+                            selectedChat._id
+                              ? {
+                                  ...c,
+                                  bubblesLeft:
+                                    c.bubblesLeft +
+                                    checkoutData.bubbles,
+                                }
+                              : c,
+                        ),
+                    );
                     closeCheckoutModal();
                   } catch (error) {
                     alert(
@@ -626,7 +858,7 @@ const FanChatWindow =
               onClose:
                 () =>
                   alert(
-                    "Payment window closed by user.",
+                    "Payment window closed.",
                   ),
             },
           );
@@ -918,10 +1150,12 @@ const FanChatWindow =
                               handleGuardedCheckout(
                                 {
                                   type: "DM_UNLOCK",
-                                  message:
-                                    msg,
-                                  amount:
-                                    msg.priceInUSDT,
+                                  message: msg,
+                                  amount: msg.priceInUSDT,
+                                  // THE FIX: Explicitly pass USD for legacy PPV messages
+                                  currency: "USD",
+                                  raw: msg.priceInUSDT,
+                                  rawCurrency: "USD"
                                 },
                                 msg.isNsfw ||
                                   chatInfo?.willingNsfw, // Fallback to creator's NSFW status if msg doesn't have it
@@ -1082,6 +1316,44 @@ const FanChatWindow =
                 </div>
                 <button
                   onClick={() => {
+                    const rawPrice =
+                      chatInfo
+                        ?.monetizationSettings
+                        ?.messageBundlePrice ||
+                      5;
+                    const rawCurrency =
+                      chatInfo
+                        ?.monetizationSettings
+                        ?.priceCurrency ||
+                      chatInfo
+                        ?.monetizationSettings
+                        ?.baseCurrency ||
+                      chatInfo?.preferredCurrency ||
+                      "USD";
+                    const converted =
+                      getFanPrice(
+                        rawPrice,
+                        rawCurrency,
+                      );
+
+                    setBundlePrice(
+                      converted.price,
+                    );
+                    setBundleCurrency(
+                      converted.currency,
+                    );
+                    setRawBundlePrice(
+                      converted.raw,
+                    );
+                    setRawBundleCurrency(
+                      converted.rawCurrency,
+                    );
+                    setBundleSize(
+                      chatInfo
+                        ?.monetizationSettings
+                        ?.messageBundleSize ||
+                        10,
+                    );
                     setBundleQuantity(
                       1,
                     );
@@ -1206,7 +1478,9 @@ const FanChatWindow =
                     bundle
                     for{" "}
                     <span className="font-bold text-emerald-400">
-                      $
+                      {
+                        bundleCurrency
+                      }{" "}
                       {
                         bundlePrice
                       }
@@ -1288,7 +1562,9 @@ const FanChatWindow =
                         Cost
                       </p>
                       <p className="text-2xl font-black text-emerald-400">
-                        $
+                        {
+                          bundleCurrency
+                        }{" "}
                         {(
                           bundleQuantity *
                           bundlePrice
@@ -1310,6 +1586,14 @@ const FanChatWindow =
                           amount:
                             bundleQuantity *
                             bundlePrice,
+                          // THE FIX: Inject the dynamic currency and raw states
+                          currency:
+                            bundleCurrency,
+                          raw:
+                            bundleQuantity *
+                            rawBundlePrice,
+                          rawCurrency:
+                            rawBundleCurrency,
                           bubbles:
                             bundleQuantity *
                             bundleSize,
@@ -1381,9 +1665,11 @@ const FanChatWindow =
                     for{" "}
                     <span className="text-emerald-500 font-bold">
                       {
-                        checkoutData.amount
+                        checkoutData.currency
                       }{" "}
-                      USD
+                      {
+                        checkoutData.amount
+                      }
                     </span>
                   </p>
 
@@ -1530,6 +1816,6 @@ const FanChatWindow =
         </div>
       </div>
     );
-  };;
+  };;;
 
 export default FanChatWindow;

@@ -1,8 +1,9 @@
+// client/src/components/EarningsDashboard.jsx
 import React, {
   useState,
   useEffect,
 } from "react";
-import { ethers } from "ethers"; // <-- ADDED: Required for Web3 transactions
+import { ethers } from "ethers";
 import api from "../utils/api";
 import {
   Users,
@@ -15,11 +16,9 @@ import {
   CheckCircle2,
   AlertCircle,
   X,
-  ShieldCheck,
   ArrowRight,
 } from "lucide-react";
 
-// THE FIX: Use Vite's import.meta.env instead of Node's process.env
 const PAYOUT_CONTRACT_ADDRESS =
   import.meta
     .env
@@ -44,6 +43,178 @@ const COUNTRY_TO_CURRENCY =
       "GHS",
     default:
       "USD",
+  };
+
+const CURRENCY_SYMBOLS =
+  {
+    NGN: "₦",
+    USD: "$",
+    GBP: "£",
+    EUR: "€",
+    KES: "KSh ",
+    GHS: "GH₵ ",
+    ZAR: "R ",
+  };
+
+// Real-Time Countdown Component
+const PendingClaimAction =
+  ({
+    withdrawal,
+    claimingId,
+    onClaim,
+  }) => {
+    const [
+      isExpired,
+      setIsExpired,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      timeLeft,
+      setTimeLeft,
+    ] =
+      useState(
+        "",
+      );
+
+    useEffect(() => {
+      const deadlineUnix =
+        withdrawal
+          .metadata
+          ?.deadline;
+      if (
+        !deadlineUnix
+      )
+        return;
+
+      const calculateTime =
+        () => {
+          const now =
+            Math.floor(
+              Date.now() /
+                1000,
+            );
+          const diff =
+            deadlineUnix -
+            now;
+
+          if (
+            diff <=
+            0
+          ) {
+            setIsExpired(
+              true,
+            );
+            return "Expired (Sweeping...)";
+          }
+
+          const hours =
+            Math.floor(
+              diff /
+                3600,
+            )
+              .toString()
+              .padStart(
+                2,
+                "0",
+              );
+          const minutes =
+            Math.floor(
+              (diff %
+                3600) /
+                60,
+            )
+              .toString()
+              .padStart(
+                2,
+                "0",
+              );
+          const seconds =
+            (
+              diff %
+              60
+            )
+              .toString()
+              .padStart(
+                2,
+                "0",
+              );
+          return `${hours}:${minutes}:${seconds}`;
+        };
+
+      setTimeLeft(
+        calculateTime(),
+      );
+      const interval =
+        setInterval(
+          () =>
+            setTimeLeft(
+              calculateTime(),
+            ),
+          1000,
+        );
+      return () =>
+        clearInterval(
+          interval,
+        );
+    }, [
+      withdrawal,
+    ]);
+
+    return (
+      <div className="flex flex-col items-end gap-1.5">
+        {withdrawal
+          .metadata
+          ?.deadline && (
+          <div
+            className={`text-[10px] font-mono flex items-center gap-1.5 ${
+              isExpired
+                ? "text-red-400"
+                : "text-amber-500"
+            }`}
+          >
+            <Clock
+              size={
+                12
+              }
+            />
+            {
+              timeLeft
+            }
+          </div>
+        )}
+        <button
+          onClick={() =>
+            onClaim(
+              withdrawal,
+            )
+          }
+          disabled={
+            claimingId ===
+              withdrawal._id ||
+            isExpired
+          }
+          className={`px-4 py-2 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 ${
+            isExpired
+              ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+              : "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md shadow-emerald-500/20"
+          }`}
+        >
+          <WalletIcon
+            size={
+              14
+            }
+          />
+          {claimingId ===
+          withdrawal._id
+            ? "Claiming..."
+            : isExpired
+              ? "Timeout"
+              : "Claim USDT"}
+        </button>
+      </div>
+    );
   };
 
 const EarningsDashboard =
@@ -92,8 +263,6 @@ const EarningsDashboard =
       useState(
         "",
       );
-
-    // Modal State for Withdrawals
     const [
       withdrawalConfig,
       setWithdrawalConfig,
@@ -104,6 +273,8 @@ const EarningsDashboard =
           currency:
             null,
           amount: 0,
+          direction:
+            "",
         },
       );
     const [
@@ -134,14 +305,25 @@ const EarningsDashboard =
       useState(
         "",
       );
-
-    // --- WEB3 VOUCHER CLAIM STATE & LOGIC ---
     const [
       claimingId,
       setClaimingId,
     ] =
       useState(
         null,
+      );
+    const [
+      exchangeRates,
+      setExchangeRates,
+    ] =
+      useState(
+        {
+          USD: {
+            buy: 1,
+            sell: 1,
+            mid: 1,
+          },
+        },
       );
 
     const handleClaimPayout =
@@ -165,7 +347,6 @@ const EarningsDashboard =
             return;
           }
 
-          // Multi-wallet extension resolver
           let targetProvider =
             window.ethereum;
           if (
@@ -192,15 +373,13 @@ const EarningsDashboard =
             );
           const signer =
             await provider.getSigner();
-
-          // Verify user is connected to Polygon Amoy (80002 / 0x13882) or Mainnet (137 / 0x89)
           const network =
             await provider.getNetwork();
           const expectedChainId =
             BigInt(
-              process
+              import.meta
                 .env
-                .REACT_APP_POLYGON_CHAIN_ID ||
+                .VITE_POLYGON_CHAIN_ID ||
                 80002,
             );
 
@@ -229,7 +408,6 @@ const EarningsDashboard =
             }
           }
 
-          // Extract cryptographic voucher parameters saved in Transaction metadata
           const metadata =
             withdrawal.metadata ||
             {};
@@ -259,7 +437,6 @@ const EarningsDashboard =
               signer,
             );
 
-          // Execute EIP-712 claim on-chain
           const tx =
             await contract.claimPayout(
               amountInWei ||
@@ -272,16 +449,11 @@ const EarningsDashboard =
               signature,
             );
 
-          console.log(
-            "Claim Tx Broadcasted:",
-            tx.hash,
-          );
-          await tx.wait(); // Wait for block confirmation
-
+          await tx.wait();
           alert(
             "Payout claimed successfully on Polygon!",
           );
-          fetchDashboardData(); // Refresh UI to update balances and statuses
+          fetchDashboardData();
         } catch (err) {
           console.error(
             "Claim Execution Error:",
@@ -307,16 +479,6 @@ const EarningsDashboard =
           );
         }
       };
-
-    const [
-      exchangeRates,
-      setExchangeRates,
-    ] =
-      useState(
-        {
-          NGN: null,
-        },
-      );
 
     const fetchDashboardData =
       async () => {
@@ -344,8 +506,6 @@ const EarningsDashboard =
             ] ||
             COUNTRY_TO_CURRENCY.default;
 
-          // IRONCLAD FIX: Added a third request to fetch the live P2P preview rate.
-          // The .catch() ensures the dashboard still loads even if this specific API fails.
           const [
             dashboardRes,
             settingsRes,
@@ -359,6 +519,7 @@ const EarningsDashboard =
                 api.get(
                   "/users/settings/monetization",
                 ),
+                // ✅ Replace flat number fallback with rate object
                 api
                   .get(
                     "/earnings/p2p-rate",
@@ -366,7 +527,16 @@ const EarningsDashboard =
                   .catch(
                     () => ({
                       data: {
-                        NGN: 1500,
+                        USD: {
+                          buy: 1,
+                          sell: 1,
+                          mid: 1,
+                        },
+                        NGN: {
+                          buy: 1400,
+                          sell: 1400,
+                          mid: 1400,
+                        },
                       },
                     }),
                   ),
@@ -374,21 +544,51 @@ const EarningsDashboard =
             );
 
           const targetCurrency =
+            storedUser.preferredCurrency ||
             settingsRes
               .data
               ?.baseCurrency ||
+            storedUser.fiatCurrency ||
             autoCurrency;
 
-          // Store the fetched rate in state so the cards can display it
-          setExchangeRates(
-            {
-              NGN:
-                rateRes
-                  .data
-                  .NGN ||
-                1500,
-            },
-          );
+          const rawRates =
+            rateRes
+              .data
+              ?.rates ||
+            rateRes
+              .data
+              ?.data ||
+            rateRes.data ||
+            {};
+
+          if (
+            typeof rawRates ===
+              "object" &&
+            rawRates !==
+              null
+          ) {
+            setExchangeRates(
+              (
+                prev,
+              ) => ({
+                ...prev,
+                ...rawRates,
+              }),
+            );
+          } else if (
+            typeof rawRates ===
+            "number"
+          ) {
+            setExchangeRates(
+              (
+                prev,
+              ) => ({
+                ...prev,
+                [targetCurrency]:
+                  rawRates,
+              }),
+            );
+          }
 
           setDashboardData(
             {
@@ -458,26 +658,6 @@ const EarningsDashboard =
       fetchDashboardData();
     }, []);
 
-    const handleOpenWithdrawModal =
-      (
-        currency,
-        amount,
-      ) => {
-        setModalError(
-          "",
-        );
-        setModalSuccess(
-          "",
-        );
-        setWithdrawalConfig(
-          {
-            isOpen: true,
-            currency,
-            amount,
-          },
-        );
-      };
-
     const handleCloseModal =
       () => {
         setWithdrawalConfig(
@@ -486,6 +666,8 @@ const EarningsDashboard =
             currency:
               null,
             amount: 0,
+            direction:
+              "",
           },
         );
         setModalError(
@@ -496,7 +678,6 @@ const EarningsDashboard =
         );
       };
 
-    // 1. Intercept the click and calculate the spread via Backend Quote
     const handleOpenLiquidateModal =
       async (
         currency,
@@ -505,7 +686,7 @@ const EarningsDashboard =
         try {
           setIsSubmitting(
             true,
-          ); // Re-use submitting state for the loading spinner
+          );
           setModalError(
             "",
           );
@@ -524,13 +705,17 @@ const EarningsDashboard =
             storedUser.payoutMethod ===
             "bank";
 
-          // Dynamically set the P2P direction
+          // FIX 1: Prioritize preferredCurrency over fiatCurrency for liquidation target
+          const creatorPreferredFiat =
+            storedUser.preferredCurrency ||
+            storedUser.fiatCurrency ||
+            "USD";
+
           const direction =
             isBankPayout
-              ? "USDT_TO_NGN"
+              ? `USDT_TO_${creatorPreferredFiat}`
               : `${currency}_TO_USDT`;
 
-          // Fetch the live, spread-adjusted quote from your new backend route
           const response =
             await api.post(
               "/earnings/quote",
@@ -539,18 +724,15 @@ const EarningsDashboard =
                 direction,
               },
             );
-          const quoteData =
-            response.data;
 
           setLiquidationQuote(
-            quoteData,
+            response.data,
           );
           setWithdrawalConfig(
             {
               isOpen: true,
               type: "LIQUIDATE",
-              currency:
-                currency,
+              currency,
               amount,
               direction,
             },
@@ -574,7 +756,6 @@ const EarningsDashboard =
         }
       };
 
-    // 2. The actual API execution when they confirm the modal
     const executeLiquidation =
       async () => {
         try {
@@ -585,21 +766,29 @@ const EarningsDashboard =
             "",
           );
 
-          // Hit the new dedicated liquidation route
           await api.post(
             "/earnings/liquidate",
             {
               amount:
                 withdrawalConfig.amount,
               quote:
-                liquidationQuote, // Pass the quoted math to enforce the agreed rate
+                liquidationQuote,
             },
           );
 
+          const [
+            fromCurr,
+            toCurr,
+          ] =
+            withdrawalConfig.direction.split(
+              "_TO_",
+            );
+
+          // FIX 2: Dynamic success message matching the actual output fiat balance
           const successMsg =
-            withdrawalConfig.direction ===
-            "USDT_TO_NGN"
-              ? "Liquidation successful! Funds moved to Floating NGN."
+            fromCurr ===
+            "USDT"
+              ? `Liquidation successful! Funds moved to Floating ${toCurr}.`
               : "Liquidation successful! Funds moved to Floating USDT.";
 
           setModalSuccess(
@@ -678,10 +867,6 @@ const EarningsDashboard =
         ) ||
           "{}",
       );
-    const targetAddress =
-      storedUser.payoutAddress ||
-      storedUser.walletAddress ||
-      "Not Configured";
 
     const rawFiatBalances =
       wallet.fiatBalances ||
@@ -735,7 +920,6 @@ const EarningsDashboard =
 
     return (
       <div className="space-y-10">
-        {/* HEADER SECTION ALIGNED TO CENTER */}
         <div className="flex flex-col items-center justify-center border-b border-slate-800 pb-6 text-center">
           <h2 className="text-3xl font-bold text-white mb-2">
             Earnings
@@ -756,7 +940,61 @@ const EarningsDashboard =
           </p>
         </div>
 
-        {/* TOP ROW: MULTI-CURRENCY FIAT LEDGER */}
+        {safeWithdrawable[
+          baseCurrency
+        ] <
+          0 && (
+          <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-4 rounded-2xl flex items-center justify-between shadow-lg">
+            <div className="flex items-center gap-3">
+              <AlertCircle
+                size={
+                  22
+                }
+                className="text-red-400 shrink-0"
+              />
+              <div>
+                <h4 className="font-bold text-sm">
+                  Account
+                  Balance
+                  Deficit
+                </h4>
+                <p className="text-xs text-red-300 mt-0.5">
+                  Your
+                  withdrawable
+                  balance
+                  is
+                  currently{" "}
+                  <strong className="font-mono">
+                    {CURRENCY_SYMBOLS[
+                      baseCurrency
+                    ] ||
+                      `${baseCurrency} `}
+                    {safeWithdrawable[
+                      baseCurrency
+                    ].toLocaleString()}
+                  </strong>{" "}
+                  due
+                  to
+                  a
+                  bank
+                  dispute.
+                  Subsequent
+                  earnings
+                  will
+                  automatically
+                  cover
+                  this
+                  balance
+                  before
+                  funds
+                  become
+                  withdrawable.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div>
           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 text-center">
             Web2
@@ -806,7 +1044,6 @@ const EarningsDashboard =
                         Pricing
                       </div>
                     )}
-
                     <div className="space-y-4 text-center">
                       <div>
                         <h3 className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">
@@ -825,7 +1062,6 @@ const EarningsDashboard =
                           )}
                         </p>
                       </div>
-
                       <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 space-y-2 flex flex-col items-center">
                         <div className="flex flex-col items-center justify-center text-xs w-full">
                           <span className="text-slate-400 flex items-center justify-center gap-1 mb-1">
@@ -861,7 +1097,6 @@ const EarningsDashboard =
                           account.
                         </p>
                       </div>
-
                       <p className="text-xs text-slate-500 font-mono pt-1 text-center">
                         All-Time
                         Earned:{" "}
@@ -881,46 +1116,76 @@ const EarningsDashboard =
                     <div className="mt-6 pt-4 border-t border-slate-800/50 space-y-3">
                       {storedUser.payoutMethod ===
                       "bank" ? (
-                        // --- BANK CREATOR LOGIC (USDT -> NGN) ---
                         currency ===
                         "USDT" ? (
                           <>
-                            {/* The Estimate Preview */}
-                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-center">
-                              <p className="text-[11px] text-slate-400 font-medium">
-                                Est.
-                                Payout
-                                Rate
-                                (incl.
-                                spread)
-                              </p>
-                              <p className="text-xs font-bold text-amber-400 font-mono mt-0.5">
-                                1
-                                USDT
-                                ≈
-                                ₦
-                                {(
-                                  (exchangeRates?.NGN ||
-                                    1500) *
-                                  0.97
-                                ).toLocaleString(
-                                  undefined,
-                                  {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  },
-                                )}
-                              </p>
-                              <p className="text-[9px] text-slate-500 mt-1 italic">
-                                *Final
-                                live
-                                quote
-                                generated
-                                on
-                                click.
-                              </p>
-                            </div>
+                            {(() => {
+                              // FIX 3: Prioritize preferredCurrency so GHS rate is looked up in exchangeRates
+                              const bankCurrency =
+                                storedUser.preferredCurrency ||
+                                storedUser.fiatCurrency ||
+                                "USD";
+                              const rateData =
+                                exchangeRates[
+                                  bankCurrency
+                                ];
+                              const numericRate =
+                                typeof rateData ===
+                                  "object" &&
+                                rateData !==
+                                  null
+                                  ? rateData.buy
+                                  : typeof rateData ===
+                                      "number"
+                                    ? rateData
+                                    : parseFloat(
+                                        rateData,
+                                      ) ||
+                                      1;
+                              const symbol =
+                                CURRENCY_SYMBOLS[
+                                  bankCurrency
+                                ] ||
+                                `${bankCurrency} `;
+                              const estimatedRate =
+                                numericRate *
+                                0.97;
 
+                              return (
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-center">
+                                  <p className="text-[11px] text-slate-400 font-medium">
+                                    Est.
+                                    Payout
+                                    Rate
+                                    (incl.
+                                    spread)
+                                  </p>
+                                  <p className="text-xs font-bold text-amber-400 font-mono mt-0.5">
+                                    1
+                                    USDT
+                                    ≈{" "}
+                                    {
+                                      symbol
+                                    }
+                                    {estimatedRate.toLocaleString(
+                                      undefined,
+                                      {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      },
+                                    )}
+                                  </p>
+                                  <p className="text-[9px] text-slate-500 mt-1 italic">
+                                    *Final
+                                    live
+                                    quote
+                                    generated
+                                    on
+                                    click.
+                                  </p>
+                                </div>
+                              );
+                            })()}
                             <button
                               disabled={
                                 withdrawableAmt <=
@@ -936,8 +1201,10 @@ const EarningsDashboard =
                               className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:hover:bg-slate-800 disabled:bg-slate-800 text-slate-950 font-bold rounded-xl transition-all text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10"
                             >
                               Liquidate
-                              to
-                              NGN{" "}
+                              to{" "}
+                              {storedUser.preferredCurrency ||
+                                storedUser.fiatCurrency ||
+                                "USD"}{" "}
                               <ArrowRight
                                 size={
                                   16
@@ -956,8 +1223,7 @@ const EarningsDashboard =
                             Weekly
                           </div>
                         )
-                      ) : // --- CRYPTO CREATOR LOGIC (FIAT -> USDT) ---
-                      currency ===
+                      ) : currency ===
                         "USDT" ? (
                         <div className="w-full py-2.5 bg-emerald-500/10 text-emerald-500 font-bold rounded-xl text-sm flex items-center justify-center gap-2 cursor-not-allowed border border-emerald-500/20">
                           <WalletIcon
@@ -971,41 +1237,67 @@ const EarningsDashboard =
                         </div>
                       ) : (
                         <>
-                          {/* The Estimate Preview */}
-                          <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-center">
-                            <p className="text-[11px] text-slate-400 font-medium">
-                              Est.
-                              Conversion
-                              Rate
-                              (incl.
-                              spread)
-                            </p>
-                            <p className="text-xs font-bold text-emerald-400 font-mono mt-0.5">
-                              1
-                              USDT
-                              ≈
-                              ₦
-                              {(
-                                (exchangeRates?.NGN ||
-                                  1500) *
-                                1.03
-                              ).toLocaleString(
-                                undefined,
-                                {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                },
-                              )}
-                            </p>
-                            <p className="text-[9px] text-slate-500 mt-1 italic">
-                              *Final
-                              live
-                              quote
-                              generated
-                              on
-                              click.
-                            </p>
-                          </div>
+                          {(() => {
+                            // ✅ THE FIX: Extract rateData.sell for Fiat -> USDT conversion
+                            const rateData =
+                              exchangeRates[
+                                currency
+                              ];
+                            const numericRate =
+                              typeof rateData ===
+                                "object" &&
+                              rateData !==
+                                null
+                                ? rateData.sell
+                                : typeof rateData ===
+                                    "number"
+                                  ? rateData
+                                  : parseFloat(
+                                      rateData,
+                                    ) ||
+                                    1;
+
+                            const symbol =
+                              CURRENCY_SYMBOLS[
+                                currency
+                              ] ||
+                              `${currency} `;
+                            const estimatedRate =
+                              numericRate *
+                              1.03;
+
+                            return (
+                              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-center">
+                                <p className="text-[11px] text-slate-400 font-medium">
+                                  Est.
+                                  Conversion
+                                  Rate
+                                  (incl.
+                                  spread)
+                                </p>
+                                <p className="text-xs font-bold text-emerald-400 font-mono mt-0.5">
+                                  {currency ===
+                                  "USD"
+                                    ? `1 USDT ≈ $1.00 USD`
+                                    : `1 USDT ≈ ${symbol}${estimatedRate.toLocaleString(
+                                        undefined,
+                                        {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                        },
+                                      )}`}
+                                </p>
+                                <p className="text-[9px] text-slate-500 mt-1 italic">
+                                  *Final
+                                  live
+                                  quote
+                                  generated
+                                  on
+                                  click.
+                                </p>
+                              </div>
+                            );
+                          })()}
 
                           <button
                             disabled={
@@ -1040,7 +1332,6 @@ const EarningsDashboard =
           </div>
         </div>
 
-        {/* MIDDLE ROW: WEB3 READ-ONLY METRICS */}
         <div className="flex flex-col items-center">
           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 text-center">
             Web3
@@ -1050,7 +1341,6 @@ const EarningsDashboard =
           </h3>
           <div className="bg-slate-900 p-8 rounded-2xl border border-emerald-500/20 shadow-sm relative overflow-hidden w-full max-w-2xl flex flex-col items-center text-center">
             <div className="absolute -right-6 -top-6 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none"></div>
-
             <div className="mb-4 p-4 bg-emerald-500/10 text-emerald-500 rounded-full shadow-inner">
               <WalletIcon
                 size={
@@ -1058,7 +1348,6 @@ const EarningsDashboard =
                 }
               />
             </div>
-
             <h3 className="text-emerald-500 text-sm font-medium mb-2 flex items-center justify-center gap-2">
               <ExternalLink
                 size={
@@ -1106,7 +1395,6 @@ const EarningsDashboard =
           </div>
         </div>
 
-        {/* BOTTOM ROW: PLATFORM METRICS */}
         <div>
           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 text-center">
             Platform
@@ -1131,7 +1419,6 @@ const EarningsDashboard =
                 }
               </p>
             </div>
-
             <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex flex-col items-center text-center">
               <div className="p-3 bg-purple-500/10 text-purple-500 rounded-full mb-3">
                 <Video
@@ -1154,7 +1441,6 @@ const EarningsDashboard =
           </div>
         </div>
 
-        {/* LEDGER TABLES */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-sm overflow-hidden flex flex-col">
             <div className="p-4 border-b border-slate-800 bg-slate-950 text-center">
@@ -1253,32 +1539,20 @@ const EarningsDashboard =
                         </p>
                       </div>
 
-                      {/* DYNAMIC ACTION: CLAIM BUTTON vs STATUS BADGE */}
                       <div className="flex items-center gap-2">
                         {w.status ===
                         "PENDING_CLAIM" ? (
-                          <button
-                            onClick={() =>
-                              handleClaimPayout(
-                                w,
-                              )
+                          <PendingClaimAction
+                            withdrawal={
+                              w
                             }
-                            disabled={
-                              claimingId ===
-                              w._id
+                            claimingId={
+                              claimingId
                             }
-                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5"
-                          >
-                            <WalletIcon
-                              size={
-                                14
-                              }
-                            />
-                            {claimingId ===
-                            w._id
-                              ? "Claiming..."
-                              : "Claim USDT"}
-                          </button>
+                            onClaim={
+                              handleClaimPayout
+                            }
+                          />
                         ) : (
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-semibold tracking-wider ${
@@ -1305,7 +1579,6 @@ const EarningsDashboard =
           </div>
         </div>
 
-        {/* LIQUIDATION DISCLAIMER MODAL */}
         {withdrawalConfig.isOpen && (
           <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-amber-500/30 rounded-3xl max-w-md w-full p-8 shadow-2xl relative space-y-6 flex flex-col items-center">
@@ -1321,7 +1594,6 @@ const EarningsDashboard =
                   }
                 />
               </button>
-
               <div className="flex flex-col items-center gap-3 border-b border-slate-800 pb-4 w-full text-center">
                 <div className="p-3 bg-amber-500/10 text-amber-500 rounded-full mb-2 border border-amber-500/20">
                   <RefreshCw
@@ -1330,10 +1602,13 @@ const EarningsDashboard =
                     }
                   />
                 </div>
+
+                {/* FIX 4: Dynamic Modal Header Title */}
                 <h3 className="text-xl font-bold text-white">
-                  {withdrawalConfig.direction ===
-                  "USDT_TO_NGN"
-                    ? "Liquidate to NGN"
+                  {withdrawalConfig.direction?.startsWith(
+                    "USDT_TO_",
+                  )
+                    ? `Liquidate to ${withdrawalConfig.direction.split("_TO_")[1]}`
                     : "Liquidate to USDT"}
                 </h3>
                 <p className="text-xs text-slate-400">
@@ -1356,7 +1631,6 @@ const EarningsDashboard =
                   }
                 </div>
               )}
-
               {modalSuccess && (
                 <div className="p-3 w-full bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-center gap-2 text-xs text-emerald-400">
                   <CheckCircle2
@@ -1371,69 +1645,95 @@ const EarningsDashboard =
                 </div>
               )}
 
-              {liquidationQuote && (
-                <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 w-full">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-400 font-medium">
-                      Amount
-                      to
-                      Liquidate:
-                    </span>
-                    <span className="font-mono font-bold text-white">
-                      {liquidationQuote.amount.toLocaleString()}{" "}
-                      {
-                        withdrawalConfig.currency
-                      }
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-400 font-medium">
-                      Live
-                      Market
-                      Rate:
-                    </span>
-                    <span className="font-mono text-slate-300">
-                      ~₦
-                      {liquidationQuote.liveMarketRate.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm border-b border-slate-800/60 pb-4">
-                    <span className="text-slate-400 font-medium">
-                      Execution
-                      Rate
-                      (incl.{" "}
-                      {
-                        liquidationQuote.spreadApplied
-                      }
+              {liquidationQuote &&
+                (() => {
+                  // FIX 5: Extract dynamic target currency and symbol for quote details
+                  const [
+                    fromCurr,
+                    toCurr,
+                  ] =
+                    withdrawalConfig.direction.split(
+                      "_TO_",
+                    );
+                  const targetFiat =
+                    fromCurr ===
+                    "USDT"
+                      ? toCurr
+                      : fromCurr;
+                  const targetSymbol =
+                    CURRENCY_SYMBOLS[
+                      targetFiat
+                    ] ||
+                    `${targetFiat} `;
 
-                      %
-                      spread):
-                    </span>
-                    <span className="font-mono text-amber-400 font-bold">
-                      ₦
-                      {liquidationQuote.executionRate.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center pt-1">
-                    <span className="text-slate-300 font-bold uppercase tracking-wider text-xs">
-                      Total
-                      Estimated
-                      Payout:
-                    </span>
-                    <span className="font-mono font-black text-emerald-400 text-xl">
-                      {withdrawalConfig.direction ===
-                      "USDT_TO_NGN"
-                        ? "₦"
-                        : ""}
-                      {liquidationQuote.estimatedPayout.toLocaleString()}
-                      {withdrawalConfig.direction !==
-                      "USDT_TO_NGN"
-                        ? " USDT"
-                        : ""}
-                    </span>
-                  </div>
-                </div>
-              )}
+                  return (
+                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 w-full">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-400 font-medium">
+                          Amount
+                          to
+                          Liquidate:
+                        </span>
+                        <span className="font-mono font-bold text-white">
+                          {liquidationQuote.amount.toLocaleString()}{" "}
+                          {
+                            withdrawalConfig.currency
+                          }
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-400 font-medium">
+                          Live
+                          Market
+                          Rate:
+                        </span>
+                        <span className="font-mono text-slate-300">
+                          ~
+                          {
+                            targetSymbol
+                          }
+                          {liquidationQuote.liveMarketRate.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm border-b border-slate-800/60 pb-4">
+                        <span className="text-slate-400 font-medium">
+                          Execution
+                          Rate
+                          (incl.{" "}
+                          {
+                            liquidationQuote.spreadApplied
+                          }
+                          %
+                          spread):
+                        </span>
+                        <span className="font-mono text-amber-400 font-bold">
+                          {
+                            targetSymbol
+                          }
+                          {liquidationQuote.executionRate.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center pt-1">
+                        <span className="text-slate-300 font-bold uppercase tracking-wider text-xs">
+                          Total
+                          Estimated
+                          Payout:
+                        </span>
+                        <span className="font-mono font-black text-emerald-400 text-xl">
+                          {fromCurr ===
+                          "USDT"
+                            ? targetSymbol
+                            : ""}
+                          {liquidationQuote.estimatedPayout.toLocaleString()}
+                          {fromCurr !==
+                          "USDT"
+                            ? " USDT"
+                            : ""}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
               <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-2xl w-full">
                 <p className="text-xs text-amber-500/90 leading-relaxed flex items-start gap-2">

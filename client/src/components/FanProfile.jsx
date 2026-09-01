@@ -245,8 +245,12 @@ const FanProfile =
 
           <div className="bg-nippy-obsidian border border-gray-800 rounded-2xl p-6 shadow-xl">
             <div className="flex flex-col items-center mb-8">
-              <div className="relative group cursor-pointer">
-                <div className="w-24 h-24 bg-gray-800 rounded-full flex items-center justify-center border-2 border-gray-700 overflow-hidden shadow-lg">
+              {/* Wrap the avatar in a label to trigger the file input */}
+              <label
+                htmlFor="avatar-upload"
+                className="relative group cursor-pointer"
+              >
+                <div className="w-24 h-24 bg-gray-800 rounded-full flex items-center justify-center border-2 border-gray-700 overflow-hidden shadow-lg transition-transform group-hover:scale-105">
                   {profile.profileImage ? (
                     <img
                       src={
@@ -274,7 +278,167 @@ const FanProfile =
                     className="text-white"
                   />
                 </div>
-              </div>
+              </label>
+
+              {/* The Invisible File Input */}
+              <input
+                type="file"
+                id="avatar-upload"
+                accept="image/jpeg, image/png, image/webp"
+                className="hidden"
+                onChange={async (
+                  e,
+                ) => {
+                  const file =
+                    e
+                      .target
+                      .files[0];
+                  if (
+                    !file
+                  )
+                    return;
+
+                  setSaving(
+                    true,
+                  );
+                  setSuccessMessage(
+                    "",
+                  );
+
+                  try {
+                    const token =
+                      localStorage.getItem(
+                        "nippy_token",
+                      );
+
+                    // 1. Request the Presigned S3 Ticket
+                    const ticketRes =
+                      await fetch(
+                        "http://localhost:5000/api/media/upload-ticket",
+                        {
+                          method:
+                            "POST",
+                          headers:
+                            {
+                              Authorization: `Bearer ${token}`,
+                              "Content-Type":
+                                "application/json",
+                            },
+                          body: JSON.stringify(
+                            {
+                              fileName:
+                                file.name,
+                              fileType:
+                                file.type,
+                            },
+                          ),
+                        },
+                      );
+
+                    if (
+                      !ticketRes.ok
+                    )
+                      throw new Error(
+                        "Failed to secure upload ticket",
+                      );
+                    const {
+                      uploadUrl,
+                      publicUrl,
+                    } =
+                      await ticketRes.json();
+
+                    // 2. Upload file directly to Cloudflare R2
+                    const uploadRes =
+                      await fetch(
+                        uploadUrl,
+                        {
+                          method:
+                            "PUT",
+                          headers:
+                            {
+                              "Content-Type":
+                                file.type,
+                            },
+                          body: file,
+                        },
+                      );
+
+                    if (
+                      !uploadRes.ok
+                    )
+                      throw new Error(
+                        "Failed to upload image to bucket",
+                      );
+
+                    // 3. Update local state immediately for snappy UX
+                    setProfile(
+                      {
+                        ...profile,
+                        profileImage:
+                          publicUrl,
+                      },
+                    );
+
+                    // 4. Save the new image URL to the database
+                    const saveRes =
+                      await fetch(
+                        "http://localhost:5000/api/users/profile",
+                        {
+                          method:
+                            "PUT",
+                          headers:
+                            {
+                              Authorization: `Bearer ${token}`,
+                              "Content-Type":
+                                "application/json",
+                            },
+                          body: JSON.stringify(
+                            {
+                              profileImage:
+                                publicUrl,
+                            },
+                          ),
+                        },
+                      );
+
+                    if (
+                      saveRes.ok
+                    ) {
+                      setSuccessMessage(
+                        "Avatar updated successfully!",
+                      );
+                      setTimeout(
+                        () =>
+                          setSuccessMessage(
+                            "",
+                          ),
+                        3000,
+                      );
+                    } else {
+                      throw new Error(
+                        "Failed to save avatar to profile",
+                      );
+                    }
+                  } catch (error) {
+                    console.error(
+                      "Avatar upload failed:",
+                      error,
+                    );
+                    alert(
+                      error.message ||
+                        "Failed to update avatar",
+                    );
+                  } finally {
+                    setSaving(
+                      false,
+                    );
+                    // Clear the input so the user can select the same file again if it failed
+                    e.target.value =
+                      null;
+                  }
+                }}
+              />
+
               <p className="text-sm text-gray-500 mt-3 font-medium">
                 Click
                 to

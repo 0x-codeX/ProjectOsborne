@@ -286,6 +286,89 @@ const MonetizationSettings =
               : 0;
           };
 
+        // --- NEW: STRICT MINIMUM PRICE ENGINE ---
+        // Determine the minimum threshold based on the active currency
+        const getMinPrice =
+          (
+            currency,
+          ) => {
+            if (
+              currency ===
+              "NGN"
+            )
+              return 500;
+            if (
+              currency ===
+              "GHS"
+            )
+              return 5;
+            return 1; // Default minimum for USD and any other fallback currencies
+          };
+
+        const minRequiredPrice =
+          getMinPrice(
+            settings.priceCurrency,
+          );
+
+        // Map all pricing inputs for dynamic validation
+        const priceValidations =
+          [
+            {
+              name: "Default PPV Price",
+              value:
+                exactPrice(
+                  settings.defaultPPVPrice,
+                ),
+            },
+            {
+              name: "Weekly Subscription",
+              value:
+                exactPrice(
+                  settings.weeklySubscription,
+                ),
+            },
+            {
+              name: "Monthly Subscription",
+              value:
+                exactPrice(
+                  settings.monthlySubscription,
+                ),
+            },
+            {
+              name: "Multi-Month Subscription",
+              value:
+                exactPrice(
+                  settings.multiMonthPrice,
+                ),
+            },
+            {
+              name: "Chat Bundle Price",
+              value:
+                exactPrice(
+                  settings.messageBundlePrice,
+                ),
+            },
+          ];
+
+        // Loop through and enforce the rule: If it's greater than 0, it MUST be >= minimum
+        for (const field of priceValidations) {
+          if (
+            field.value >
+              0 &&
+            field.value <
+              minRequiredPrice
+          ) {
+            setStatus(
+              "error",
+            );
+            setMessage(
+              `The minimum allowed price for ${settings.priceCurrency} is ${minRequiredPrice}. Please increase your ${field.name} or set it to 0 to disable it.`,
+            );
+            return; // Hard stop, prevent the API call
+          }
+        }
+        // --- END STRICT MINIMUM PRICE ENGINE ---
+
         const sanitizedPayload =
           {
             ...settings,

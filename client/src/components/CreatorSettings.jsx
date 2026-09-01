@@ -23,7 +23,8 @@ import {
   Landmark,
   CreditCard,
   FileCheck,
-  Globe, // <-- Added Globe icon for currency
+  Globe,
+  ImageIcon,
 } from "lucide-react";
 import { ethers } from "ethers";
 
@@ -138,6 +139,22 @@ const CreatorSettings =
         "",
       );
 
+    // Upload progress indicators
+    const [
+      isUploadingAvatar,
+      setIsUploadingAvatar,
+    ] =
+      useState(
+        false,
+      );
+    const [
+      isUploadingBanner,
+      setIsUploadingBanner,
+    ] =
+      useState(
+        false,
+      );
+
     // Security state
     const [
       showSecurityConfirm,
@@ -230,12 +247,15 @@ const CreatorSettings =
               "",
             preferredCurrency:
               userData.preferredCurrency ||
-              "USD", // <-- ADDED PREFERRED CURRENCY
+              "USD",
             willingNsfw:
               userData.willingNsfw ||
               false,
             profileImage:
               userData.profileImage ||
+              "",
+            bannerImage:
+              userData.bannerImage ||
               "",
 
             // Legal KYC Name (Pulled from Webhook data)
@@ -267,7 +287,8 @@ const CreatorSettings =
               "",
             fiatCurrency:
               userData.fiatCurrency ||
-              "NGN",
+              userData.preferredCurrency ||
+              "USD",
             paypalEmail:
               userData.paypalEmail ||
               "",
@@ -332,45 +353,162 @@ const CreatorSettings =
         );
       };
 
+    // PRESIGNED S3/R2 DIRECT FILE UPLOADER
     const handleImageSelect =
-      (
+      async (
         e,
+        fieldName,
       ) => {
         const file =
           e
             .target
             .files[0];
         if (
-          file
+          !file
+        )
+          return;
+
+        if (
+          file.size >
+          10 *
+            1024 *
+            1024
         ) {
-          if (
-            file.size >
-            2 *
-              1024 *
-              1024
-          ) {
-            setError(
-              "Image size must be less than 2MB.",
-            );
-            return;
-          }
-          const reader =
-            new FileReader();
-          reader.onloadend =
-            () => {
-              setFormData(
-                (
-                  prev,
-                ) => ({
-                  ...prev,
-                  profileImage:
-                    reader.result,
-                }),
-              );
-            };
-          reader.readAsDataURL(
-            file,
+          setError(
+            "Image file size must be less than 10MB.",
           );
+          return;
+        }
+
+        setError(
+          "",
+        );
+        if (
+          fieldName ===
+          "profileImage"
+        )
+          setIsUploadingAvatar(
+            true,
+          );
+        if (
+          fieldName ===
+          "bannerImage"
+        )
+          setIsUploadingBanner(
+            true,
+          );
+
+        try {
+          const token =
+            localStorage.getItem(
+              "nippy_token",
+            ) ||
+            localStorage.getItem(
+              "token",
+            );
+
+          // 1. Request a 15-minute S3 upload ticket
+          const ticketRes =
+            await fetch(
+              "http://localhost:5000/api/media/upload-ticket",
+              {
+                method:
+                  "POST",
+                headers:
+                  {
+                    "Content-Type":
+                      "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                body: JSON.stringify(
+                  {
+                    fileName:
+                      file.name,
+                    fileType:
+                      file.type,
+                  },
+                ),
+              },
+            );
+
+          const ticketData =
+            await ticketRes.json();
+          if (
+            !ticketRes.ok
+          ) {
+            throw new Error(
+              ticketData.message ||
+                "Failed to generate upload URL",
+            );
+          }
+
+          // 2. Direct binary PUT to storage bucket (bypasses Express payload limit)
+          const uploadRes =
+            await fetch(
+              ticketData.uploadUrl,
+              {
+                method:
+                  "PUT",
+                headers:
+                  {
+                    "Content-Type":
+                      file.type,
+                  },
+                body: file,
+              },
+            );
+
+          if (
+            !uploadRes.ok
+          ) {
+            throw new Error(
+              "Failed to upload image file to cloud storage.",
+            );
+          }
+
+          // 3. Store the public URL in form state
+          setFormData(
+            (
+              prev,
+            ) => ({
+              ...prev,
+              [fieldName]:
+                ticketData.publicUrl,
+            }),
+          );
+
+          setSuccessMsg(
+            `${
+              fieldName ===
+              "bannerImage"
+                ? "Banner"
+                : "Profile image"
+            } uploaded. Click 'Save Changes' to lock it in.`,
+          );
+        } catch (err) {
+          console.error(
+            "Image upload error:",
+            err,
+          );
+          setError(
+            err.message ||
+              "Image upload failed.",
+          );
+        } finally {
+          if (
+            fieldName ===
+            "profileImage"
+          )
+            setIsUploadingAvatar(
+              false,
+            );
+          if (
+            fieldName ===
+            "bannerImage"
+          )
+            setIsUploadingBanner(
+              false,
+            );
         }
       };
 
@@ -553,7 +691,7 @@ const CreatorSettings =
               "") ||
           formData.fiatCurrency !==
             (user.fiatCurrency ||
-              "NGN") ||
+              "USD") ||
           formData.paypalEmail !==
             (user.paypalEmail ||
               "");
@@ -650,7 +788,9 @@ const CreatorSettings =
                 `set a new backup password`,
               );
 
-            const message = `CONFIRM_ACCOUNT_UPDATE: I authorize changing my ${changesText.join(" and ")}.`;
+            const message = `CONFIRM_ACCOUNT_UPDATE: I authorize changing my ${changesText.join(
+              " and ",
+            )}.`;
             const securitySignature =
               await signer.signMessage(
                 message,
@@ -715,7 +855,6 @@ const CreatorSettings =
           "",
         );
 
-        // Track if the currency is being changed right now
         const currencyChanged =
           formData.preferredCurrency !==
           (user.preferredCurrency ||
@@ -794,11 +933,9 @@ const CreatorSettings =
             },
           );
 
-          // THE FIX: If currency changed, redirect immediately.
           if (
             currencyChanged
           ) {
-            // UPDATE THIS PATH to match your exact React Router path for monetization settings
             navigate(
               "/creator/monetization",
               {
@@ -829,7 +966,6 @@ const CreatorSettings =
         setError(
           "",
         );
-
         let authPayload =
           {};
 
@@ -837,7 +973,6 @@ const CreatorSettings =
           if (
             user.walletAddress
           ) {
-            // --- WEB3 FLOW: Require MetaMask Signature ---
             if (
               !window.ethereum
             )
@@ -872,7 +1007,6 @@ const CreatorSettings =
             const signer =
               await provider.getSigner();
 
-            // Exact string match required by backend
             const expectedMessage = `CONFIRM_ACCOUNT_DELETION: I confirm that I want to permanently delete my Nippy account (${user.walletAddress.toLowerCase()}).`;
             const signature =
               await signer.signMessage(
@@ -884,7 +1018,6 @@ const CreatorSettings =
                 signature,
               };
           } else {
-            // --- WEB2 FLOW: Require Password ---
             if (
               !deletePassword
             ) {
@@ -911,7 +1044,6 @@ const CreatorSettings =
               "token",
             );
 
-          // --- EXECUTE DELETION ---
           const response =
             await fetch(
               "http://localhost:5000/api/users/profile",
@@ -942,7 +1074,6 @@ const CreatorSettings =
             );
           }
 
-          // --- WIPE LOCAL STATE & REDIRECT ---
           localStorage.removeItem(
             "nippy_user",
           );
@@ -1108,10 +1239,10 @@ const CreatorSettings =
               >
                 <ArrowLeft className="w-6 h-6" />
               </Link>
-              <h1 className="text-2xl font-bold text-white">
+              <h2 className="text-2xl font-bold text-white">
                 Creator
                 Settings
-              </h1>
+              </h2>
             </div>
 
             <button
@@ -1119,7 +1250,9 @@ const CreatorSettings =
                 handleInitialSaveClick
               }
               disabled={
-                isSaving
+                isSaving ||
+                isUploadingAvatar ||
+                isUploadingBanner
               }
               className="flex items-center px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl transition-all text-sm font-bold shadow-lg shadow-amber-500/20 disabled:opacity-50"
             >
@@ -1158,8 +1291,60 @@ const CreatorSettings =
               Information
             </h2>
 
+            {/* BANNER PICTURE UPLOADER */}
+            <div className="relative h-40 md:h-48 w-full bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 mb-8 group">
+              {formData.bannerImage ? (
+                <img
+                  src={
+                    formData.bannerImage
+                  }
+                  alt="Banner Preview"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-r from-slate-900 via-slate-800 to-slate-950 flex flex-col items-center justify-center text-slate-500">
+                  <ImageIcon className="w-8 h-8 mb-2 opacity-50" />
+                  <span className="text-xs font-semibold">
+                    Upload
+                    Profile
+                    Banner
+                    (Recommended
+                    1200x400)
+                  </span>
+                </div>
+              )}
+              <label
+                htmlFor="banner-upload"
+                className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center cursor-pointer text-white font-bold text-sm gap-2"
+              >
+                <Camera className="w-6 h-6 text-white" />
+                <span>
+                  {isUploadingBanner
+                    ? "Uploading Banner..."
+                    : "Change Banner Image"}
+                </span>
+                <input
+                  type="file"
+                  id="banner-upload"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(
+                    e,
+                  ) =>
+                    handleImageSelect(
+                      e,
+                      "bannerImage",
+                    )
+                  }
+                  disabled={
+                    isUploadingBanner
+                  }
+                />
+              </label>
+            </div>
+
             <div className="flex flex-col md:flex-row gap-8 mb-8">
-              {/* Avatar Upload */}
+              {/* AVATAR UPLOADER */}
               <div className="flex-shrink-0 relative group w-24 h-24">
                 <div className="w-full h-full rounded-full bg-slate-800 border-2 border-slate-700 overflow-hidden flex items-center justify-center">
                   {formData.profileImage ? (
@@ -1178,14 +1363,28 @@ const CreatorSettings =
                   htmlFor="avatar-upload"
                   className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
                 >
-                  <Camera className="w-6 h-6 text-white" />
+                  {isUploadingAvatar ? (
+                    <span className="text-[10px] text-white font-bold animate-pulse">
+                      Uploading...
+                    </span>
+                  ) : (
+                    <Camera className="w-6 h-6 text-white" />
+                  )}
                   <input
                     type="file"
                     id="avatar-upload"
                     accept="image/*"
                     className="hidden"
-                    onChange={
-                      handleImageSelect
+                    onChange={(
+                      e,
+                    ) =>
+                      handleImageSelect(
+                        e,
+                        "profileImage",
+                      )
+                    }
+                    disabled={
+                      isUploadingAvatar
                     }
                   />
                 </label>
@@ -1322,7 +1521,7 @@ const CreatorSettings =
                 </div>
               </div>
 
-              {/* THE FIX: PREFERRED CURRENCY SELECTOR */}
+              {/* PREFERRED CURRENCY SELECTOR */}
               <div className="flex flex-col">
                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                   <Globe className="w-3 h-3 text-amber-500" />{" "}
@@ -1371,9 +1570,8 @@ const CreatorSettings =
                   </div>
                 </div>
 
-                {/* THE FIX: Settlement Warning for Non-NGN Display Currencies */}
                 {formData.preferredCurrency !==
-                  "NGN" && (
+                  formData.fiatCurrency && (
                   <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex gap-2 text-amber-500 text-xs leading-relaxed">
                     <AlertCircle
                       size={
@@ -1383,13 +1581,12 @@ const CreatorSettings =
                     />
                     <p>
                       <strong className="text-amber-400">
-                        Display
-                        Only:
+                        Currency
+                        Mismatch:
                       </strong>{" "}
                       Your
                       profile
-                      will
-                      charge
+                      charges
                       fans
                       in{" "}
                       {
@@ -1397,31 +1594,20 @@ const CreatorSettings =
                       }
                       ,
                       but
-                      all
-                      Web2
+                      your
                       bank
                       payouts
-                      are
-                      strictly
+                      will
+                      be
                       settled
                       in{" "}
                       <strong className="text-amber-400">
-                        NGN
+                        {
+                          formData.fiatCurrency
+                        }
                       </strong>
+
                       .
-                      We
-                      do
-                      not
-                      support
-                      direct{" "}
-                      {
-                        formData.preferredCurrency
-                      }{" "}
-                      bank
-                      transfers
-                      at
-                      this
-                      time.
                     </p>
                   </div>
                 )}
@@ -1537,7 +1723,6 @@ const CreatorSettings =
                     }
                     type="button"
                     onClick={() =>
-                      // MUTUALLY EXCLUSIVE PAYOUT ROUTING: Clears stale data immediately
                       setFormData(
                         (
                           prev,
@@ -1676,7 +1861,7 @@ const CreatorSettings =
                     />
                   </div>
 
-                  {/* BANK DROPDOWN: Captures both Name and Code */}
+                  {/* BANK DROPDOWN */}
                   <div>
                     <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                       <Landmark className="w-4 h-4 text-blue-500" />{" "}
