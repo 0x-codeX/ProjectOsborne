@@ -717,30 +717,11 @@ const FanChatWindow =
           paymentMethod ===
           "CARD"
         ) {
-          // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
-          const fanRate =
-            exchangeRates[
-              checkoutData
-                .currency
-            ] ||
-            1;
-          const ngnRate =
-            exchangeRates[
-              "NGN"
-            ] ||
-            1500;
-
-          // Reverse engineer the USD base price, then convert to NGN
-          const priceInUSD =
-            checkoutData.amount /
-            fanRate;
-          const priceInNGN =
-            priceInUSD *
-            ngnRate;
-          const amountInSubunits =
-            Math.round(
-              priceInNGN *
-                100,
+          const gatewayConfig =
+            getSmartGatewayConfig(
+              checkoutData.amount,
+              checkoutData.currency,
+              exchangeRates,
             );
 
           initializePayment(
@@ -755,9 +736,9 @@ const FanChatWindow =
                     currentUser?.email ||
                     "fan@nippy.com",
                   amount:
-                    amountInSubunits,
+                    gatewayConfig.amountInSubunits,
                   currency:
-                    "NGN", // Paystack strict currency
+                    gatewayConfig.currency,
                 },
               onSuccess:
                 async (
@@ -808,38 +789,6 @@ const FanChatWindow =
                       false,
                     );
                     closeCheckoutModal();
-
-                    // Instantly restock local bubbles
-                    setSelectedChat(
-                      (
-                        prev,
-                      ) => ({
-                        ...prev,
-                        bubblesLeft:
-                          prev.bubblesLeft +
-                          checkoutData.bubbles,
-                      }),
-                    );
-                    setInbox(
-                      (
-                        prev,
-                      ) =>
-                        prev.map(
-                          (
-                            c,
-                          ) =>
-                            c._id ===
-                            selectedChat._id
-                              ? {
-                                  ...c,
-                                  bubblesLeft:
-                                    c.bubblesLeft +
-                                    checkoutData.bubbles,
-                                }
-                              : c,
-                        ),
-                    );
-                    closeCheckoutModal();
                   } catch (error) {
                     alert(
                       "Verification failed: " +
@@ -876,29 +825,28 @@ const FanChatWindow =
           );
 
           if (
-            !profileData
-              ?.creator
-              ?.walletAddress
-          )
+            !chatInfo?.walletAddress
+          ) {
             throw new Error(
               "Creator missing Web3 wallet.",
             );
+          }
+
           if (
             !cryptoQuote?.requiredUSDT ||
             !cryptoQuote?.rawUSDT
-          )
+          ) {
             throw new Error(
               "Missing crypto quote.",
             );
+          }
 
-          // THE FIX: We pass BOTH the Fan's bloated price and the Creator's raw base price to the Smart Contract!
+          // Pass BOTH the Fan's bloated price and the Creator's raw base price to the Smart Contract
           const txHash =
             await transferUSDT(
-              profileData
-                .creator
-                .walletAddress,
-              cryptoQuote.requiredUSDT, // e.g., 3.50 USDT (Fan is charged this)
-              cryptoQuote.rawUSDT, // e.g., 3.33 USDT (Contract calculates 80% split against this)
+              chatInfo.walletAddress,
+              cryptoQuote.requiredUSDT,
+              cryptoQuote.rawUSDT,
               checkoutData.post
                 ? checkoutData
                     .post
@@ -908,10 +856,11 @@ const FanChatWindow =
 
           if (
             !txHash
-          )
+          ) {
             throw new Error(
               "Transaction completed but no hash was returned.",
             );
+          }
 
           // The backend uses checkoutData.raw to credit the Creator's Wallet
           await api.post(
@@ -922,7 +871,7 @@ const FanChatWindow =
               paymentMethod:
                 "CRYPTO",
               creatorId:
-                id,
+                chatInfo?._id,
               contentId:
                 checkoutData.post
                   ? checkoutData
@@ -945,7 +894,7 @@ const FanChatWindow =
             },
           );
 
-          await fetchProfileAndRates();
+          await fetchMessages();
           closeCheckoutModal();
         } catch (error) {
           alert(
@@ -961,7 +910,7 @@ const FanChatWindow =
             null,
           );
         }
-      };
+      };;
 
     return (
       <div className="fixed inset-0 z-50 flex justify-center bg-black/95 md:py-6 font-sans">

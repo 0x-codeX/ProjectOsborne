@@ -31,6 +31,7 @@ import {
 import { io } from "socket.io-client";
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import { usePaystackPayment } from "react-paystack";
+import { getSmartGatewayConfig } from "../utils/paymentGateway";
 
 
 
@@ -395,30 +396,11 @@ const CreatorMessages =
           paymentMethod ===
           "CARD"
         ) {
-          // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
-          const fanRate =
-            exchangeRates[
-              checkoutData
-                .currency
-            ] ||
-            1;
-          const ngnRate =
-            exchangeRates[
-              "NGN"
-            ] ||
-            1500;
-
-          // Reverse engineer the USD base price, then convert to NGN
-          const priceInUSD =
-            checkoutData.amount /
-            fanRate;
-          const priceInNGN =
-            priceInUSD *
-            ngnRate;
-          const amountInSubunits =
-            Math.round(
-              priceInNGN *
-                100,
+          const gatewayConfig =
+            getSmartGatewayConfig(
+              checkoutData.amount,
+              checkoutData.currency,
+              exchangeRates,
             );
 
           initializePayment(
@@ -433,9 +415,9 @@ const CreatorMessages =
                     currentUser?.email ||
                     "fan@nippy.com",
                   amount:
-                    amountInSubunits,
+                    gatewayConfig.amountInSubunits,
                   currency:
-                    "NGN", // Paystack strict currency
+                    gatewayConfig.currency,
                 },
               onSuccess:
                 async (

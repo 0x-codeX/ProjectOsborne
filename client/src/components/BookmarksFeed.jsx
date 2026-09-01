@@ -25,6 +25,7 @@ import {
 import { Link } from "react-router-dom";
 import AgeVerificationGate from "./AgeVerificationGate";
 import { io } from "socket.io-client";
+import { getSmartGatewayConfig } from "../utils/paymentGateway";
 
 // --- SUB-COMPONENT ---
 const FeedPostItem =
@@ -1191,32 +1192,11 @@ const BookmarksFeed =
           paymentMethod ===
           "CARD"
         ) {
-          // THE FIX: Calculate fiat based on the padded fan price, so the platform keeps the spread!
-          const toFanRate =
-            exchangeRates[
-              paymentModalPost
-                .fanCurrency
-            ] ||
-            1;
-          const toNGNRate =
-            exchangeRates[
-              "NGN"
-            ] ||
-            1500;
-
-          // 1. Convert the padded Fan price (e.g., $0.50) back to USD
-          const paddedPriceInUSD =
-            paymentModalPost.fanPrice /
-            toFanRate;
-
-          // 2. Convert to NGN for Paystack (e.g., $0.50 * 1390 = 695 NGN)
-          const priceInNGN =
-            paddedPriceInUSD *
-            toNGNRate;
-          const amountInSubunits =
-            Math.ceil(
-              priceInNGN *
-                100,
+          const gatewayConfig =
+            getSmartGatewayConfig(
+              paymentModalPost.fanPrice,
+              paymentModalPost.fanCurrency,
+              exchangeRates,
             );
 
           initializePayment(
@@ -1231,9 +1211,9 @@ const BookmarksFeed =
                     currentUser?.email ||
                     "fan@nippy.com",
                   amount:
-                    amountInSubunits,
+                    gatewayConfig.amountInSubunits,
                   currency:
-                    "NGN",
+                    gatewayConfig.currency,
                 },
               onSuccess:
                 async (

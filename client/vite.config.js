@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig(
   {
@@ -8,6 +9,58 @@ export default defineConfig(
       [
         react(),
         tailwindcss(),
+        VitePWA(
+          {
+            registerType:
+              "autoUpdate",
+            // The server will crash if these files are missing from your public/ folder.
+            // If you don't have them yet, comment out the includeAssets and icons arrays.
+            includeAssets:
+              [
+                "favicon.ico",
+                "apple-touch-icon.png",
+              ],
+            manifest:
+              {
+                name: "Nippy",
+                short_name:
+                  "Nippy",
+                description:
+                  "Nippy Platform",
+                theme_color:
+                  "#09090b",
+                background_color:
+                  "#09090b",
+                display:
+                  "standalone",
+                start_url:
+                  "/",
+                icons:
+                  [
+                    {
+                      src: "pwa-192x192.png",
+                      sizes:
+                        "192x192",
+                      type: "image/png",
+                    },
+                    {
+                      src: "pwa-512x512.png",
+                      sizes:
+                        "512x512",
+                      type: "image/png",
+                    },
+                    {
+                      src: "pwa-512x512.png",
+                      sizes:
+                        "512x512",
+                      type: "image/png",
+                      purpose:
+                        "any maskable",
+                    },
+                  ],
+              },
+          },
+        ),
       ],
     server:
       {
@@ -16,7 +69,7 @@ export default defineConfig(
             "/api":
               {
                 target:
-                  "http://localhost:5000", // CHANGE THIS to your Node server's port if it isn't 5000
+                  "http://localhost:5000",
                 changeOrigin: true,
               },
           },

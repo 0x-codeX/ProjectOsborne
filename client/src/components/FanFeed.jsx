@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import api from "../utils/api";
 import { io } from "socket.io-client";
+import { getSmartGatewayConfig } from "../utils/paymentGateway";
 
 
 
@@ -1501,28 +1502,11 @@ const FanFeed =
           paymentMethod ===
           "CARD"
         ) {
-          const toFanRate =
-            exchangeRates[
-              paymentModalPost
-                .fanCurrency
-            ] ||
-            1;
-          const toNGNRate =
-            exchangeRates[
-              "NGN"
-            ] ||
-            1500;
-
-          const paddedPriceInUSD =
-            paymentModalPost.fanPrice /
-            toFanRate;
-          const priceInNGN =
-            paddedPriceInUSD *
-            toNGNRate;
-          const amountInSubunits =
-            Math.ceil(
-              priceInNGN *
-                100,
+          const gatewayConfig =
+            getSmartGatewayConfig(
+              paymentModalPost.fanPrice,
+              paymentModalPost.fanCurrency,
+              exchangeRates,
             );
 
           initializePayment(
@@ -1537,9 +1521,9 @@ const FanFeed =
                     currentUser?.email ||
                     "fan@nippy.com",
                   amount:
-                    amountInSubunits,
+                    gatewayConfig.amountInSubunits,
                   currency:
-                    "NGN",
+                    gatewayConfig.currency,
                 },
               onSuccess:
                 async (

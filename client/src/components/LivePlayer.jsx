@@ -763,6 +763,8 @@ const LivePlayer =
                   "/purchases/crypto-quote",
                   {
                     amountUSD,
+                    rawAmountUSD:
+                      amountUSD,
                   },
                 );
               setCryptoQuote(
@@ -894,6 +896,8 @@ const LivePlayer =
                   .creator
                   .walletAddress,
                 cryptoQuote.requiredUSDT,
+                cryptoQuote.rawUSDT ||
+                  cryptoQuote.requiredUSDT,
                 stream._id,
               );
             if (

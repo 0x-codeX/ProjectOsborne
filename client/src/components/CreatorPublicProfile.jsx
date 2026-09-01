@@ -26,6 +26,9 @@ import {
 import { useWeb3Transfer } from "../hooks/useWeb3Transfer";
 import api from "../utils/api";
 import { io } from "socket.io-client";
+import { getSmartGatewayConfig } from "../utils/paymentGateway";
+
+
 
 const CreatorPublicProfile =
   () => {
@@ -584,35 +587,13 @@ const CreatorPublicProfile =
           paymentMethod ===
           "CARD"
         ) {
-          // --- WEB2 EXECUTION (DYNAMIC FIAT) ---
-          // THE FIX: Gateway strictly requires the native merchant currency (NGN).
-          // Convert using checkoutData, not paymentModalPost
-          const fanRate =
-            exchangeRates[
-              checkoutData
-                .currency
-            ] ||
-            1;
-          const ngnRate =
-            exchangeRates[
-              "NGN"
-            ] ||
-            1500; // Fallback rate safeguard
-
-          // Reverse engineer the USD base price, then convert to NGN
-          const priceInUSD =
-            checkoutData.amount /
-            fanRate;
-          const priceInNGN =
-            priceInUSD *
-            ngnRate;
-
-          // Gateway expects subunits (Kobo)
-          const amountInSubunits =
-            Math.round(
-              priceInNGN *
-                100,
+          const gatewayConfig =
+            getSmartGatewayConfig(
+              checkoutData.amount,
+              checkoutData.currency,
+              exchangeRates,
             );
+
           initializePayment(
             {
               config:
@@ -625,9 +606,9 @@ const CreatorPublicProfile =
                     currentUser?.email ||
                     "fan@nippy.com",
                   amount:
-                    amountInSubunits,
+                    gatewayConfig.amountInSubunits,
                   currency:
-                    "NGN",
+                    gatewayConfig.currency,
                 },
               onSuccess:
                 async (
