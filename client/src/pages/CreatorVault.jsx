@@ -413,6 +413,7 @@ const CreatorVault =
             false,
           );
         }
+      };
 
         const filteredContents =
           contents.filter(
@@ -1197,6 +1198,5 @@ const CreatorVault =
           </div>
         );
       };
-  }
 
 export default CreatorVault;
