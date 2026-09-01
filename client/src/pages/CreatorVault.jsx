@@ -19,6 +19,7 @@ import {
   Plus,
   RefreshCw,
 } from "lucide-react";
+import api from "../utils/api";
 
 // THE FIX: Ironclad Dynamic Icon Renderer
 const DynamicCurrencyIcon =
@@ -192,51 +193,21 @@ const CreatorVault =
           "",
         );
         try {
-          const token =
-            getAuthToken();
-          if (
-            !token
-          ) {
-            navigate(
-              "/auth/login",
-            );
-            return;
-          }
-
+          // api.js automatically attaches the token and routes to your live Render backend
           const response =
-            await fetch(
-              "http://localhost:5000/api/content/vault",
-              {
-                method:
-                  "GET",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
+            await api.get(
+              "/content/vault",
             );
-
-          if (
-            !response.ok
-          ) {
-            const data =
-              await response.json();
-            throw new Error(
-              data.message ||
-                "Failed to fetch vault items.",
-            );
-          }
-
-          const data =
-            await response.json();
           setContents(
-            data,
+            response.data,
           );
         } catch (err) {
           setError(
-            err.message ||
+            err
+              .response
+              ?.data
+              ?.message ||
+              err.message ||
               "Could not load vault contents.",
           );
         } finally {
@@ -352,36 +323,13 @@ const CreatorVault =
         // --- END STRICT MINIMUM PRICE ENGINE ---
 
         try {
-          const token =
-            getAuthToken();
           const response =
-            await fetch(
-              `http://localhost:5000/api/content/${editingPost._id}`,
-              {
-                method:
-                  "PUT",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                body: JSON.stringify(
-                  editFormData,
-                ),
-              },
+            await api.put(
+              `/content/${editingPost._id}`,
+              editFormData,
             );
-
           const data =
-            await response.json();
-
-          if (
-            !response.ok
-          )
-            throw new Error(
-              data.message ||
-                "Failed to update post.",
-            );
+            response.data;
 
           setContents(
             (
@@ -402,7 +350,11 @@ const CreatorVault =
           );
         } catch (err) {
           setError(
-            err.message ||
+            err
+              .response
+              ?.data
+              ?.message ||
+              err.message ||
               "Failed to save changes.",
           );
         } finally {
@@ -427,31 +379,9 @@ const CreatorVault =
         );
 
         try {
-          const token =
-            getAuthToken();
           const response =
-            await fetch(
-              `http://localhost:5000/api/content/${deletingPostId}`,
-              {
-                method:
-                  "DELETE",
-                headers:
-                  {
-                    "Content-Type":
-                      "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
-            );
-
-          const data =
-            await response.json();
-          if (
-            !response.ok
-          )
-            throw new Error(
-              data.message ||
-                "Failed to delete post.",
+            await api.delete(
+              `/content/${deletingPostId}`,
             );
 
           setContents(
@@ -471,7 +401,11 @@ const CreatorVault =
           );
         } catch (err) {
           setError(
-            err.message ||
+            err
+              .response
+              ?.data
+              ?.message ||
+              err.message ||
               "Failed to delete post.",
           );
         } finally {
@@ -479,790 +413,790 @@ const CreatorVault =
             false,
           );
         }
-      };
 
-    const filteredContents =
-      contents.filter(
-        (
-          item,
-        ) => {
-          const matchesSearch =
-            item.title
-              ?.toLowerCase()
-              .includes(
-                searchTerm.toLowerCase(),
-              ) ||
-            item.description
-              ?.toLowerCase()
-              .includes(
-                searchTerm.toLowerCase(),
-              );
-
-          if (
-            !matchesSearch
-          )
-            return false;
-
-          const itemPrice =
-            item.price !==
-            undefined
-              ? item.price
-              : item.priceInUSDT ||
-                0;
-
-          if (
-            filterType ===
-            "ppv"
-          )
-            return (
-              itemPrice >
-              0
-            );
-          if (
-            filterType ===
-            "free"
-          )
-            return (
-              itemPrice ===
-              0
-            );
-          if (
-            filterType ===
-            "nsfw"
-          )
-            return (
-              item.isNsfw ===
-              true
-            );
-          return true;
-        },
-      );
-
-    const activeCurrency =
-      editingPost?.priceCurrency ||
-      defaultCurrency;
-
-    // --- NEW: REAL-TIME PRICE VALIDATION ENGINE ---
-    const getMinPriceRealTime =
-      (
-        currency,
-      ) => {
-        if (
-          currency ===
-          "NGN"
-        )
-          return 500;
-        if (
-          currency ===
-          "GHS"
-        )
-          return 5;
-        return 1;
-      };
-    const minRequiredPrice =
-      getMinPriceRealTime(
-        activeCurrency,
-      );
-    const attemptedPrice =
-      parseFloat(
-        editFormData.price,
-      ) ||
-      0;
-    // Invalid IF they typed a number greater than 0 AND it's less than the minimum
-    const isPriceInvalid =
-      attemptedPrice >
-        0 &&
-      attemptedPrice <
-        minRequiredPrice;
-    // --- END REAL-TIME VALIDATION ---
-
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:px-8 md:py-6 font-sans max-w-7xl mx-auto relative">
-        {/* Top Header Aligned with Creator Dashboard */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-slate-800 pb-4 gap-4">
-          <div className="flex flex-col">
-            <button
-              onClick={() =>
-                navigate(
-                  "/creator/dashboard",
-                )
-              }
-              className="flex items-center text-slate-500 hover:text-[#FF5757] transition-colors mb-3 text-xs font-semibold uppercase tracking-wider w-fit"
-            >
-              <ArrowLeft className="w-4 h-4 mr-1" />{" "}
-              Back
-              to
-              Dashboard
-            </button>
-            <div className="flex items-center gap-3">
-              <h2 className="text-8xl font-bold text-white tracking-tight leading-none mb-1">
-                Vault
-              </h2>
-              <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-mono font-semibold tracking-wider mb-1">
-                {
-                  contents.length
-                }{" "}
-                Items
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 w-full md:w-auto flex-wrap sm:flex-nowrap">
-            <button
-              onClick={() =>
-                navigate(
-                  "/creator/dashboard",
-                )
-              }
-              className="bg-[#FF5757] hover:bg-[#ff3d3d] text-white px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.2)] transition-all cursor-pointer text-sm font-bold w-full sm:w-auto justify-center"
-            >
-              <Plus className="w-4 h-4 text-white" />
-              <span>
-                Upload
-                New
-                Content
-              </span>
-            </button>
-          </div>
-        </header>
-
-        {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-xl flex items-center text-red-500 text-sm">
-            <AlertCircle className="w-5 h-5 mr-3 flex-shrink-0" />
-            <span>
-              {
-                error
-              }
-            </span>
-          </div>
-        )}
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-8 flex flex-col md:flex-row gap-4 items-center justify-between shadow-lg">
-          <div className="relative w-full md:w-80">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search uploads..."
-              value={
-                searchTerm
-              }
-              onChange={(
-                e,
-              ) =>
-                setSearchTerm(
-                  e
-                    .target
-                    .value,
-                )
-              }
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-9 pr-4 text-sm text-white focus:outline-none focus:border-slate-700"
-            />
-          </div>
-
-          <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
-            {[
-              {
-                id: "all",
-                label:
-                  "All Items",
-              },
-              {
-                id: "ppv",
-                label:
-                  "Pay-Per-View",
-              },
-              {
-                id: "free",
-                label:
-                  "Free Content",
-              },
-              {
-                id: "nsfw",
-                label:
-                  "NSFW (18+)",
-              },
-            ].map(
-              (
-                tab,
-              ) => (
-                <button
-                  key={
-                    tab.id
-                  }
-                  onClick={() =>
-                    setFilterType(
-                      tab.id,
-                    )
-                  }
-                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                    filterType ===
-                    tab.id
-                      ? "bg-slate-800 text-white border border-slate-700"
-                      : "text-slate-400 hover:text-white hover:bg-slate-950"
-                  }`}
-                >
-                  {
-                    tab.label
-                  }
-                </button>
-              ),
-            )}
-            <button
-              onClick={
-                fetchVaultContent
-              }
-              title="Refresh Vault"
-              className="p-2 text-slate-400 hover:text-white bg-slate-950 border border-slate-800 rounded-lg transition-colors ml-auto md:ml-2"
-            >
-              <RefreshCw
-                className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`}
-              />
-            </button>
-          </div>
-        </div>
-
-        {isLoading ? (
-          <div className="min-h-[300px] flex items-center justify-center text-slate-500 animate-pulse font-mono text-sm uppercase tracking-wider">
-            Retrieving
-            Vault
-            Items...
-          </div>
-        ) : filteredContents.length ===
-          0 ? (
-          <div className="bg-slate-900/50 border border-slate-800/80 rounded-3xl p-12 text-center max-w-lg mx-auto my-12">
-            <Film className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-            <h3 className="text-lg font-bold text-white mb-1">
-              No
-              Content
-              Found
-            </h3>
-            <p className="text-slate-400 text-sm mb-6">
-              {contents.length ===
-              0
-                ? "You haven't uploaded any media or posts to your Vault yet."
-                : "No items match your active search and filter options."}
-            </p>
-            {contents.length ===
-              0 && (
-              <button
-                onClick={() =>
-                  navigate(
-                    "/creator/dashboard",
-                  )
-                }
-                className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl text-sm transition-colors"
-              >
-                Go
-                to
-                Dashboard
-                Uploader
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredContents.map(
-              (
-                post,
-              ) => {
-                const isVideo =
-                  post.fileType?.includes(
-                    "video",
+        const filteredContents =
+          contents.filter(
+            (
+              item,
+            ) => {
+              const matchesSearch =
+                item.title
+                  ?.toLowerCase()
+                  .includes(
+                    searchTerm.toLowerCase(),
+                  ) ||
+                item.description
+                  ?.toLowerCase()
+                  .includes(
+                    searchTerm.toLowerCase(),
                   );
-                const postPrice =
-                  post.price !==
-                  undefined
-                    ? post.price
-                    : post.priceInUSDT ||
-                      0;
-                const postCurrency =
-                  post.priceCurrency ||
-                  defaultCurrency;
 
+              if (
+                !matchesSearch
+              )
+                return false;
+
+              const itemPrice =
+                item.price !==
+                undefined
+                  ? item.price
+                  : item.priceInUSDT ||
+                    0;
+
+              if (
+                filterType ===
+                "ppv"
+              )
                 return (
-                  <div
-                    key={
-                      post._id
-                    }
-                    className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl hover:border-slate-700 transition-all flex flex-col"
-                  >
-                    <div className="relative aspect-video bg-slate-950 flex items-center justify-center border-b border-slate-800 overflow-hidden group">
-                      {post.previewKey ? (
-                        <img
-                          src={`https://pub-cloudflare.com/${post.previewKey}`}
-                          alt={
-                            post.title
-                          }
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center justify-center text-slate-600">
-                          {isVideo ? (
-                            <Film className="w-10 h-10 mb-2" />
-                          ) : (
-                            <ImageIcon className="w-10 h-10 mb-2" />
-                          )}
-                          <span className="text-xs font-mono uppercase tracking-wider text-slate-500">
-                            {post.fileType ||
-                              "Media File"}
-                          </span>
-                        </div>
-                      )}
-
-                      <div className="absolute top-3 left-3 bg-slate-950/80 backdrop-blur-md border border-slate-700 px-3 py-1 rounded-full text-xs font-mono font-bold text-emerald-400 flex items-center gap-1 shadow-lg">
-                        {postPrice >
-                        0 ? (
-                          <>
-                            <Lock className="w-3 h-3 text-amber-400" />
-                            <span>
-                              {
-                                postPrice
-                              }{" "}
-                              {
-                                postCurrency
-                              }
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <Unlock className="w-3 h-3 text-emerald-400" />
-                            <span>
-                              FREE
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      {post.isNsfw && (
-                        <div className="absolute top-3 right-3 bg-red-500/90 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded shadow">
-                          18+
-                          NSFW
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="p-5 flex-grow flex flex-col justify-between">
-                      <div>
-                        <h3 className="font-bold text-white text-lg mb-1 truncate">
-                          {
-                            post.title
-                          }
-                        </h3>
-                        <p className="text-slate-400 text-sm line-clamp-2 mb-4 leading-relaxed">
-                          {post.description ||
-                            "No description provided."}
-                        </p>
-                      </div>
-                      <div>
-                        <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-800/80 pt-3 mb-4">
-                          <span>
-                            Uploaded:{" "}
-                            {new Date(
-                              post.createdAt,
-                            ).toLocaleDateString()}
-                          </span>
-                          <span
-                            className={`font-semibold ${post.isActive ? "text-emerald-500" : "text-amber-500"}`}
-                          >
-                            {post.isActive
-                              ? "Published"
-                              : "Draft/Hidden"}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() =>
-                              handleOpenEdit(
-                                post,
-                              )
-                            }
-                            className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-medium text-xs flex items-center justify-center transition-colors"
-                          >
-                            <Edit3 className="w-3.5 h-3.5 mr-1.5 text-slate-400" />{" "}
-                            Edit
-                            Details
-                          </button>
-                          <button
-                            onClick={() =>
-                              setDeletingPostId(
-                                post._id,
-                              )
-                            }
-                            className="py-2 px-3 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-500 border border-red-500/20 rounded-xl text-xs transition-colors flex items-center justify-center"
-                            title="Delete Content"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  itemPrice >
+                  0
                 );
-              },
-            )}
-          </div>
-        )}
+              if (
+                filterType ===
+                "free"
+              )
+                return (
+                  itemPrice ===
+                  0
+                );
+              if (
+                filterType ===
+                "nsfw"
+              )
+                return (
+                  item.isNsfw ===
+                  true
+                );
+              return true;
+            },
+          );
 
-        {/* Edit Modal */}
-        {editingPost && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 w-full max-w-lg shadow-2xl relative">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-white flex items-center">
-                  <Edit3 className="w-5 h-5 mr-2 text-amber-500" />{" "}
-                  Edit
-                  Content
-                  Details
-                </h3>
+        const activeCurrency =
+          editingPost?.priceCurrency ||
+          defaultCurrency;
+
+        // --- NEW: REAL-TIME PRICE VALIDATION ENGINE ---
+        const getMinPriceRealTime =
+          (
+            currency,
+          ) => {
+            if (
+              currency ===
+              "NGN"
+            )
+              return 500;
+            if (
+              currency ===
+              "GHS"
+            )
+              return 5;
+            return 1;
+          };
+        const minRequiredPrice =
+          getMinPriceRealTime(
+            activeCurrency,
+          );
+        const attemptedPrice =
+          parseFloat(
+            editFormData.price,
+          ) ||
+          0;
+        // Invalid IF they typed a number greater than 0 AND it's less than the minimum
+        const isPriceInvalid =
+          attemptedPrice >
+            0 &&
+          attemptedPrice <
+            minRequiredPrice;
+        // --- END REAL-TIME VALIDATION ---
+
+        return (
+          <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:px-8 md:py-6 font-sans max-w-7xl mx-auto relative">
+            {/* Top Header Aligned with Creator Dashboard */}
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-slate-800 pb-4 gap-4">
+              <div className="flex flex-col">
                 <button
                   onClick={() =>
-                    setEditingPost(
-                      null,
+                    navigate(
+                      "/creator/dashboard",
                     )
                   }
-                  className="text-slate-400 hover:text-[#FF5757] transition-colors"
+                  className="flex items-center text-slate-500 hover:text-[#FF5757] transition-colors mb-3 text-xs font-semibold uppercase tracking-wider w-fit"
                 >
-                  <X className="w-5 h-5" />
+                  <ArrowLeft className="w-4 h-4 mr-1" />{" "}
+                  Back
+                  to
+                  Dashboard
                 </button>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-8xl font-bold text-white tracking-tight leading-none mb-1">
+                    Vault
+                  </h2>
+                  <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-mono font-semibold tracking-wider mb-1">
+                    {
+                      contents.length
+                    }{" "}
+                    Items
+                  </span>
+                </div>
               </div>
 
-              <form
-                onSubmit={
-                  handleSaveEdit
-                }
-                className="space-y-4"
-              >
-                <div>
-                  <label className="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1 block">
-                    Post
-                    Title
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={
-                      editFormData.title
-                    }
-                    onChange={(
-                      e,
-                    ) =>
-                      setEditFormData(
-                        (
-                          prev,
-                        ) => ({
-                          ...prev,
-                          title:
-                            e
-                              .target
-                              .value,
-                        }),
-                      )
-                    }
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1 block">
-                    Description
-                  </label>
-                  <textarea
-                    rows={
-                      3
-                    }
-                    value={
-                      editFormData.description
-                    }
-                    onChange={(
-                      e,
-                    ) =>
-                      setEditFormData(
-                        (
-                          prev,
-                        ) => ({
-                          ...prev,
-                          description:
-                            e
-                              .target
-                              .value,
-                        }),
-                      )
-                    }
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-amber-500 resize-none"
-                  />
-                </div>
-                <div>
-                  <label
-                    className={`text-xs uppercase tracking-wider font-semibold mb-1 block transition-colors ${
-                      isPriceInvalid
-                        ? "text-red-400"
-                        : "text-slate-400"
-                    }`}
-                  >
-                    Price
-                    in{" "}
-                    {
-                      activeCurrency
-                    }{" "}
-                    (Set
-                    0
-                    for
-                    Free)
-                  </label>
-                  <div className="relative">
-                    <DynamicCurrencyIcon
-                      currency={
-                        activeCurrency
+              <div className="flex items-center gap-3 w-full md:w-auto flex-wrap sm:flex-nowrap">
+                <button
+                  onClick={() =>
+                    navigate(
+                      "/creator/dashboard",
+                    )
+                  }
+                  className="bg-[#FF5757] hover:bg-[#ff3d3d] text-white px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.2)] transition-all cursor-pointer text-sm font-bold w-full sm:w-auto justify-center"
+                >
+                  <Plus className="w-4 h-4 text-white" />
+                  <span>
+                    Upload
+                    New
+                    Content
+                  </span>
+                </button>
+              </div>
+            </header>
+
+            {error && (
+              <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-xl flex items-center text-red-500 text-sm">
+                <AlertCircle className="w-5 h-5 mr-3 flex-shrink-0" />
+                <span>
+                  {
+                    error
+                  }
+                </span>
+              </div>
+            )}
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-8 flex flex-col md:flex-row gap-4 items-center justify-between shadow-lg">
+              <div className="relative w-full md:w-80">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Search uploads..."
+                  value={
+                    searchTerm
+                  }
+                  onChange={(
+                    e,
+                  ) =>
+                    setSearchTerm(
+                      e
+                        .target
+                        .value,
+                    )
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-9 pr-4 text-sm text-white focus:outline-none focus:border-slate-700"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
+                {[
+                  {
+                    id: "all",
+                    label:
+                      "All Items",
+                  },
+                  {
+                    id: "ppv",
+                    label:
+                      "Pay-Per-View",
+                  },
+                  {
+                    id: "free",
+                    label:
+                      "Free Content",
+                  },
+                  {
+                    id: "nsfw",
+                    label:
+                      "NSFW (18+)",
+                  },
+                ].map(
+                  (
+                    tab,
+                  ) => (
+                    <button
+                      key={
+                        tab.id
                       }
-                      className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 transition-colors ${
-                        isPriceInvalid
-                          ? "text-red-500"
-                          : "text-slate-500"
+                      onClick={() =>
+                        setFilterType(
+                          tab.id,
+                        )
+                      }
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                        filterType ===
+                        tab.id
+                          ? "bg-slate-800 text-white border border-slate-700"
+                          : "text-slate-400 hover:text-white hover:bg-slate-950"
                       }`}
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      required
-                      value={
-                        editFormData.price
+                    >
+                      {
+                        tab.label
                       }
-                      onChange={(
-                        e,
-                      ) =>
-                        setEditFormData(
-                          (
-                            prev,
-                          ) => ({
-                            ...prev,
-                            price:
-                              parseFloat(
+                    </button>
+                  ),
+                )}
+                <button
+                  onClick={
+                    fetchVaultContent
+                  }
+                  title="Refresh Vault"
+                  className="p-2 text-slate-400 hover:text-white bg-slate-950 border border-slate-800 rounded-lg transition-colors ml-auto md:ml-2"
+                >
+                  <RefreshCw
+                    className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {isLoading ? (
+              <div className="min-h-[300px] flex items-center justify-center text-slate-500 animate-pulse font-mono text-sm uppercase tracking-wider">
+                Retrieving
+                Vault
+                Items...
+              </div>
+            ) : filteredContents.length ===
+              0 ? (
+              <div className="bg-slate-900/50 border border-slate-800/80 rounded-3xl p-12 text-center max-w-lg mx-auto my-12">
+                <Film className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+                <h3 className="text-lg font-bold text-white mb-1">
+                  No
+                  Content
+                  Found
+                </h3>
+                <p className="text-slate-400 text-sm mb-6">
+                  {contents.length ===
+                  0
+                    ? "You haven't uploaded any media or posts to your Vault yet."
+                    : "No items match your active search and filter options."}
+                </p>
+                {contents.length ===
+                  0 && (
+                  <button
+                    onClick={() =>
+                      navigate(
+                        "/creator/dashboard",
+                      )
+                    }
+                    className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl text-sm transition-colors"
+                  >
+                    Go
+                    to
+                    Dashboard
+                    Uploader
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredContents.map(
+                  (
+                    post,
+                  ) => {
+                    const isVideo =
+                      post.fileType?.includes(
+                        "video",
+                      );
+                    const postPrice =
+                      post.price !==
+                      undefined
+                        ? post.price
+                        : post.priceInUSDT ||
+                          0;
+                    const postCurrency =
+                      post.priceCurrency ||
+                      defaultCurrency;
+
+                    return (
+                      <div
+                        key={
+                          post._id
+                        }
+                        className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl hover:border-slate-700 transition-all flex flex-col"
+                      >
+                        <div className="relative aspect-video bg-slate-950 flex items-center justify-center border-b border-slate-800 overflow-hidden group">
+                          {post.previewKey ? (
+                            <img
+                              src={`https://pub-cloudflare.com/${post.previewKey}`}
+                              alt={
+                                post.title
+                              }
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex flex-col items-center justify-center text-slate-600">
+                              {isVideo ? (
+                                <Film className="w-10 h-10 mb-2" />
+                              ) : (
+                                <ImageIcon className="w-10 h-10 mb-2" />
+                              )}
+                              <span className="text-xs font-mono uppercase tracking-wider text-slate-500">
+                                {post.fileType ||
+                                  "Media File"}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="absolute top-3 left-3 bg-slate-950/80 backdrop-blur-md border border-slate-700 px-3 py-1 rounded-full text-xs font-mono font-bold text-emerald-400 flex items-center gap-1 shadow-lg">
+                            {postPrice >
+                            0 ? (
+                              <>
+                                <Lock className="w-3 h-3 text-amber-400" />
+                                <span>
+                                  {
+                                    postPrice
+                                  }{" "}
+                                  {
+                                    postCurrency
+                                  }
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Unlock className="w-3 h-3 text-emerald-400" />
+                                <span>
+                                  FREE
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          {post.isNsfw && (
+                            <div className="absolute top-3 right-3 bg-red-500/90 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded shadow">
+                              18+
+                              NSFW
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-5 flex-grow flex flex-col justify-between">
+                          <div>
+                            <h3 className="font-bold text-white text-lg mb-1 truncate">
+                              {
+                                post.title
+                              }
+                            </h3>
+                            <p className="text-slate-400 text-sm line-clamp-2 mb-4 leading-relaxed">
+                              {post.description ||
+                                "No description provided."}
+                            </p>
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-800/80 pt-3 mb-4">
+                              <span>
+                                Uploaded:{" "}
+                                {new Date(
+                                  post.createdAt,
+                                ).toLocaleDateString()}
+                              </span>
+                              <span
+                                className={`font-semibold ${post.isActive ? "text-emerald-500" : "text-amber-500"}`}
+                              >
+                                {post.isActive
+                                  ? "Published"
+                                  : "Draft/Hidden"}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() =>
+                                  handleOpenEdit(
+                                    post,
+                                  )
+                                }
+                                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-medium text-xs flex items-center justify-center transition-colors"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 mr-1.5 text-slate-400" />{" "}
+                                Edit
+                                Details
+                              </button>
+                              <button
+                                onClick={() =>
+                                  setDeletingPostId(
+                                    post._id,
+                                  )
+                                }
+                                className="py-2 px-3 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-500 border border-red-500/20 rounded-xl text-xs transition-colors flex items-center justify-center"
+                                title="Delete Content"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  },
+                )}
+              </div>
+            )}
+
+            {/* Edit Modal */}
+            {editingPost && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 w-full max-w-lg shadow-2xl relative">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-xl font-bold text-white flex items-center">
+                      <Edit3 className="w-5 h-5 mr-2 text-amber-500" />{" "}
+                      Edit
+                      Content
+                      Details
+                    </h3>
+                    <button
+                      onClick={() =>
+                        setEditingPost(
+                          null,
+                        )
+                      }
+                      className="text-slate-400 hover:text-[#FF5757] transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={
+                      handleSaveEdit
+                    }
+                    className="space-y-4"
+                  >
+                    <div>
+                      <label className="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1 block">
+                        Post
+                        Title
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={
+                          editFormData.title
+                        }
+                        onChange={(
+                          e,
+                        ) =>
+                          setEditFormData(
+                            (
+                              prev,
+                            ) => ({
+                              ...prev,
+                              title:
                                 e
                                   .target
                                   .value,
-                              ) ||
-                              0,
-                          }),
-                        )
-                      }
-                      className={`w-full bg-slate-950 border rounded-xl py-2.5 pl-9 pr-4 text-white text-sm font-mono focus:outline-none transition-all ${
-                        isPriceInvalid
-                          ? "border-red-500 focus:border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]"
-                          : "border-slate-800 focus:border-amber-500"
-                      }`}
-                    />
-                  </div>
-                  {isPriceInvalid && (
-                    <p className="text-[10px] text-red-400 font-bold mt-1.5 flex items-center gap-1 animate-in slide-in-from-top-1">
-                      <AlertCircle
-                        size={
-                          12
+                            }),
+                          )
                         }
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-amber-500"
                       />
-                      Minimum
-                      price
-                      is{" "}
-                      {
-                        minRequiredPrice
-                      }{" "}
-                      {
-                        activeCurrency
-                      }{" "}
-                      (or
-                      0
-                      for
-                      Free).
-                    </p>
-                  )}
-                </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1 block">
+                        Description
+                      </label>
+                      <textarea
+                        rows={
+                          3
+                        }
+                        value={
+                          editFormData.description
+                        }
+                        onChange={(
+                          e,
+                        ) =>
+                          setEditFormData(
+                            (
+                              prev,
+                            ) => ({
+                              ...prev,
+                              description:
+                                e
+                                  .target
+                                  .value,
+                            }),
+                          )
+                        }
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-amber-500 resize-none"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        className={`text-xs uppercase tracking-wider font-semibold mb-1 block transition-colors ${
+                          isPriceInvalid
+                            ? "text-red-400"
+                            : "text-slate-400"
+                        }`}
+                      >
+                        Price
+                        in{" "}
+                        {
+                          activeCurrency
+                        }{" "}
+                        (Set
+                        0
+                        for
+                        Free)
+                      </label>
+                      <div className="relative">
+                        <DynamicCurrencyIcon
+                          currency={
+                            activeCurrency
+                          }
+                          className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 transition-colors ${
+                            isPriceInvalid
+                              ? "text-red-500"
+                              : "text-slate-500"
+                          }`}
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          required
+                          value={
+                            editFormData.price
+                          }
+                          onChange={(
+                            e,
+                          ) =>
+                            setEditFormData(
+                              (
+                                prev,
+                              ) => ({
+                                ...prev,
+                                price:
+                                  parseFloat(
+                                    e
+                                      .target
+                                      .value,
+                                  ) ||
+                                  0,
+                              }),
+                            )
+                          }
+                          className={`w-full bg-slate-950 border rounded-xl py-2.5 pl-9 pr-4 text-white text-sm font-mono focus:outline-none transition-all ${
+                            isPriceInvalid
+                              ? "border-red-500 focus:border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]"
+                              : "border-slate-800 focus:border-amber-500"
+                          }`}
+                        />
+                      </div>
+                      {isPriceInvalid && (
+                        <p className="text-[10px] text-red-400 font-bold mt-1.5 flex items-center gap-1 animate-in slide-in-from-top-1">
+                          <AlertCircle
+                            size={
+                              12
+                            }
+                          />
+                          Minimum
+                          price
+                          is{" "}
+                          {
+                            minRequiredPrice
+                          }{" "}
+                          {
+                            activeCurrency
+                          }{" "}
+                          (or
+                          0
+                          for
+                          Free).
+                        </p>
+                      )}
+                    </div>
 
-                <div className="pt-2 space-y-3">
-                  <label className="flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={
-                        editFormData.isNsfw
-                      }
-                      onChange={(
-                        e,
-                      ) =>
-                        setEditFormData(
-                          (
-                            prev,
-                          ) => ({
-                            ...prev,
-                            isNsfw:
-                              e
-                                .target
-                                .checked,
-                          }),
+                    <div className="pt-2 space-y-3">
+                      <label className="flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={
+                            editFormData.isNsfw
+                          }
+                          onChange={(
+                            e,
+                          ) =>
+                            setEditFormData(
+                              (
+                                prev,
+                              ) => ({
+                                ...prev,
+                                isNsfw:
+                                  e
+                                    .target
+                                    .checked,
+                              }),
+                            )
+                          }
+                          className="sr-only"
+                        />
+                        <div
+                          className={`w-9 h-5 rounded-full transition-colors relative ${
+                            editFormData.isNsfw
+                              ? "bg-red-500"
+                              : "bg-slate-800"
+                          }`}
+                        >
+                          <div
+                            className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.75 transition-transform ${
+                              editFormData.isNsfw
+                                ? "transform translate-x-4.5"
+                                : "left-0.75"
+                            }`}
+                          ></div>
+                        </div>
+                        <span className="ml-3 text-sm text-slate-300 font-medium">
+                          Flag
+                          as
+                          NSFW
+                          (18+
+                          Content)
+                        </span>
+                      </label>
+                      <label className="flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={
+                            editFormData.isActive
+                          }
+                          onChange={(
+                            e,
+                          ) =>
+                            setEditFormData(
+                              (
+                                prev,
+                              ) => ({
+                                ...prev,
+                                isActive:
+                                  e
+                                    .target
+                                    .checked,
+                              }),
+                            )
+                          }
+                          className="sr-only"
+                        />
+                        <div
+                          className={`w-9 h-5 rounded-full transition-colors relative ${
+                            editFormData.isActive
+                              ? "bg-emerald-500"
+                              : "bg-slate-800"
+                          }`}
+                        >
+                          <div
+                            className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.75 transition-transform ${
+                              editFormData.isActive
+                                ? "transform translate-x-4.5"
+                                : "left-0.75"
+                            }`}
+                          ></div>
+                        </div>
+                        <span className="ml-3 text-sm text-slate-300 font-medium">
+                          Publish
+                          to
+                          Feed
+                          (Active)
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingPost(
+                            null,
+                          )
+                        }
+                        className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium text-sm transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={
+                          isSaving ||
+                          isPriceInvalid
+                        }
+                        className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:bg-slate-700 disabled:text-slate-400"
+                      >
+                        {isSaving
+                          ? "Saving..."
+                          : "Save Changes"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {deletingPostId && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                <div className="bg-slate-900 border border-red-500/30 p-8 rounded-3xl w-full max-w-md shadow-2xl relative text-center">
+                  <div className="w-14 h-14 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+                    <ShieldAlert className="w-7 h-7 text-red-500" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-2">
+                    Delete
+                    Content
+                    Post?
+                  </h3>
+                  <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+                    This
+                    action
+                    is
+                    permanent
+                    and
+                    cannot
+                    be
+                    undone.
+                    The
+                    post
+                    will
+                    be
+                    wiped
+                    from
+                    your
+                    Creator
+                    Vault
+                    and
+                    fan
+                    feeds.
+                  </p>
+                  <div className="flex gap-4">
+                    <button
+                      onClick={() =>
+                        setDeletingPostId(
+                          null,
                         )
                       }
-                      className="sr-only"
-                    />
-                    <div
-                      className={`w-9 h-5 rounded-full transition-colors relative ${
-                        editFormData.isNsfw
-                          ? "bg-red-500"
-                          : "bg-slate-800"
-                      }`}
+                      className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium text-sm transition-colors"
                     >
-                      <div
-                        className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.75 transition-transform ${
-                          editFormData.isNsfw
-                            ? "transform translate-x-4.5"
-                            : "left-0.75"
-                        }`}
-                      ></div>
-                    </div>
-                    <span className="ml-3 text-sm text-slate-300 font-medium">
-                      Flag
-                      as
-                      NSFW
-                      (18+
-                      Content)
-                    </span>
-                  </label>
-                  <label className="flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={
-                        editFormData.isActive
+                      Cancel
+                    </button>
+                    <button
+                      onClick={
+                        handleDeletePost
                       }
-                      onChange={(
-                        e,
-                      ) =>
-                        setEditFormData(
-                          (
-                            prev,
-                          ) => ({
-                            ...prev,
-                            isActive:
-                              e
-                                .target
-                                .checked,
-                          }),
-                        )
+                      disabled={
+                        isDeleting
                       }
-                      className="sr-only"
-                    />
-                    <div
-                      className={`w-9 h-5 rounded-full transition-colors relative ${
-                        editFormData.isActive
-                          ? "bg-emerald-500"
-                          : "bg-slate-800"
-                      }`}
+                      className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold text-sm transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50"
                     >
-                      <div
-                        className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.75 transition-transform ${
-                          editFormData.isActive
-                            ? "transform translate-x-4.5"
-                            : "left-0.75"
-                        }`}
-                      ></div>
-                    </div>
-                    <span className="ml-3 text-sm text-slate-300 font-medium">
-                      Publish
-                      to
-                      Feed
-                      (Active)
-                    </span>
-                  </label>
+                      {isDeleting
+                        ? "Deleting..."
+                        : "Delete Permanently"}
+                    </button>
+                  </div>
                 </div>
-
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEditingPost(
-                        null,
-                      )
-                    }
-                    className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium text-sm transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={
-                      isSaving ||
-                      isPriceInvalid
-                    }
-                    className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:bg-slate-700 disabled:text-slate-400"
-                  >
-                    {isSaving
-                      ? "Saving..."
-                      : "Save Changes"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Delete Confirmation Modal */}
-        {deletingPostId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-slate-900 border border-red-500/30 p-8 rounded-3xl w-full max-w-md shadow-2xl relative text-center">
-              <div className="w-14 h-14 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
-                <ShieldAlert className="w-7 h-7 text-red-500" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">
-                Delete
-                Content
-                Post?
-              </h3>
-              <p className="text-slate-400 text-sm mb-6 leading-relaxed">
-                This
-                action
-                is
-                permanent
-                and
-                cannot
-                be
-                undone.
-                The
-                post
-                will
-                be
-                wiped
-                from
-                your
-                Creator
-                Vault
-                and
-                fan
-                feeds.
-              </p>
-              <div className="flex gap-4">
-                <button
-                  onClick={() =>
-                    setDeletingPostId(
-                      null,
-                    )
-                  }
-                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium text-sm transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={
-                    handleDeletePost
-                  }
-                  disabled={
-                    isDeleting
-                  }
-                  className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold text-sm transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50"
-                >
-                  {isDeleting
-                    ? "Deleting..."
-                    : "Delete Permanently"}
-                </button>
-              </div>
-            </div>
+            )}
           </div>
-        )}
-      </div>
-    );
-  };
+        );
+      };
+  }
 
 export default CreatorVault;

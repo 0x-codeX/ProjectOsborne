@@ -146,7 +146,7 @@ const CreatorLiveStudio =
             "/api",
             "",
           ) ||
-          "http://localhost:5000";
+          "https://nippy-serverside.onrender.com";
         socketRef.current =
           io(
             socketUrl,
