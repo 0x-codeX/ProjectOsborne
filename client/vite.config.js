@@ -38,19 +38,19 @@ export default defineConfig(
                 icons:
                   [
                     {
-                      src: "pwa-192x192.png",
+                      src: "NippyLogo.png",
                       sizes:
                         "192x192",
                       type: "image/png",
                     },
                     {
-                      src: "pwa-512x512.png",
+                      src: "NippyLogo.png",
                       sizes:
                         "512x512",
                       type: "image/png",
                     },
                     {
-                      src: "pwa-512x512.png",
+                      src: "NippyLogo.png",
                       sizes:
                         "512x512",
                       type: "image/png",
@@ -61,6 +61,9 @@ export default defineConfig(
               },
           },
         ),
+        workbox, {
+        maximumFileSizeToCacheInBytes: 4000000 // 4 MB
+      },
       ],
     server:
       {
