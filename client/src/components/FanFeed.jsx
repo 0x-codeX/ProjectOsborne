@@ -254,10 +254,10 @@ const FeedPostItem =
         data-post-id={
           post._id
         }
-        className="feed-post-card mb-10 bg-nippy-obsidian/80 backdrop-blur-md border border-gray-800/60 rounded-2xl overflow-hidden shadow-xl"
+        className="feed-post-card mb-10 bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-2xl overflow-hidden shadow-xl"
       >
         {/* Creator Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
+        <div className="flex items-center justify-between p-4 border-b border-slate-800/50">
           <Link
             to={
               creatorProfileRoute
@@ -274,11 +274,11 @@ const FeedPostItem =
                     .profileImage
                 }
                 alt="Creator"
-                className="w-10 h-10 rounded-full object-cover border border-gray-700 group-hover:border-emerald-500 transition-colors"
+                className="w-10 h-10 rounded-full object-cover border border-slate-700 group-hover:border-emerald-500 transition-colors"
               />
             ) : (
-              <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center border border-gray-600 group-hover:border-emerald-500 transition-colors">
-                <span className="font-bold text-gray-300 group-hover:text-white">
+              <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center border border-slate-600 group-hover:border-emerald-500 transition-colors">
+                <span className="font-bold text-slate-300 group-hover:text-white">
                   {post.creator?.username
                     ?.charAt(
                       0,
@@ -295,7 +295,7 @@ const FeedPostItem =
                   ?.username ||
                   "Unknown"}
               </div>
-              <div className="text-xs text-gray-500">
+              <div className="text-xs text-slate-500">
                 {new Date(
                   post.createdAt,
                 ).toLocaleDateString()}
@@ -350,8 +350,8 @@ const FeedPostItem =
                 post
                   .creator
                   ?.isFollowed
-                  ? "bg-transparent text-gray-400 border-gray-700 hover:border-rose-500 hover:text-rose-500"
-                  : "bg-white text-black border-transparent hover:bg-gray-200"
+                  ? "bg-transparent text-slate-400 border-slate-700 hover:border-rose-500 hover:text-rose-500"
+                  : "bg-white text-black border-transparent hover:bg-slate-200"
               }`}
             >
               {post
@@ -452,7 +452,7 @@ const FeedPostItem =
                   Content
                   Locked
                 </h3>
-                <p className="text-gray-200 text-sm mb-6 font-medium drop-shadow-md text-center max-w-xs">
+                <p className="text-slate-200 text-sm mb-6 font-medium drop-shadow-md text-center max-w-xs">
                   Unlock
                   this
                   content
@@ -484,7 +484,7 @@ const FeedPostItem =
                         },
                       );
                     }}
-                    className="bg-white hover:bg-gray-200 text-black font-bold py-3 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg disabled:opacity-70"
+                    className="bg-white hover:bg-slate-200 text-black font-bold py-3 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg disabled:opacity-70"
                   >
                     {!exchangeRates ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -503,7 +503,7 @@ const FeedPostItem =
                     to={
                       creatorProfileRoute
                     }
-                    className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-gray-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
+                    className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-slate-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
                   >
                     Subscribe
                     to
@@ -521,12 +521,12 @@ const FeedPostItem =
               displayTitle
             }
           </h2>
-          <p className="text-sm text-gray-400 mb-4">
+          <p className="text-sm text-slate-400 mb-4">
             {
               post.description
             }
           </p>
-          <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
+          <div className="flex items-center justify-between border-t border-slate-800/50 pt-4">
             <div className="flex items-center gap-6">
               <button
                 onClick={() =>
@@ -543,10 +543,10 @@ const FeedPostItem =
                   className={`transition-all duration-200 ${
                     post.isLiked
                       ? "text-rose-500 fill-current scale-110"
-                      : "text-gray-400 group-hover:text-rose-500"
+                      : "text-slate-400 group-hover:text-rose-500"
                   }`}
                 />
-                <span className="text-sm text-gray-400 font-medium">
+                <span className="text-sm text-slate-400 font-medium">
                   {post.likesCount ||
                     0}
                 </span>
@@ -566,14 +566,14 @@ const FeedPostItem =
                   size={
                     22
                   }
-                  className="text-gray-400 group-hover:text-blue-400"
+                  className="text-slate-400 group-hover:text-blue-400"
                 />
-                <span className="text-sm text-gray-400 font-medium">
+                <span className="text-sm text-slate-400 font-medium">
                   {post.commentsCount ||
                     0}
                 </span>
               </button>
-              <div className="flex items-center gap-2 text-gray-500">
+              <div className="flex items-center gap-2 text-slate-500">
                 <Eye
                   size={
                     22
@@ -600,7 +600,7 @@ const FeedPostItem =
                 className={
                   post.isBookmarked
                     ? "fill-white text-white"
-                    : "text-gray-400 hover:text-white"
+                    : "text-slate-400 hover:text-white"
                 }
               />
             </button>
@@ -610,8 +610,8 @@ const FeedPostItem =
         {/* Comments Section */}
         {activeCommentPostId ===
           post._id && (
-          <div className="bg-slate-900/80 backdrop-blur-md border-t border-gray-800/60 p-4 animate-in slide-in-from-top-2">
-            <div className="max-h-48 overflow-y-auto mb-4 space-y-3 pr-2 scrollbar-thin scrollbar-thumb-gray-700">
+          <div className="bg-slate-900/80 backdrop-blur-md border-t border-slate-800/60 p-4 animate-in slide-in-from-top-2">
+            <div className="max-h-48 overflow-y-auto mb-4 space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-700">
               {post.comments &&
               post
                 .comments
@@ -634,7 +634,7 @@ const FeedPostItem =
                             .username
                         }
                       </span>
-                      <span className="text-gray-400">
+                      <span className="text-slate-400">
                         {
                           comment.text
                         }
@@ -643,7 +643,7 @@ const FeedPostItem =
                   ),
                 )
               ) : (
-                <p className="text-xs text-gray-500 text-center italic">
+                <p className="text-xs text-slate-500 text-center italic">
                   No
                   comments
                   yet.
@@ -678,7 +678,7 @@ const FeedPostItem =
                     post._id,
                   )
                 }
-                className="w-full bg-black border border-gray-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:outline-none focus:border-emerald-500"
+                className="w-full bg-black border border-slate-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:outline-none focus:border-emerald-500"
               />
               <button
                 onClick={() =>
@@ -1756,7 +1756,7 @@ const FanFeed =
 
         {feed.length ===
         0 ? (
-          <p className="text-center text-gray-500 mt-10">
+          <p className="text-center text-slate-500 mt-10">
             No
             content
             available.
@@ -1853,7 +1853,7 @@ const FanFeed =
                   onClick={
                     closeModal
                   }
-                  className="text-gray-400 hover:text-white transition-colors"
+                  className="text-slate-400 hover:text-white transition-colors"
                   disabled={
                     processingId ===
                     paymentModalPost._id
@@ -1868,7 +1868,7 @@ const FanFeed =
               </div>
 
               <div className="p-6 space-y-4">
-                <p className="text-sm text-gray-400 text-center">
+                <p className="text-sm text-slate-400 text-center">
                   You
                   are
                   unlocking
@@ -1901,7 +1901,7 @@ const FanFeed =
                       paymentMethod ===
                       "CRYPTO"
                         ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
-                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                        : "border-slate-700 text-slate-400 hover:border-slate-500"
                     }`}
                   >
                     <Wallet
@@ -1927,7 +1927,7 @@ const FanFeed =
                       paymentMethod ===
                       "CARD"
                         ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
-                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                        : "border-slate-700 text-slate-400 hover:border-slate-500"
                     }`}
                   >
                     <CreditCard
@@ -1961,7 +1961,7 @@ const FanFeed =
                   "CRYPTO" &&
                   cryptoQuote && (
                     <div className="mt-2 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
-                      <p className="text-sm text-gray-400 mb-1">
+                      <p className="text-sm text-slate-400 mb-1">
                         Total:{" "}
                         <span className="text-white">
                           {paymentModalPost.fanPrice?.toFixed(

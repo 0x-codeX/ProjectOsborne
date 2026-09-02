@@ -11,8 +11,9 @@ import {
   Loader2,
   Globe,
   MapPin,
+  ArrowLeft,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { ethers } from "ethers";
 import api from "../utils/api"
 
@@ -496,7 +497,17 @@ const FanSettings =
 
     return (
       <div className="max-w-2xl mx-auto py-8 px-4">
-        <div className="flex items-center gap-3 mb-8 border-b border-gray-800 pb-4">
+        <div className="flex items-center gap-3 mb-8 border-b border-slate-800 pb-4 mt-4 md:mt-0">
+          <Link
+            to="/fan/profile"
+            className="md:hidden text-slate-400 hover:text-white mr-2 bg-slate-800/50 p-2 rounded-full"
+          >
+            <ArrowLeft
+              size={
+                20
+              }
+            />
+          </Link>
           <ShieldAlert
             size={
               28
@@ -530,7 +541,7 @@ const FanSettings =
           onSubmit={
             handlePreferencesUpdate
           }
-          className="bg-nippy-obsidian border border-slate-800 rounded-2xl p-6 shadow-xl mb-8"
+          className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl mb-8"
         >
           <h2 className="text-white font-bold mb-6">
             General
@@ -539,7 +550,7 @@ const FanSettings =
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
+              <label className="block text-sm font-bold text-slate-400 mb-2 flex items-center gap-2">
                 <MapPin
                   size={
                     16
@@ -557,13 +568,13 @@ const FanSettings =
                 onChange={
                   handleChange
                 }
-                className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
+                className="w-full bg-black border border-slate-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
                 placeholder="e.g. Nigeria"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
+              <label className="block text-sm font-bold text-slate-400 mb-2 flex items-center gap-2">
                 <Globe
                   size={
                     16
@@ -582,7 +593,7 @@ const FanSettings =
                   onChange={
                     handleChange
                   }
-                  className="w-full bg-black border border-gray-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-nippy-coral transition-colors appearance-none font-medium"
+                  className="w-full bg-black border border-slate-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-nippy-coral transition-colors appearance-none font-medium"
                 >
                   <option value="USD">
                     USD
@@ -689,7 +700,7 @@ const FanSettings =
           onSubmit={
             handleSecurityUpdate
           }
-          className="bg-nippy-obsidian border border-red-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden mb-8"
+          className="bg-slate-900 border border-red-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden mb-8"
         >
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-orange-500"></div>
           <h2 className="text-white font-bold mb-4">
@@ -724,7 +735,7 @@ const FanSettings =
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
+              <label className="block text-sm font-bold text-slate-400 mb-2 flex items-center gap-2">
                 <Mail
                   size={
                     16
@@ -743,13 +754,13 @@ const FanSettings =
                 onChange={
                   handleChange
                 }
-                className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
+                className="w-full bg-black border border-slate-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
                 placeholder="New email address"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
+              <label className="block text-sm font-bold text-slate-400 mb-2 flex items-center gap-2">
                 <Lock
                   size={
                     16
@@ -767,7 +778,7 @@ const FanSettings =
                 onChange={
                   handleChange
                 }
-                className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
+                className="w-full bg-black border border-slate-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-nippy-coral transition-colors"
                 placeholder="New password (min 6 characters)"
               />
             </div>
@@ -808,7 +819,7 @@ const FanSettings =
             Web3
             Integration
           </h2>
-          <p className="text-sm text-gray-400 mb-4">
+          <p className="text-sm text-slate-400 mb-4">
             Link
             a
             MetaMask

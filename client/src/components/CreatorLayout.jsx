@@ -244,6 +244,13 @@ const CreatorLayout =
           item.label !==
           "Alerts",
       );
+      const isProfileRoute =
+        location.pathname.includes(
+          "/creator/profile",
+        ) ||
+        location.pathname.includes(
+          "/creator/settings",
+        );
 
     const handleLogout =
       () => {
@@ -576,6 +583,7 @@ const CreatorLayout =
                     {
                       uploadState.progress
                     }
+
                     %
                   </span>
                 </div>
@@ -608,7 +616,7 @@ const CreatorLayout =
               !isSupportOpen,
             )
           }
-          className={`fixed z-[100] bottom-24 right-4 md:bottom-8 md:right-8 text-white p-3.5 sm:p-4 rounded-full shadow-[0_4px_20px_rgba(255,87,87,0.4)] transition-all flex items-center justify-center group ${
+          className={`fixed z-[100] bottom-24 right-4 md:bottom-8 md:right-8 text-white p-3.5 sm:p-4 rounded-full shadow-[0_4px_20px_rgba(255,87,87,0.4)] transition-all items-center justify-center group ${!isProfileRoute ? "hidden md:flex" : "flex"} ${
             isSupportOpen
               ? "bg-slate-700 hover:bg-slate-600 scale-100"
               : "bg-[#FF5757] hover:bg-rose-600 hover:scale-110"

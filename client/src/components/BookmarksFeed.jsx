@@ -56,13 +56,13 @@ const FeedPostItem =
       isRatesLoading;
 
     return (
-      <div className="mb-10 bg-nippy-obsidian border border-gray-800 rounded-2xl overflow-hidden shadow-xl">
-        <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
+      <div className="mb-10 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+        <div className="flex items-center justify-between p-4 border-b border-slate-800/50">
           <Link
             to={`/creator/${post.creator?._id}`}
             className="flex items-center gap-3 group cursor-pointer"
           >
-            <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center overflow-hidden border border-gray-600 group-hover:border-emerald-500 transition-colors">
+            <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center overflow-hidden border border-slate-600 group-hover:border-emerald-500 transition-colors">
               {post
                 .creator
                 ?.profileImage ? (
@@ -76,7 +76,7 @@ const FeedPostItem =
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <span className="font-bold text-gray-300 group-hover:text-white">
+                <span className="font-bold text-slate-300 group-hover:text-white">
                   {post.creator?.username
                     ?.charAt(
                       0,
@@ -93,7 +93,7 @@ const FeedPostItem =
                   ?.username ||
                   "Unknown"}
               </div>
-              <div className="text-xs text-gray-500">
+              <div className="text-xs text-slate-500">
                 {new Date(
                   post.createdAt,
                 ).toLocaleDateString()}
@@ -158,8 +158,8 @@ const FeedPostItem =
                 post
                   .creator
                   ?.isFollowed
-                  ? "bg-transparent text-gray-400 border-gray-700 hover:border-rose-500 hover:text-rose-500"
-                  : "bg-white text-black border-transparent hover:bg-gray-200"
+                  ? "bg-transparent text-slate-400 border-slate-700 hover:border-rose-500 hover:text-rose-500"
+                  : "bg-white text-black border-transparent hover:bg-slate-200"
               }`}
             >
               {post
@@ -261,7 +261,7 @@ const FeedPostItem =
                   Content
                   Locked
                 </h3>
-                <p className="text-gray-200 text-sm mb-6 font-medium drop-shadow-md text-center max-w-xs">
+                <p className="text-slate-200 text-sm mb-6 font-medium drop-shadow-md text-center max-w-xs">
                   Unlock
                   this
                   content
@@ -284,7 +284,7 @@ const FeedPostItem =
                     disabled={
                       priceLoading
                     }
-                    className="bg-white hover:bg-gray-200 text-black font-bold py-3 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg disabled:opacity-70 disabled:cursor-not-allowed"
+                    className="bg-white hover:bg-slate-200 text-black font-bold py-3 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg disabled:opacity-70 disabled:cursor-not-allowed"
                   >
                     {priceLoading ? (
                       <Loader2 className="w-5 h-5 animate-spin text-slate-800" />
@@ -302,7 +302,7 @@ const FeedPostItem =
 
                   <Link
                     to={`/creator/${post.creator?._id}`}
-                    className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-gray-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
+                    className="bg-black/60 hover:bg-black/80 text-white font-bold py-3 px-6 rounded-full border border-slate-600 flex items-center justify-center transition-colors shadow-lg backdrop-blur-md"
                   >
                     Subscribe
                     to
@@ -319,7 +319,7 @@ const FeedPostItem =
               post.title
             }
           </h2>
-          <p className="text-sm text-gray-400 mb-4">
+          <p className="text-sm text-slate-400 mb-4">
             {
               post.description
             }
@@ -342,7 +342,7 @@ const FeedPostItem =
               </div>
             )}
 
-          <div className="flex items-center justify-between border-t border-gray-800/50 pt-4">
+          <div className="flex items-center justify-between border-t border-slate-800/50 pt-4">
             <div className="flex items-center gap-6">
               <button
                 onClick={() =>
@@ -359,10 +359,10 @@ const FeedPostItem =
                   className={`transition-all ${
                     post.isLiked
                       ? "text-rose-500 fill-current scale-110"
-                      : "text-gray-400 group-hover:text-rose-500"
+                      : "text-slate-400 group-hover:text-rose-500"
                   }`}
                 />
-                <span className="text-sm text-gray-400 font-medium">
+                <span className="text-sm text-slate-400 font-medium">
                   {post.likesCount ||
                     0}
                 </span>
@@ -382,14 +382,14 @@ const FeedPostItem =
                   size={
                     22
                   }
-                  className="text-gray-400 group-hover:text-blue-400"
+                  className="text-slate-400 group-hover:text-blue-400"
                 />
-                <span className="text-sm text-gray-400 font-medium">
+                <span className="text-sm text-slate-400 font-medium">
                   {post.commentsCount ||
                     0}
                 </span>
               </button>
-              <div className="flex items-center gap-2 text-gray-500">
+              <div className="flex items-center gap-2 text-slate-500">
                 <Eye
                   size={
                     22
@@ -420,7 +420,7 @@ const FeedPostItem =
 
         {activeCommentPostId ===
           post._id && (
-          <div className="bg-slate-900 border-t border-gray-800 p-4 animate-in slide-in-from-top-2">
+          <div className="bg-slate-900 border-t border-slate-800 p-4 animate-in slide-in-from-top-2">
             <div className="max-h-48 overflow-y-auto mb-4 space-y-3 scrollbar-thin">
               {post.comments &&
               post
@@ -444,7 +444,7 @@ const FeedPostItem =
                             .username
                         }
                       </span>
-                      <span className="text-gray-400">
+                      <span className="text-slate-400">
                         {
                           comment.text
                         }
@@ -453,7 +453,7 @@ const FeedPostItem =
                   ),
                 )
               ) : (
-                <p className="text-xs text-gray-500 text-center italic">
+                <p className="text-xs text-slate-500 text-center italic">
                   No
                   comments
                   yet.
@@ -485,7 +485,7 @@ const FeedPostItem =
                   )
                 }
                 placeholder="Write a comment..."
-                className="w-full bg-black border border-gray-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:border-emerald-500 outline-none"
+                className="w-full bg-black border border-slate-700 text-white text-sm rounded-full py-2 pl-4 pr-12 focus:border-emerald-500 outline-none"
               />
               <button
                 onClick={() =>
@@ -1381,7 +1381,7 @@ const BookmarksFeed =
         <div className="flex justify-center items-center h-64 text-emerald-500 animate-pulse font-medium">
           <Loader2 className="w-6 h-6 mr-2 animate-spin" />{" "}
           Loading
-          vault...
+          Bookmarks...
         </div>
       );
     }
@@ -1415,7 +1415,7 @@ const BookmarksFeed =
 
     return (
       <div className="max-w-2xl mx-auto py-8 px-4">
-        <div className="flex items-center gap-3 mb-8 border-b border-gray-800 pb-4">
+        {/* <div className="flex items-center gap-3 mb-8 border-b border-slate-800 pb-4">
           <Bookmark
             size={
               28
@@ -1425,9 +1425,9 @@ const BookmarksFeed =
           <h1 className="text-2xl font-bold text-slate-200">
             Your
             Saved
-            Vault
+            Bookmarks
           </h1>
-        </div>
+        </div> */}
 
         {feed.length ===
         0 ? (
@@ -1436,15 +1436,12 @@ const BookmarksFeed =
               size={
                 64
               }
-              className="text-gray-700 mb-4"
+              className="text-slate-700 mb-4"
             />
-            <p className="text-gray-400 font-medium text-lg">
-              Your
-              vault
-              is
-              empty.
+            <p className="text-slate-400 font-medium text-lg">
+              Nothing Here Yet.
             </p>
-            <p className="text-gray-500 text-sm mt-2">
+            <p className="text-slate-500 text-sm mt-2">
               Content
               you
               bookmark
@@ -1564,7 +1561,7 @@ const BookmarksFeed =
                   onClick={
                     closeModal
                   }
-                  className="text-gray-400 hover:text-white transition-colors"
+                  className="text-slate-400 hover:text-white transition-colors"
                   disabled={
                     processingId ===
                     paymentModalPost._id
@@ -1578,7 +1575,7 @@ const BookmarksFeed =
                 </button>
               </div>
               <div className="p-6 space-y-4">
-                <p className="text-sm text-gray-400 text-center leading-relaxed">
+                <p className="text-sm text-slate-400 text-center leading-relaxed">
                   You
                   are
                   unlocking
@@ -1610,7 +1607,7 @@ const BookmarksFeed =
                       paymentMethod ===
                       "CRYPTO"
                         ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
-                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                        : "border-slate-700 text-slate-400 hover:border-slate-500"
                     }`}
                   >
                     <Wallet
@@ -1636,7 +1633,7 @@ const BookmarksFeed =
                       paymentMethod ===
                       "CARD"
                         ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
-                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                        : "border-slate-700 text-slate-400 hover:border-slate-500"
                     }`}
                   >
                     <CreditCard
@@ -1671,7 +1668,7 @@ const BookmarksFeed =
                   "CRYPTO" &&
                   cryptoQuote && (
                     <div className="mt-2 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
-                      <p className="text-sm text-gray-400 mb-1">
+                      <p className="text-sm text-slate-400 mb-1">
                         Total:{" "}
                         <span className="text-white">
                           {paymentModalPost.fanPrice.toFixed(

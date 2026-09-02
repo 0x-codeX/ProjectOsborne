@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Settings,
   LayoutDashboard,
+  LogOut,
 } from "lucide-react";
 import api from "../utils/api";
 
@@ -81,6 +82,21 @@ const FanProfile =
         }
       };
 
+    const handleLogout =
+        () => {
+          localStorage.removeItem(
+            "nippy_token",
+          );
+          localStorage.removeItem(
+            "token",
+          );
+          localStorage.removeItem(
+            "nippy_user",
+          );
+          window.location.href =
+            "/auth/login";
+        };
+
     const handleSave =
       async (
         e,
@@ -148,10 +164,10 @@ const FanProfile =
 
     return (
       <div className="w-full max-w-2xl mx-auto pb-20 md:pb-0">
-        <div className="md:hidden flex justify-between items-center p-4 bg-nippy-obsidian/90 backdrop-blur-md sticky top-0 z-40 border-b border-gray-800">
+        <div className="md:hidden flex justify-between items-center p-4 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40 border-b border-slate-800">
           <Link
             to="/fan/dashboard"
-            className="p-2 text-gray-400 hover:text-white transition-colors bg-gray-800/50 hover:bg-gray-700 rounded-full"
+            className="p-2 text-slate-400 hover:text-white transition-colors bg-slate-800/50 hover:bg-slate-700 rounded-full"
           >
             <LayoutDashboard
               size={
@@ -164,7 +180,7 @@ const FanProfile =
           </h1>
           <Link
             to="/fan/settings"
-            className="p-2 text-gray-400 hover:text-white transition-colors bg-gray-800/50 hover:bg-gray-700 rounded-full"
+            className="p-2 text-slate-400 hover:text-white transition-colors bg-slate-800/50 hover:bg-slate-700 rounded-full"
           >
             <Settings
               size={
@@ -177,7 +193,7 @@ const FanProfile =
         <div className="hidden md:flex justify-end pt-6 px-4">
           <Link
             to="/fan/settings"
-            className="flex items-center gap-2 p-2 px-4 text-sm font-medium text-gray-400 hover:text-white transition-colors bg-gray-800/50 hover:bg-gray-700 rounded-full"
+            className="flex items-center gap-2 p-2 px-4 text-sm font-medium text-slate-400 hover:text-white transition-colors bg-slate-800/50 hover:bg-slate-700 rounded-full"
           >
             <Settings
               size={
@@ -189,7 +205,7 @@ const FanProfile =
         </div>
 
         <div className="px-4 py-4 md:py-2">
-          <div className="hidden md:flex items-center gap-3 mb-8 border-b border-gray-800 pb-4">
+          <div className="hidden md:flex items-center gap-3 mb-8 border-b border-slate-800 pb-4">
             <User
               size={
                 28
@@ -202,14 +218,14 @@ const FanProfile =
             </h1>
           </div>
 
-          <div className="bg-nippy-obsidian border border-gray-800 rounded-2xl p-6 shadow-xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
             <div className="flex flex-col items-center mb-8">
               {/* Wrap the avatar in a label to trigger the file input */}
               <label
                 htmlFor="avatar-upload"
                 className="relative group cursor-pointer"
               >
-                <div className="w-24 h-24 bg-gray-800 rounded-full flex items-center justify-center border-2 border-gray-700 overflow-hidden shadow-lg transition-transform group-hover:scale-105">
+                <div className="w-24 h-24 bg-slate-800 rounded-full flex items-center justify-center border-2 border-slate-700 overflow-hidden shadow-lg transition-transform group-hover:scale-105">
                   {profile.profileImage ? (
                     <img
                       src={
@@ -219,7 +235,7 @@ const FanProfile =
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <span className="text-3xl font-bold text-gray-400">
+                    <span className="text-3xl font-bold text-slate-400">
                       {profile.username
                         ?.charAt(
                           0,
@@ -357,7 +373,7 @@ const FanProfile =
                 }}
               />
 
-              <p className="text-sm text-gray-500 mt-3 font-medium">
+              <p className="text-sm text-slate-500 mt-3 font-medium">
                 Click
                 to
                 update
@@ -372,7 +388,7 @@ const FanProfile =
               className="space-y-6"
             >
               <div>
-                <label className="block text-sm font-bold text-gray-400 mb-2">
+                <label className="block text-sm font-bold text-slate-400 mb-2">
                   Username
                 </label>
                 <input
@@ -394,15 +410,15 @@ const FanProfile =
                       },
                     )
                   }
-                  className="w-full bg-black border border-gray-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 transition-colors"
+                  className="w-full bg-black border border-slate-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 transition-colors"
                   placeholder="e.g., Web3Whale"
                   required
                 />
               </div>
 
-              <div className="bg-black/50 border border-gray-800 rounded-xl p-4 flex items-center justify-between">
+              <div className="bg-black/50 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
                 <div>
-                  <label className="block text-sm font-bold text-gray-400 mb-1 flex items-center gap-2">
+                  <label className="block text-sm font-bold text-slate-400 mb-1 flex items-center gap-2">
                     <Wallet
                       size={
                         16
@@ -430,12 +446,12 @@ const FanProfile =
                 )}
               </div>
 
-              <p className="text-xs text-gray-500 flex items-center gap-2 bg-gray-900/50 p-3 rounded-lg">
+              <p className="text-xs text-slate-500 flex items-center gap-2 bg-slate-900/50 p-3 rounded-lg">
                 <ShieldCheck
                   size={
                     16
                   }
-                  className="text-gray-400"
+                  className="text-slate-400"
                 />
                 To
                 change
@@ -476,6 +492,22 @@ const FanProfile =
                 {saving
                   ? "Saving..."
                   : "Save Profile"}
+              </button>
+
+              <button
+                type="button"
+                onClick={
+                  handleLogout
+                }
+                className="md:hidden w-full mt-4 bg-transparent border border-red-500/50 text-red-500 font-bold py-3 rounded-xl hover:bg-red-500/10 transition-all flex justify-center items-center gap-2"
+              >
+                <LogOut
+                  size={
+                    20
+                  }
+                />
+                Exit
+                Account
               </button>
 
               {successMessage && (

@@ -345,6 +345,14 @@ const FanLayout =
         },
       ];
 
+      const isProfileRoute =
+        location.pathname.includes(
+          "/fan/profile",
+        ) ||
+        location.pathname.includes(
+          "/fan/settings",
+        );
+
     const handleLogout =
       () => {
         localStorage.removeItem(
@@ -366,12 +374,12 @@ const FanLayout =
               landingBackground
             }
             alt="Creator Background"
-            className="w-full h-full object-cover grayscale-[50%] blur-2xl scale-125 opacity-40"
+            className="w-full h-full object-cover grayscale-[50%] blur-2xl scale-125 opacity-30"
           />
-          <div className="absolute inset-0 bg-nippy-onyx/95"></div>
+          <div className="absolute inset-0 bg-slate-950/95"></div>
         </div>
 
-        <header className="hidden md:flex justify-between items-center py-4 px-10 border-b border-gray-800 bg-nippy-obsidian/90 backdrop-blur-md sticky top-0 z-50">
+        <header className="hidden md:flex justify-between items-center py-4 px-10 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-50">
           <div
             className="flex items-center cursor-pointer group"
             onClick={() =>
@@ -427,8 +435,8 @@ const FanLayout =
                         }
                         className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
                           isActive
-                            ? "bg-gray-800 text-emerald-500 font-semibold"
-                            : "text-gray-400 hover:text-white hover:bg-gray-800/50"
+                            ? "bg-slate-800 text-emerald-500 font-bold shadow-lg"
+                            : "text-slate-400 hover:text-white hover:bg-slate-800/50"
                         }`}
                       >
                         <Icon
@@ -443,10 +451,10 @@ const FanLayout =
                         </span>
                       </Link>
 
-                      <div className="absolute top-full right-0 mt-2 w-40 bg-nippy-obsidian border border-gray-800 rounded-xl shadow-xl opacity-0 group-hover:opacity-100 transition-opacity invisible group-hover:visible z-50 overflow-hidden">
+                      <div className="absolute top-full right-0 mt-2 w-40 bg-slate-900 border border-slate-800 rounded-xl shadow-xl opacity-0 group-hover:opacity-100 transition-opacity invisible group-hover:visible z-50 overflow-hidden">
                         <Link
                           to="/fan/settings"
-                          className="flex items-center px-4 py-3 text-sm text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+                          className="flex items-center px-4 py-3 text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
                         >
                           <Settings
                             size={
@@ -471,8 +479,8 @@ const FanLayout =
                     }
                     className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
                       isActive
-                        ? "bg-gray-800 text-emerald-500 font-semibold"
-                        : "text-gray-400 hover:text-white hover:bg-gray-800/50"
+                        ? "bg-slate-800 text-emerald-500 font-semibold"
+                        : "text-slate-400 hover:text-white hover:bg-slate-800/50"
                     }`}
                   >
                     <div className="relative">
@@ -487,7 +495,7 @@ const FanLayout =
                         "Messages" &&
                         unreadData.creatorsCount >
                           0 && (
-                          <span className="absolute -top-1.5 -right-2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-nippy-obsidian shadow-sm">
+                          <span className="absolute -top-1.5 -right-2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-slate-900 shadow-sm">
                             {unreadData.creatorsCount >
                             1 ? (
                               <>
@@ -511,14 +519,14 @@ const FanLayout =
                         "Notifications" &&
                       activeLiveStreams >
                         0 ? (
-                        <span className="absolute -top-1.5 -right-3 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-nippy-obsidian shadow-sm animate-pulse tracking-wide">
+                        <span className="absolute -top-1.5 -right-3 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-slate-900 shadow-sm animate-pulse tracking-wide">
                           LIVE
                         </span>
                       ) : item.label ===
                           "Notifications" &&
                         unreadNotifs >
                           0 ? (
-                        <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-nippy-obsidian shadow-sm shadow-red-500/50"></span>
+                        <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-slate-900 shadow-sm shadow-red-500/50"></span>
                       ) : null}
                     </div>
                     <span className="text-sm">
@@ -536,7 +544,7 @@ const FanLayout =
             onClick={
               handleLogout
             }
-            className="flex items-center gap-2 px-4 py-2 text-gray-400 hover:text-red-400 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-slate-400 hover:text-red-400 transition-colors"
           >
             <LogOut
               size={
@@ -560,7 +568,7 @@ const FanLayout =
               !isSupportOpen,
             )
           }
-          className={`fixed z-[100] bottom-24 right-4 md:bottom-8 md:right-8 text-white p-3.5 sm:p-4 rounded-full shadow-[0_4px_20px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center group ${
+          className={`fixed z-[100] bottom-24 right-4 md:bottom-8 md:right-8 text-white p-3.5 sm:p-4 rounded-full shadow-[0_4px_20px_rgba(16,185,129,0.4)] transition-all items-center justify-center group ${!isProfileRoute ? "hidden md:flex" : "flex"} ${
             isSupportOpen
               ? "bg-slate-700 hover:bg-slate-600 scale-100"
               : "bg-emerald-500 hover:bg-emerald-600 hover:scale-110"
@@ -788,7 +796,7 @@ const FanLayout =
           </div>
         )}
 
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-nippy-obsidian/95 backdrop-blur-md border-t border-gray-800 z-50 flex justify-around items-center py-3 px-2 pb-safe">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 z-50 flex justify-around items-center py-2 px-2 pb-safe shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.5)]">
           {navItems
             .filter(
               (
@@ -815,16 +823,18 @@ const FanLayout =
                     to={
                       item.path
                     }
-                    className={`flex flex-col items-center p-2 rounded-xl transition-all ${
+                    className={`flex flex-col items-center p-2 rounded-xl transition-all w-16 ${
                       isActive
                         ? "text-emerald-500"
-                        : "text-gray-500 hover:text-gray-300"
+                        : "text-slate-500 hover:text-slate-300"
                     }`}
                   >
-                    <div className="relative">
+                    <div
+                      className={`relative p-1.5 rounded-lg transition-colors ${isActive ? "bg-emerald-500/10" : "bg-transparent"}`}
+                    >
                       <Icon
                         size={
-                          24
+                          22
                         }
                         className={
                           isActive
@@ -838,7 +848,7 @@ const FanLayout =
                         "Messages" &&
                         unreadData.creatorsCount >
                           0 && (
-                          <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-nippy-obsidian shadow-sm shadow-black">
+                          <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-slate-900 shadow-sm shadow-black">
                             {unreadData.creatorsCount >
                             1 ? (
                               <>
@@ -862,17 +872,17 @@ const FanLayout =
                         "Notifications" &&
                       activeLiveStreams >
                         0 ? (
-                        <span className="absolute -top-1 -right-3 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-nippy-obsidian shadow-sm animate-pulse tracking-wide">
+                        <span className="absolute -top-1 -right-3 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-slate-900 shadow-sm animate-pulse tracking-wide">
                           LIVE
                         </span>
                       ) : item.label ===
                           "Notifications" &&
                         unreadNotifs >
                           0 ? (
-                        <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border border-nippy-obsidian shadow-sm shadow-red-500/50"></span>
+                        <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border border-slate-900 shadow-sm shadow-red-500/50"></span>
                       ) : null}
                     </div>
-                    <span className="text-[10px] mt-1 font-medium">
+                    <span className="text-[10px] mt-1 font-bold tracking-wide">
                       {
                         item.label
                       }
