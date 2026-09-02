@@ -1624,7 +1624,7 @@ const LivePlayer =
                     </p>
                   ) : cryptoQuote ? (
                     <>
-                      <p className="text-sm text-gray-400 mb-1">
+                      <p className="text-sm text-slate-400 mb-1">
                         Converted
                         Value
                       </p>

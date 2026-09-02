@@ -2,7 +2,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import {
   Wallet,
   ShieldCheck,
@@ -98,13 +98,13 @@ const PayoutQueue =
       adminUser.role ===
       "MODERATE_ADMIN";
 
-    const getAxiosConfig =
-      () => ({
-        headers:
-          {
-            Authorization: `Bearer ${localStorage.getItem("nippy_admin_token")}`,
-          },
-      });
+    // const getAxiosConfig =
+    //   () => ({
+    //     headers:
+    //       {
+    //         Authorization: `Bearer ${localStorage.getItem("nippy_admin_token")}`,
+    //       },
+    //   });
 
     // --- LIFECYCLE HOOKS ---
     useEffect(() => {
@@ -132,10 +132,7 @@ const PayoutQueue =
       async () => {
         try {
           const res =
-            await axios.get(
-              `/api/admin/withdrawals?status=${filter}`,
-              getAxiosConfig(),
-            );
+            await api.get(`/admin/withdrawals?status=${filter}`);
           if (
             Array.isArray(
               res.data,
@@ -172,15 +169,14 @@ const PayoutQueue =
           "loading",
         );
         try {
-          await axios.post(
-            "/api/admin/withdrawals/action",
+          await api.post(
+            "/admin/withdrawals/action",
             {
               withdrawalId:
                 selectedPayout._id,
               action:
                 actionType,
-            },
-            getAxiosConfig(),
+            }
           );
           setPayouts(
             (
@@ -215,9 +211,8 @@ const PayoutQueue =
         try {
           // Pointing to your backend URL (adjust if hosted elsewhere)
           const res =
-            await axios.get(
-              "http://localhost:5000/api/admin/clearing/pending",
-              getAxiosConfig(),
+            await api.get(
+              "/admin/clearing/pending",
             );
           setPendingClearings(
             res.data ||
@@ -246,8 +241,8 @@ const PayoutQueue =
             isGodAdmin
               ? "/clearing/instant"
               : "/clearing/approve";
-          await axios.post(
-            `http://localhost:5000/api/admin${endpoint}`,
+          await api.post(
+            `/admin${endpoint}`,
             {
               requestId:
                 selectedClearing._id,
@@ -262,8 +257,7 @@ const PayoutQueue =
               direction:
                 selectedClearing.direction,
               depositConfirmed: true,
-            },
-            getAxiosConfig(),
+            }
           );
           setDepositConfirmed(
             false,
@@ -296,9 +290,8 @@ const PayoutQueue =
         );
         try {
           const res =
-            await axios.get(
-              "http://localhost:5000/api/admin/treasury/force-audit",
-              getAxiosConfig(),
+            await api.get(
+              "/admin/treasury/force-audit",
             );
           alert(
             `Audit Result: ${res.data.message}`,
@@ -341,9 +334,8 @@ const PayoutQueue =
         );
         try {
           const res =
-            await axios.get(
-              "http://localhost:5000/api/admin/treasury/force-fiat-batch",
-              getAxiosConfig(),
+            await api.get(
+              "/admin/treasury/force-fiat-batch",
             );
           alert(
             `Batch Result: ${res.data.message}`,

@@ -151,14 +151,12 @@ const FanInbox =
       };
 
     return (
-      <div className="w-full max-w-3xl mx-auto flex flex-col h-full min-h-screen bg-nippy-onyx">
-        <div className="sticky top-0 z-40 bg-nippy-obsidian/95 backdrop-blur-md border-b border-gray-800 p-4 md:pt-6">
-          <h1 className="text-2xl font-bold text-slate-200 mb-4">
-            Messages
-          </h1>
+      <div className="w-full max-w-3xl mx-auto flex flex-col h-full min-h-screen bg-slate-950">
+        <div className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 p-4 md:pt-6">
+          
           <div className="relative w-full">
             <Search
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500"
+              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500"
               size={
                 18
               }
@@ -178,7 +176,7 @@ const FanInbox =
                     .value,
                 )
               }
-              className="w-full bg-gray-900 border border-gray-700 text-white rounded-xl py-2.5 pl-10 pr-4 focus:outline-none focus:border-emerald-500 transition-colors text-sm"
+              className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl py-2.5 pl-10 pr-4 focus:outline-none focus:border-emerald-500 transition-colors text-sm"
             />
           </div>
         </div>
@@ -190,7 +188,7 @@ const FanInbox =
             </div>
           ) : filteredChats.length ===
             0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-500">
+            <div className="flex flex-col items-center justify-center h-64 text-slate-500">
               <p>
                 No
                 messages
@@ -198,7 +196,7 @@ const FanInbox =
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-gray-800/50">
+            <div className="divide-y divide-slate-800/50">
               {filteredChats.map(
                 (
                   chat,
@@ -212,7 +210,7 @@ const FanInbox =
                         `/messages/${chat._id}`,
                       )
                     }
-                    className="flex items-center gap-4 p-4 hover:bg-gray-800/30 transition-colors cursor-pointer"
+                    className="flex items-center gap-4 p-4 hover:bg-slate-800/30 transition-colors cursor-pointer"
                   >
                     <div className="relative flex-shrink-0">
                       <img
@@ -227,7 +225,7 @@ const FanInbox =
                             .creator
                             ?.username
                         }
-                        className="w-14 h-14 rounded-full object-cover border border-gray-700"
+                        className="w-14 h-14 rounded-full object-cover border border-slate-700"
                       />
                     </div>
 
@@ -266,7 +264,7 @@ const FanInbox =
                             chat.unreadCount >
                             0
                               ? "text-slate-200 font-semibold"
-                              : "text-gray-500"
+                              : "text-slate-500"
                           }`}
                         >
                           {chat
@@ -284,7 +282,7 @@ const FanInbox =
                           chat.unreadCount >
                           0
                             ? "text-emerald-500 font-bold"
-                            : "text-gray-500"
+                            : "text-slate-500"
                         }`}
                       >
                         {formatTime(
@@ -305,7 +303,7 @@ const FanInbox =
                           size={
                             18
                           }
-                          className="text-gray-600 flex-shrink-0"
+                          className="text-slate-600 flex-shrink-0"
                         />
                       )}
                     </div>

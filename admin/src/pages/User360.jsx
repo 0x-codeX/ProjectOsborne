@@ -2,7 +2,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import {
   Search,
   User as UserIcon,
@@ -198,10 +198,6 @@ const User360 =
         "",
       );
 
-    const token =
-      localStorage.getItem(
-        "nippy_admin_token",
-      );
     const adminUser =
       JSON.parse(
         localStorage.getItem(
@@ -224,13 +220,6 @@ const User360 =
       adminUser.role ===
       "MODERATE_ADMIN";
 
-    const axiosConfig =
-      {
-        headers:
-          {
-            Authorization: `Bearer ${token}`,
-          },
-      };
 
     // --- NEW: Load Pending Approvals for Super Admins ---
     useEffect(() => {
@@ -248,9 +237,8 @@ const User360 =
             true,
           );
           const res =
-            await axios.get(
-              "http://localhost:5000/api/admin/approvals/pending",
-              axiosConfig,
+            await api.get(
+              "/admin/approvals/pending",
             );
           const approvals =
             res
@@ -314,9 +302,8 @@ const User360 =
 
         try {
           const res =
-            await axios.get(
-              `http://localhost:5000/api/admin/users/search?query=${searchQuery}`,
-              axiosConfig,
+            await api.get(
+              `/admin/users/search?query=${searchQuery}`,
             );
           setSearchResults(
             {
@@ -385,10 +372,7 @@ const User360 =
         );
         try {
           const res =
-            await axios.get(
-              `http://localhost:5000/api/admin/users/360/${userId}`,
-              axiosConfig,
-            );
+            await api.get(`/admin/users/360/${userId}`);
           setSelectedUser(
             res
               .data
@@ -433,10 +417,7 @@ const User360 =
         );
         try {
           const res =
-            await axios.get(
-              `http://localhost:5000/api/admin/item/360/${itemId}`,
-              axiosConfig,
-            );
+            await api.get(`/admin/item/360/${itemId}`);
           setItemData(
             res.data,
           );
@@ -477,14 +458,9 @@ const User360 =
             : "suspended";
 
         try {
-          await axios.post(
-            `http://localhost:5000/api/admin/users/${selectedUser._id}/status`,
-            {
-              status:
-                newStatus,
-            },
-            axiosConfig,
-          );
+          await api.post(`/admin/users/${selectedUser._id}/status`, {
+            status: newStatus,
+          });
           setSelectedUser(
             (
               prev,
@@ -533,11 +509,7 @@ const User360 =
         );
 
         try {
-          await axios.post(
-            `http://localhost:5000/api/admin/users/${selectedUser._id}/send-reset`,
-            {},
-            axiosConfig,
-          );
+          await api.post(`/admin/users/${selectedUser._id}/send-reset`);
           setSuccessMsg(
             `Password reset link sent to ${selectedUser.email}`,
           );
@@ -578,8 +550,7 @@ const User360 =
         );
 
         try {
-          await axios.post(
-            `http://localhost:5000/api/admin/item/${itemData.item._id}/request-manual-unlock`,
+          await api.post(`/admin/item/${itemData.item._id}/request-manual-unlock`,
             {
               userIdOrEmail:
                 grantAccessData.targetUser,
@@ -587,7 +558,6 @@ const User360 =
               justification:
                 grantAccessData.justification,
             },
-            axiosConfig,
           );
           setSuccessMsg(
             "Unlock request sent to Super Admins for approval.",
@@ -630,12 +600,10 @@ const User360 =
         action,
       ) => {
         try {
-          await axios.post(
-            `http://localhost:5000/api/admin/approvals/${approvalId}/process`,
+          await api.post(`/admin/approvals/${approvalId}/process`,
             {
               action,
-            }, // 'APPROVE' or 'REJECT'
-            axiosConfig,
+            },
           );
           setSuccessMsg(
             `Request ${action.toLowerCase()}d successfully.`,

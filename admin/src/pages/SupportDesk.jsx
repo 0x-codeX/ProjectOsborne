@@ -2,7 +2,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import {
   Search,
   Mail,
@@ -66,14 +66,8 @@ const SupportDesk =
 
           // IRONCLAD: Hardcoded absolute URL to bypass Vite proxy issues
           const res =
-            await axios.get(
-              "http://localhost:5000/api/admin/tickets",
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
+            await api.get(
+              "/admin/tickets",
             );
 
           console.log(
@@ -129,8 +123,8 @@ const SupportDesk =
             );
 
           // IRONCLAD: Hardcoded absolute URL
-          await axios.post(
-            "http://localhost:5000/api/admin/support/reply",
+          await api.post(
+            "/admin/support/reply",
             {
               ticketId:
                 selectedTicket._id,
@@ -139,12 +133,6 @@ const SupportDesk =
               subject: `Re: ${selectedTicket.subject}`,
               replyBody:
                 replyMessage,
-            },
-            {
-              headers:
-                {
-                  Authorization: `Bearer ${token}`,
-                },
             },
           );
 

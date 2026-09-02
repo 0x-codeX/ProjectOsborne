@@ -914,9 +914,9 @@ const FanChatWindow =
 
     return (
       <div className="fixed inset-0 z-50 flex justify-center bg-black/95 md:py-6 font-sans">
-        <div className="w-full h-full md:h-[90vh] md:max-w-2xl bg-nippy-onyx md:rounded-3xl md:border md:border-gray-800 md:shadow-2xl flex flex-col relative overflow-hidden">
+        <div className="w-full h-full md:h-[90vh] md:max-w-2xl bg-slate-950 md:rounded-3xl md:border md:border-slate-800 md:shadow-2xl flex flex-col relative overflow-hidden">
           {/* HEADER */}
-          <div className="flex items-center justify-between p-4 bg-nippy-obsidian/95 backdrop-blur-md border-b border-gray-800 z-10">
+          <div className="flex items-center justify-between p-4 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 z-10">
             <div className="flex items-center gap-3">
               <button
                 onClick={() =>
@@ -924,7 +924,7 @@ const FanChatWindow =
                     -1,
                   )
                 }
-                className="p-2 -ml-2 text-gray-400 hover:text-white transition-colors rounded-full"
+                className="p-2 -ml-2 text-slate-400 hover:text-white transition-colors rounded-full"
               >
                 <ArrowLeft
                   size={
@@ -960,7 +960,7 @@ const FanChatWindow =
                     alt={
                       chatInfo.username
                     }
-                    className="w-10 h-10 rounded-full object-cover border border-gray-700 group-hover:border-emerald-500 transition-colors"
+                    className="w-10 h-10 rounded-full object-cover border border-slate-700 group-hover:border-emerald-500 transition-colors"
                   />
                   <div className="flex flex-col">
                     <h2 className="text-sm font-bold text-slate-200 flex items-center gap-1 group-hover:text-emerald-400 transition-colors">
@@ -1042,7 +1042,7 @@ const FanChatWindow =
                       className={`max-w-[85%] md:max-w-[70%] px-4 py-2.5 shadow-sm relative ${
                         isMe
                           ? "bg-emerald-500 text-white rounded-2xl rounded-tr-sm"
-                          : "bg-[#262626] text-slate-200 rounded-2xl rounded-tl-sm border border-gray-800"
+                          : "bg-[#262626] text-slate-200 rounded-2xl rounded-tl-sm border border-slate-800"
                       }`}
                     >
                       {/* FREE VOICE NOTE */}
@@ -1208,7 +1208,7 @@ const FanChatWindow =
                         className={`text-[10px] mt-1.5 flex items-center gap-1 ${
                           isMe
                             ? "text-white/70 justify-end"
-                            : "text-gray-500"
+                            : "text-slate-500"
                         }`}
                       >
                         {new Date(
@@ -1235,7 +1235,7 @@ const FanChatWindow =
           </div>
 
           {/* INPUT / BUNDLE PROMPT */}
-          <div className="bg-nippy-obsidian/95 border-t border-gray-800 p-3 pb-safe z-10">
+          <div className="bg-slate-900/95 border-t border-slate-800 p-3 pb-safe z-10">
             {requiresBundle ||
             bubblesLeft <=
               0 ? (
@@ -1342,14 +1342,14 @@ const FanChatWindow =
                       )
                     }
                     placeholder="Message (max 200 characters)..."
-                    className="w-full bg-[#262626] border border-gray-700 text-white rounded-full py-3 pl-4 pr-10 focus:outline-none focus:border-emerald-500 transition-colors text-sm"
+                    className="w-full bg-[#262626] border border-slate-700 text-white rounded-full py-3 pl-4 pr-10 focus:outline-none focus:border-emerald-500 transition-colors text-sm"
                   />
                   <span
                     className={`absolute right-4 top-3 text-xs ${
                       inputText.length >=
                       200
                         ? "text-red-400"
-                        : "text-gray-500"
+                        : "text-slate-500"
                     }`}
                   >
                     {
@@ -1392,7 +1392,7 @@ const FanChatWindow =
                         false,
                       )
                     }
-                    className="text-gray-400 hover:text-white transition-colors"
+                    className="text-slate-400 hover:text-white transition-colors"
                   >
                     <X
                       size={
@@ -1590,7 +1590,7 @@ const FanChatWindow =
                       processingId !==
                       null
                     }
-                    className="text-gray-400 hover:text-white transition-colors"
+                    className="text-slate-400 hover:text-white transition-colors"
                   >
                     <X
                       size={
@@ -1601,7 +1601,7 @@ const FanChatWindow =
                 </div>
 
                 <div className="p-6 space-y-4">
-                  <p className="text-sm text-gray-400 text-center">
+                  <p className="text-sm text-slate-400 text-center">
                     {checkoutData.type ===
                     "CHAT_BUNDLE"
                       ? `You are buying ${checkoutData.bubbles} messages from `
@@ -1631,7 +1631,7 @@ const FanChatWindow =
                         paymentMethod ===
                         "CRYPTO"
                           ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
-                          : "border-slate-700 text-gray-400 hover:border-slate-500"
+                          : "border-slate-700 text-slate-400 hover:border-slate-500"
                       }`}
                     >
                       <Wallet
@@ -1658,7 +1658,7 @@ const FanChatWindow =
                         paymentMethod ===
                         "CARD"
                           ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
-                          : "border-slate-700 text-gray-400 hover:border-slate-500"
+                          : "border-slate-700 text-slate-400 hover:border-slate-500"
                       }`}
                     >
                       <CreditCard
@@ -1693,7 +1693,7 @@ const FanChatWindow =
                     "CRYPTO" &&
                     cryptoQuote && (
                       <div className="mt-2 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
-                        <p className="text-sm text-gray-400 mb-1">
+                        <p className="text-sm text-slate-400 mb-1">
                           Total:{" "}
                           <span className="text-white">
                             $

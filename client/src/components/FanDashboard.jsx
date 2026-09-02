@@ -99,10 +99,6 @@ const FanDashboard =
             }
             className="text-emerald-500"
           />
-          <h1 className="text-2xl font-bold text-slate-200">
-            Your
-            Dashboard
-          </h1>
         </div>
 
         {/* Tabs */}

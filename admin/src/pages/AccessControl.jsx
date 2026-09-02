@@ -2,7 +2,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import {
   Shield,
   Search,
@@ -83,18 +83,6 @@ const AccessControl =
         false,
       );
 
-    const token =
-      localStorage.getItem(
-        "nippy_admin_token",
-      );
-    const axiosConfig =
-      {
-        headers:
-          {
-            Authorization: `Bearer ${token}`,
-          },
-      };
-
     // 1. Fetch Live Ledger on Load
     useEffect(() => {
       fetchAdmins();
@@ -104,9 +92,8 @@ const AccessControl =
       async () => {
         try {
           const res =
-            await axios.get(
-              "http://localhost:5000/api/admin/admins",
-              axiosConfig,
+            await api.get(
+              "/admin/admins",
             );
           setAdmins(
             res.data ||
@@ -132,9 +119,8 @@ const AccessControl =
       async () => {
         try {
           const res =
-            await axios.get(
-              "http://localhost:5000/api/admin/clearing/pending",
-              axiosConfig,
+            await api.get(
+              "/admin/clearing/pending",
             );
           setPendingClearings(
             res.data ||
@@ -182,8 +168,8 @@ const AccessControl =
               : "/clearing/approve";
 
           const res =
-            await axios.post(
-              `http://localhost:5000/api/admin${endpoint}`,
+            await api.post(
+              `/admin${endpoint}`,
               {
                 requestId:
                   selectedRequest._id,
@@ -199,7 +185,6 @@ const AccessControl =
                   selectedRequest.direction,
                 depositConfirmed: true,
               },
-              axiosConfig,
             );
 
           setStatus(
@@ -237,10 +222,7 @@ const AccessControl =
         e.preventDefault();
         try {
           const res =
-            await axios.get(
-              `http://localhost:5000/api/admin/users/search?query=${searchQuery}`,
-              axiosConfig,
-            );
+            await api.get(`/admin/users/search?query=${searchQuery}`);
           setUser(
             res
               .data
@@ -284,14 +266,13 @@ const AccessControl =
               : "/role/assign-staff";
 
           const res =
-            await axios.post(
-              `http://localhost:5000/api/admin${endpoint}`,
+            await api.post(
+              `/admin${endpoint}`,
               {
                 targetUserId:
                   targetUserId,
                 newRole,
               },
-              axiosConfig,
             );
 
           setStatus(

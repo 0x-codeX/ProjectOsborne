@@ -106,8 +106,8 @@ const FanBiodata =
       };
 
     return (
-      <div className="max-w-md mx-auto mt-12 p-6 border rounded-lg bg-white shadow-sm">
-        <h2 className="text-2xl font-bold mb-6">
+      <div className="max-w-md mx-auto mt-12 p-8 bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl">
+        <h2 className="text-2xl font-bold text-white mb-6">
           Complete
           Your
           Fan
@@ -115,7 +115,7 @@ const FanBiodata =
         </h2>
 
         {error && (
-          <div className="bg-red-100 text-red-700 p-3 rounded mb-4">
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl mb-4 font-bold text-sm">
             {
               error
             }
@@ -127,15 +127,15 @@ const FanBiodata =
             handleSubmit
           }
         >
-          <div className="mb-4">
-            <label className="block text-gray-700 font-medium mb-2">
+          <div className="mb-6">
+            <label className="block text-slate-300 font-bold mb-2 text-sm">
               Pick
               a
               Username
             </label>
             <input
               type="text"
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:border-black"
+              className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 transition-colors"
               value={
                 username
               }
@@ -154,11 +154,11 @@ const FanBiodata =
           </div>
 
           {/* THE AGE GATE */}
-          <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-            <label className="flex items-start cursor-pointer">
+          <div className="mb-6 p-4 bg-slate-950 border border-slate-800 rounded-xl">
+            <label className="flex items-start cursor-pointer group">
               <input
                 type="checkbox"
-                className="mt-1 mr-3 w-5 h-5 cursor-pointer"
+                className="mt-1 mr-3 w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-900 cursor-pointer shrink-0"
                 checked={
                   isOver18
                 }
@@ -172,7 +172,7 @@ const FanBiodata =
                   )
                 }
               />
-              <span className="text-sm text-gray-800">
+              <span className="text-sm text-slate-400 group-hover:text-slate-300 transition-colors leading-relaxed">
                 I
                 confirm
                 that
@@ -212,10 +212,10 @@ const FanBiodata =
             disabled={
               !isOver18
             }
-            className={`w-full py-3 rounded font-bold text-white transition-colors ${
+            className={`w-full py-3.5 rounded-xl font-bold transition-all ${
               isOver18
-                ? "bg-black hover:bg-gray-800"
-                : "bg-gray-400 cursor-not-allowed"
+                ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-500/20"
+                : "bg-slate-800 text-slate-500 cursor-not-allowed"
             }`}
           >
             Enter

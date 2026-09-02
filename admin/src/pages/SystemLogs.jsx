@@ -2,7 +2,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import {
   Activity,
   Search,
@@ -43,11 +43,6 @@ const SystemLogs =
         "",
       );
 
-    const token =
-      localStorage.getItem(
-        "nippy_admin_token",
-      );
-
     useEffect(() => {
       fetchLogs();
     }, []);
@@ -59,14 +54,8 @@ const SystemLogs =
             true,
           );
           const res =
-            await axios.get(
-              "http://localhost:5000/api/admin/logs",
-              {
-                headers:
-                  {
-                    Authorization: `Bearer ${token}`,
-                  },
-              },
+            await api.get(
+              "/admin/logs",
             );
           setLogs(
             res.data,

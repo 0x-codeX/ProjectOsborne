@@ -422,7 +422,7 @@ const NotificationsFeed =
                 className={`w-10 h-10 rounded-full object-cover border ${
                   sticky
                     ? "border-red-500 animate-pulse"
-                    : "border-gray-700"
+                    : "border-slate-700"
                 }`}
               />
               {sticky && (
@@ -443,7 +443,7 @@ const NotificationsFeed =
           {
             size: 20,
             className:
-              "text-gray-400",
+              "text-slate-400",
           };
         let IconComponent =
           Bell;
@@ -482,7 +482,7 @@ const NotificationsFeed =
             iconProps.className =
               sticky
                 ? "text-red-500"
-                : "text-gray-500";
+                : "text-slate-500";
             break;
           case "WELCOME_MESSAGE":
             IconComponent =
@@ -511,7 +511,7 @@ const NotificationsFeed =
             className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${
               sticky
                 ? "bg-red-500/10 border-red-500/50"
-                : "bg-gray-900 border-gray-800"
+                : "bg-slate-900 border-slate-800"
             }`}
           >
             <IconComponent
@@ -534,15 +534,11 @@ const NotificationsFeed =
 
     return (
       <div className="max-w-2xl mx-auto py-8 px-4">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-slate-200">
-            Notifications
-          </h1>
-        </div>
+        
 
         {notifications.length ===
         0 ? (
-          <div className="text-center text-gray-500 mt-20 flex flex-col items-center">
+          <div className="text-center text-slate-500 mt-20 flex flex-col items-center">
             <Bell
               size={
                 48
@@ -584,14 +580,14 @@ const NotificationsFeed =
                     }
                     className={`flex items-start gap-4 p-4 rounded-xl border transition-all relative overflow-hidden ${
                       notif.actionUrl
-                        ? "cursor-pointer hover:bg-gray-800/80"
+                        ? "cursor-pointer hover:bg-slate-800/80"
                         : ""
                     } ${
                       sticky
                         ? "bg-red-950/20 border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.1)]"
                         : !isUnread
-                          ? "bg-nippy-obsidian border-gray-800/50 opacity-75"
-                          : "bg-gray-800/50 border-gray-700 shadow-lg shadow-black/20"
+                          ? "bg-slate-900 border-slate-800/50 opacity-75"
+                          : "bg-slate-800/50 border-slate-700 shadow-lg shadow-black/20"
                     }`}
                   >
                     {/* Visual Flair for Active Streams */}
@@ -606,7 +602,7 @@ const NotificationsFeed =
                     <div className="flex-1 pr-6">
                       <div className="flex items-center gap-2">
                         <h3
-                          className={`text-sm font-bold ${sticky ? "text-red-400" : !isUnread ? "text-gray-300" : "text-white"}`}
+                          className={`text-sm font-bold ${sticky ? "text-red-400" : !isUnread ? "text-slate-300" : "text-white"}`}
                         >
                           {
                             notif.title
@@ -630,7 +626,7 @@ const NotificationsFeed =
                         ) : null}
                       </div>
 
-                      <p className="text-sm text-gray-400 mt-1 leading-snug whitespace-pre-wrap">
+                      <p className="text-sm text-slate-400 mt-1 leading-snug whitespace-pre-wrap">
                         {notif.type ===
                           "GO_LIVE" &&
                         !sticky
@@ -638,7 +634,7 @@ const NotificationsFeed =
                           : notif.message}
                       </p>
 
-                      <span className="text-xs text-gray-600 mt-2 block font-medium">
+                      <span className="text-xs text-slate-600 mt-2 block font-medium">
                         {new Date(
                           notif.createdAt,
                         ).toLocaleDateString()}{" "}

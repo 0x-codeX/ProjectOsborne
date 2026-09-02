@@ -802,7 +802,7 @@ const CreatorPublicProfile =
       !profileData
     ) {
       return (
-        <div className="text-center text-gray-500 mt-20">
+        <div className="text-center text-slate-500 mt-20">
           Creator
           not
           found.
@@ -881,9 +881,9 @@ const CreatorPublicProfile =
       );
 
     return (
-      <div className="max-w-4xl mx-auto pb-12 relative shadow-2xl bg-black min-h-screen">
+      <div className="max-w-4xl mx-auto pb-12 relative shadow-2xl bg-slate-950 min-h-screen">
         {/* THE BANNER (Twitter/Facebook Style) */}
-        <div className="h-48 md:h-72 w-full bg-gray-900 relative">
+        <div className="h-48 md:h-72 w-full bg-slate-900 relative">
           {creator.bannerImage ? (
             <img
               src={
@@ -893,7 +893,7 @@ const CreatorPublicProfile =
               className="w-full h-full object-cover"
             />
           ) : (
-            <div className="w-full h-full bg-gradient-to-r from-gray-900 via-slate-800 to-black"></div>
+            <div className="w-full h-full bg-gradient-to-r from-slate-900 via-slate-800 to-black"></div>
           )}
         </div>
         {/* ^^^ THIS WAS THE MISSING CLOSING DIV THAT CAUSED YOUR RED SQUIGGLIES ^^^ */}
@@ -905,7 +905,7 @@ const CreatorPublicProfile =
             <div className="flex flex-col">
               {/* THE ENLARGED AVATAR */}
               <div className="relative w-max">
-                <div className="w-28 h-28 md:w-40 md:h-40 bg-gray-800 rounded-full border-4 border-black flex items-center justify-center overflow-hidden shadow-xl">
+                <div className="w-28 h-28 md:w-40 md:h-40 bg-slate-800 rounded-full border-4 border-slate-950 flex items-center justify-center overflow-hidden shadow-xl">
                   {creator.profileImage ? (
                     <img
                       src={
@@ -917,7 +917,7 @@ const CreatorPublicProfile =
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <span className="text-4xl md:text-5xl font-bold text-gray-400">
+                    <span className="text-4xl md:text-5xl font-bold text-slate-400">
                       {creator.username
                         .charAt(
                           0,
@@ -932,9 +932,9 @@ const CreatorPublicProfile =
                   onClick={
                     handleFollowToggle
                   }
-                  className={`absolute bottom-0 right-0 md:bottom-2 md:right-2 p-2 rounded-full border-4 border-black transition-all ${
+                  className={`absolute bottom-0 right-0 md:bottom-2 md:right-2 p-2 rounded-full border-4 border-slate-950 transition-all ${
                     isFollowed
-                      ? "bg-gray-700 text-white hover:bg-gray-600"
+                      ? "bg-slate-700 text-white hover:bg-slate-600"
                       : "bg-emerald-500 text-white hover:bg-emerald-600"
                   }`}
                 >
@@ -1050,7 +1050,7 @@ const CreatorPublicProfile =
                         true,
                       );
                     }}
-                    className="bg-slate-900 text-gray-400 border border-gray-600 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-slate-800 hover:text-white transition-all flex items-center gap-2 shadow-lg"
+                    className="bg-slate-900 text-slate-400 border border-slate-600 px-3 py-2 sm:px-4 rounded-full font-bold hover:bg-slate-800 hover:text-white transition-all flex items-center gap-2 shadow-lg"
                   >
                     <MessageSquare
                       size={
@@ -1065,7 +1065,7 @@ const CreatorPublicProfile =
                 ))}
 
               {isSubscribed ? (
-                <button className="bg-gray-800 text-emerald-400 px-4 py-2 rounded-full font-bold flex items-center gap-1.5 border border-gray-700 cursor-default text-sm">
+                <button className="bg-slate-800 text-emerald-400 px-4 py-2 rounded-full font-bold flex items-center gap-1.5 border border-slate-700 cursor-default text-sm">
                   <Unlock
                     size={
                       16
@@ -1081,7 +1081,7 @@ const CreatorPublicProfile =
                       true,
                     )
                   }
-                  className="bg-white text-black px-4 py-2 rounded-full font-bold hover:bg-gray-200 transition-all flex items-center gap-1.5 shadow-lg text-sm"
+                  className="bg-white text-black px-4 py-2 rounded-full font-bold hover:bg-slate-200 transition-all flex items-center gap-1.5 shadow-lg text-sm"
                 >
                   <Star
                     size={
@@ -1091,7 +1091,7 @@ const CreatorPublicProfile =
                   Subscribe
                 </button>
               ) : (
-                <button className="bg-gray-800 text-white px-4 py-2 rounded-full font-bold border border-gray-700 text-sm">
+                <button className="bg-slate-800 text-white px-4 py-2 rounded-full font-bold border border-slate-700 text-sm">
                   Free
                   Profile
                 </button>
@@ -1101,7 +1101,7 @@ const CreatorPublicProfile =
         </div>
 
         <div className="px-4 mt-12 md:mt-16">
-          <h2 className="text-xl font-bold text-white mb-6 border-b border-gray-800 pb-2">
+          <h2 className="text-xl font-bold text-white mb-6 border-b border-slate-800 pb-2">
             Creator
             Vault
           </h2>
@@ -1150,7 +1150,7 @@ const CreatorPublicProfile =
                         </div>
                       )}
 
-                    <div className="bg-black aspect-square relative flex items-center justify-center border-b border-gray-800/50 overflow-hidden">
+                    <div className="bg-slate-950 aspect-square relative flex items-center justify-center border-b border-slate-800/50 overflow-hidden">
                       {/* THE FIX: Bypass the blur if the content is free */}
                       {post.isLocked &&
                       !isFreeContent ? (
@@ -1171,7 +1171,7 @@ const CreatorPublicProfile =
                               size={
                                 32
                               }
-                              className="text-gray-300 mb-2 shadow-sm"
+                              className="text-slate-300 mb-2 shadow-sm"
                             />
                             <p className="text-white font-bold mb-3 shadow-md">
                               Locked
@@ -1194,7 +1194,7 @@ const CreatorPublicProfile =
                                   post.isNsfw,
                                 ); // Checks if this specific post is NSFW
                               }}
-                              className="bg-white hover:bg-gray-200 text-black font-bold py-2 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg"
+                              className="bg-white hover:bg-slate-200 text-black font-bold py-2 px-6 rounded-full flex items-center justify-center gap-2 transition-colors shadow-lg"
                             >
                               Unlock
                               for{" "}
@@ -1244,7 +1244,7 @@ const CreatorPublicProfile =
                           post.title
                         }
                       </h3>
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-slate-500 mt-1">
                         {new Date(
                           post.createdAt,
                         ).toLocaleDateString()}
@@ -1257,7 +1257,7 @@ const CreatorPublicProfile =
           </div>
           {content.length ===
             0 && (
-            <p className="text-center text-gray-500 mt-10">
+            <p className="text-center text-slate-500 mt-10">
               This
               creator
               hasn't
@@ -1284,7 +1284,7 @@ const CreatorPublicProfile =
                       false,
                     )
                   }
-                  className="text-gray-400 hover:text-white transition-colors"
+                  className="text-slate-400 hover:text-white transition-colors"
                 >
                   <X
                     size={
@@ -1294,7 +1294,7 @@ const CreatorPublicProfile =
                 </button>
               </div>
               <div className="p-6 space-y-4">
-                <p className="text-sm text-gray-400 mb-4 text-center">
+                <p className="text-sm text-slate-400 mb-4 text-center">
                   Select
                   a
                   plan
@@ -1351,7 +1351,7 @@ const CreatorPublicProfile =
                           size={
                             18
                           }
-                          className="text-gray-400 group-hover:text-emerald-500"
+                          className="text-slate-400 group-hover:text-emerald-500"
                         />
                         {tier.price.toFixed(
                           2,
@@ -1384,7 +1384,7 @@ const CreatorPublicProfile =
                       false,
                     )
                   }
-                  className="text-gray-400 hover:text-white transition-colors"
+                  className="text-slate-400 hover:text-white transition-colors"
                 >
                   <X
                     size={
@@ -1576,7 +1576,7 @@ const CreatorPublicProfile =
                   onClick={
                     closeCheckoutModal
                   }
-                  className="text-gray-400 hover:text-white transition-colors"
+                  className="text-slate-400 hover:text-white transition-colors"
                   disabled={
                     processingId !==
                     null
@@ -1591,7 +1591,7 @@ const CreatorPublicProfile =
               </div>
 
               <div className="p-6 space-y-4">
-                <p className="text-sm text-gray-400 text-center">
+                <p className="text-sm text-slate-400 text-center">
                   {checkoutData.type ===
                   "PPV"
                     ? `You are unlocking a post from `
@@ -1624,7 +1624,7 @@ const CreatorPublicProfile =
                       paymentMethod ===
                       "CRYPTO"
                         ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
-                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                        : "border-slate-700 text-slate-400 hover:border-slate-500"
                     }`}
                   >
                     <Wallet
@@ -1651,7 +1651,7 @@ const CreatorPublicProfile =
                       paymentMethod ===
                       "CARD"
                         ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
-                        : "border-slate-700 text-gray-400 hover:border-slate-500"
+                        : "border-slate-700 text-slate-400 hover:border-slate-500"
                     }`}
                   >
                     <CreditCard
@@ -1686,7 +1686,7 @@ const CreatorPublicProfile =
                   "CRYPTO" &&
                   cryptoQuote && (
                     <div className="mt-2 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
-                      <p className="text-sm text-gray-400 mb-1">
+                      <p className="text-sm text-slate-400 mb-1">
                         Total:{" "}
                         <span className="text-white">
                           $
