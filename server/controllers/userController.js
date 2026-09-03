@@ -5,6 +5,33 @@ const ethers = require("ethers");
 const Ticket = require("../models/Ticket");
 const exchangeConfig = require("../config/exchangeRates");
 
+
+const generateFallbackUsername =
+  async () => {
+    let isUnique = false;
+    let newUsername =
+      "";
+    while (
+      !isUnique
+    ) {
+      // Generates a random suffix like user83492 to avoid sequential DB race conditions
+      newUsername = `user${Math.floor(10000 + Math.random() * 90000)}`;
+      const exists =
+        await User.findOne(
+          {
+            username:
+              newUsername,
+          },
+        );
+      if (
+        !exists
+      )
+        isUnique = true;
+    }
+    return newUsername;
+  };
+
+
 // PUT /api/users/profile
 // Handles Bio Data Setup and Profile Updates
 exports.submitBioData =
@@ -215,31 +242,43 @@ exports.submitBioData =
           );
       }
 
+      let finalUsername =
+        username;
       if (
-        username
+        username !==
+        undefined
       ) {
-        const existingUser =
-          await User.findOne(
-            {
-              username,
-              _id: {
-                $ne: userId,
-              },
-            },
-          );
         if (
-          existingUser
-        )
-          return res
-            .status(
-              409,
-            )
-            .json(
+          username.trim() ===
+          ""
+        ) {
+          finalUsername =
+            await generateFallbackUsername();
+        } else {
+          const existingUser =
+            await User.findOne(
               {
-                message:
-                  "Username is already taken.",
+                username,
+                _id: {
+                  $ne: userId,
+                },
               },
             );
+          if (
+            existingUser
+          ) {
+            return res
+              .status(
+                409,
+              )
+              .json(
+                {
+                  message:
+                    "Username is already taken.",
+                },
+              );
+          }
+        }
       }
 
       if (
@@ -319,7 +358,11 @@ exports.submitBioData =
           userId,
           {
             $set: {
-              username,
+              username:
+                finalUsername !==
+                undefined
+                  ? finalUsername
+                  : user.username,
               email,
               phone,
               gender,
@@ -358,6 +401,15 @@ exports.submitBioData =
           },
         );
     } catch (error) {
+      if (error.code === 11000) {
+    const duplicateField = Object.keys(error.keyValue)[0];
+    const duplicateValue = error.keyValue[duplicateField];
+    return res.status(409).json({
+      message: `The ${duplicateField} '${duplicateValue}' is already in use. Please choose another.`
+    });
+  }
+  res.status(500).json({ message: "Server Error", error: error.message });
+}
       console.error(
         "Error updating profile:",
         error,
@@ -391,7 +443,7 @@ exports.submitBioData =
           },
         );
     }
-  };
+  
 
 // DELETE /api/users/profile
 exports.deleteProfile =
@@ -1022,39 +1074,53 @@ exports.updateProfile =
       } =
         req.body;
 
+      let finalUsername =
+        username;
       if (
-        username
+        username !==
+        undefined
       ) {
-        const existingUser =
-          await User.findOne(
-            {
-              username,
-              _id: {
-                $ne: req
-                  .user
-                  ._id,
-              },
-            },
-          );
         if (
-          existingUser
-        )
-          return res
-            .status(
-              400,
-            )
-            .json(
+          username.trim() ===
+          ""
+        ) {
+          finalUsername =
+            await generateFallbackUsername();
+        } else {
+          const existingUser =
+            await User.findOne(
               {
-                message:
-                  "Username is already taken",
+                username,
+                _id: {
+                  $ne: req
+                    .user
+                    ._id,
+                },
               },
             );
+          if (
+            existingUser
+          ) {
+            return res
+              .status(
+                400,
+              )
+              .json(
+                {
+                  message:
+                    "Username is already taken",
+                },
+              );
+          }
+        }
       }
 
       const updates =
         {
-          ...(username && {
-            username,
+          ...(finalUsername !==
+            undefined && {
+            username:
+              finalUsername,
           }),
           ...(profileImage && {
             profileImage,
@@ -1362,3 +1428,22 @@ exports.submitSupportTicket =
         );
     }
   };
+
+  // ADD THIS NEW CONTROLLER EXPORT
+// GET /api/users/check-username
+exports.checkUsernameAvailability = async (req, res) => {
+  try {
+    const { username } = req.query;
+    if (!username) return res.status(200).json({ available: true });
+
+    // Check if username exists, excluding the current user's own username
+    const existingUser = await User.findOne({ 
+      username: new RegExp(`^${username}$`, "i"), // Case-insensitive check
+      _id: { $ne: req.user._id } 
+    });
+
+    return res.status(200).json({ available: !existingUser });
+  } catch (error) {
+    res.status(500).json({ message: "Server error checking username." });
+  }
+};

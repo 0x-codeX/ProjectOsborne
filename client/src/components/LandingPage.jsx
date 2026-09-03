@@ -583,31 +583,51 @@ const LandingPage =
                         required
                       />
                     </div>
-                    <div className="relative">
-                      <Lock
-                        className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
-                        size={
-                          18
-                        }
-                      />
-                      <input
-                        type="password"
-                        placeholder="Password"
-                        value={
-                          password
-                        }
-                        onChange={(
-                          e,
-                        ) =>
-                          setPassword(
-                            e
-                              .target
-                              .value,
-                          )
-                        }
-                        className="w-full bg-slate-950/50 border border-slate-700 text-white rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
-                        required
-                      />
+                    <div className="flex flex-col gap-1.5">
+                      <div className="relative">
+                        <Lock
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+                          size={
+                            18
+                          }
+                        />
+                        <input
+                          type="password"
+                          placeholder="Password"
+                          value={
+                            password
+                          }
+                          onChange={(
+                            e,
+                          ) =>
+                            setPassword(
+                              e
+                                .target
+                                .value,
+                            )
+                          }
+                          className={`w-full bg-slate-950/50 border ${
+                            error
+                              ? "border-red-500/50 focus:border-red-500"
+                              : "border-slate-700 focus:border-emerald-500"
+                          } text-white rounded-xl py-3 pl-12 pr-4 focus:outline-none transition-colors placeholder:text-slate-500`}
+                          required
+                        />
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate(
+                              "/forgot-password",
+                            )
+                          }
+                          className="text-xs font-bold text-slate-400 hover:text-emerald-500 transition-colors"
+                        >
+                          Forgot
+                          password?
+                        </button>
+                      </div>
                     </div>
                     <button
                       type="submit"

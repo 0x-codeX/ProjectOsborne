@@ -63,3 +63,18 @@ exports.sendAccountsCryptoPayoutEmail =
       mailOptions,
     );
   };
+
+/**
+ * Sends generic system emails (OTPs, Password Resets, Welcome Emails)
+ */
+exports.sendEmail = async ({ to, subject, text, html }) => {
+  const mailOptions = {
+    from: `"Nippy" <${process.env.EMAIL_USER}>`,
+    to,
+    subject,
+    text,
+    html,
+  };
+
+  return transporter.sendMail(mailOptions);
+};

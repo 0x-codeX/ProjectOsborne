@@ -4,6 +4,9 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs"); // For password hashing
 const jwt = require("jsonwebtoken");
 const axios = require("axios");
+const {
+  sendEmail,
+} = require("../utils/emailService");
 
 
 // Generate JWT with a 30-day expiration
@@ -26,6 +29,30 @@ const generateToken =
       },
     );
   };
+
+const generateFallbackUsername =
+    async () => {
+      let isUnique = false;
+      let newUsername =
+        "";
+      while (
+        !isUnique
+      ) {
+        newUsername = `user${Math.floor(10000 + Math.random() * 90000)}`;
+        const exists =
+          await User.findOne(
+            {
+              username:
+                newUsername,
+            },
+          );
+        if (
+          !exists
+        )
+          isUnique = true;
+      }
+      return newUsername;
+    };
 
 // @desc    Register a new user (Fan or Creator)
 // @route   POST /api/auth/register
@@ -79,6 +106,21 @@ exports.registerUser =
             },
           );
       }
+
+      const generatedUsername =
+        await generateFallbackUsername();
+        await User.create(
+          {
+            email,
+            passwordHash:
+              hashedPassword,
+            role:
+              role ||
+              "fan",
+            username:
+              generatedUsername, // <-- ADDED
+          },
+        );
 
       // Hash password securely
       const salt =
@@ -143,6 +185,29 @@ exports.registerUser =
           );
       }
     } catch (error) {
+      if (
+        error.code ===
+        11000
+      ) {
+        const duplicateField =
+          Object.keys(
+            error.keyValue,
+          )[0];
+        const duplicateValue =
+          error
+            .keyValue[
+            duplicateField
+          ];
+        return res
+          .status(
+            409,
+          )
+          .json(
+            {
+              message: `The ${duplicateField} '${duplicateValue}' is already in use. Please choose another.`,
+            },
+          );
+      }
       res
         .status(
           500,
@@ -250,6 +315,26 @@ exports.getWeb3Nonce = async (req, res) => {
     
     // Generate a secure, random hex string (looks exactly like the one you posted)
     const nonce = crypto.randomBytes(16).toString('hex');
+
+    const generatedUsername =
+      await generateFallbackUsername();
+    if (
+      !user
+    ) {
+      user =
+        await User.create(
+          {
+            walletAddress:
+              cleanAddress,
+            nonce:
+              nonce,
+            role: "fan",
+            hasCompletedBioData: false,
+            username:
+              generatedUsername, // <-- ADDED
+          },
+        );
+    }
 
     let user = await User.findOne({ walletAddress: cleanAddress });
 
@@ -504,5 +589,122 @@ exports.googleAuth = async (req, res) => {
   } catch (error) {
     console.error("Google Auth Error:", error);
     res.status(401).json({ message: "Google authentication failed. Invalid token." });
+  }
+};
+
+// @desc    Generate & Send Verification OTP
+// @route   POST /api/auth/send-otp
+exports.sendVerificationOtp = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id); // Assuming protected route
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Hash OTP before saving to DB to prevent database breaches exposing valid OTPs
+    const salt = await bcrypt.genSalt(10);
+    user.emailVerificationOtp = await bcrypt.hash(otp, salt);
+    user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes from now
+    
+    await user.save();
+
+    // Fire and forget email delivery
+    await sendEmail({
+      to: user.email,
+      subject: "Verify your Nippy Account",
+      text: `Your verification code is: ${otp}. It expires in 10 minutes.`
+    });
+
+    res.status(200).json({ message: "OTP sent successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Error sending OTP." });
+  }
+};
+
+// @desc    Verify the OTP
+// @route   POST /api/auth/verify-otp
+exports.verifyOtp = async (req, res) => {
+  try {
+    const { otp } = req.body;
+    // Explicitly select the hidden OTP field
+    const user = await User.findById(req.user.id).select("+emailVerificationOtp +otpExpires");
+    
+    if (!user.emailVerificationOtp || user.otpExpires < Date.now()) {
+      return res.status(400).json({ message: "OTP is invalid or has expired." });
+    }
+
+    const isMatch = await bcrypt.compare(otp, user.emailVerificationOtp);
+    if (!isMatch) return res.status(400).json({ message: "Incorrect OTP." });
+
+    user.isEmailVerified = true;
+    user.emailVerificationOtp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
+
+    res.status(200).json({ message: "Email successfully verified." });
+  } catch (error) {
+    res.status(500).json({ message: "Error verifying OTP." });
+  }
+};
+
+// @desc    Initiate Password Reset
+// @route   POST /api/auth/forgot-password
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+    
+    // Always return 200 even if user doesn't exist to prevent email enumeration attacks
+    if (!user) return res.status(200).json({ message: "If that email exists, a reset link was sent." });
+
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    
+    // Hash token for database storage
+    const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+    
+    user.resetPasswordToken = hashedToken;
+    user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+    await user.save();
+
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+    
+    await sendEmail({
+      to: user.email,
+      subject: "Password Reset Request",
+      text: `Reset your password by clicking here: ${resetUrl}`
+    });
+
+    res.status(200).json({ message: "If that email exists, a reset link was sent." });
+  } catch (error) {
+    res.status(500).json({ message: "Error processing request." });
+  }
+};
+
+// @desc    Execute Password Reset
+// @route   PUT /api/auth/reset-password/:token
+exports.resetPassword = async (req, res) => {
+  try {
+    // Reconstruct the hash from the raw token in the URL params
+    const hashedToken = crypto.createHash("sha256").update(req.params.token).digest("hex");
+
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!user) return res.status(400).json({ message: "Invalid or expired reset token." });
+
+    const salt = await bcrypt.genSalt(10);
+    user.passwordHash = await bcrypt.hash(req.body.password, salt);
+    
+    // Clean up reset fields
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    res.status(200).json({ message: "Password reset successfully. You can now log in." });
+  } catch (error) {
+    res.status(500).json({ message: "Server error resetting password." });
   }
 };

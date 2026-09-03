@@ -48,6 +48,20 @@ const FanProfile =
       useState(
         false,
       );
+      const [
+        usernameError,
+        setUsernameError,
+      ] =
+        useState(
+          "",
+        );
+      const [
+        isCheckingUsername,
+        setIsCheckingUsername,
+      ] =
+        useState(
+          false,
+        );
     const [
       successMessage,
       setSuccessMessage,
@@ -59,6 +73,31 @@ const FanProfile =
     useEffect(() => {
       fetchProfile();
     }, []);
+
+    useEffect(() => {
+      if (!profile.username || profile.username.trim() === "") {
+        setUsernameError("");
+        return;
+      }
+
+      const delayDebounceFn = setTimeout(async () => {
+        setIsCheckingUsername(true);
+        try {
+          const response = await api.get(`/users/check-username?username=${profile.username}`);
+          if (!response.data.available) {
+            setUsernameError("Username already taken");
+          } else {
+            setUsernameError("");
+          }
+        } catch (error) {
+          console.error("Error checking username", error);
+        } finally {
+          setIsCheckingUsername(false);
+        }
+      }, 500);
+
+      return () => clearTimeout(delayDebounceFn);
+    }, [profile.username]);
 
     const fetchProfile =
       async () => {
@@ -391,29 +430,53 @@ const FanProfile =
                 <label className="block text-sm font-bold text-slate-400 mb-2">
                   Username
                 </label>
-                <input
-                  type="text"
-                  value={
-                    profile.username ||
-                    ""
-                  }
-                  onChange={(
-                    e,
-                  ) =>
-                    setProfile(
-                      {
-                        ...profile,
-                        username:
-                          e
-                            .target
-                            .value,
-                      },
-                    )
-                  }
-                  className="w-full bg-black border border-slate-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 transition-colors"
-                  placeholder="e.g., Web3Whale"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={
+                      profile.username ||
+                      ""
+                    }
+                    onChange={(
+                      e,
+                    ) =>
+                      setProfile(
+                        {
+                          ...profile,
+                          username:
+                            e
+                              .target
+                              .value,
+                        },
+                      )
+                    }
+                    className={`w-full bg-black border ${
+                      usernameError
+                        ? "border-red-500"
+                        : "border-slate-700"
+                    } text-white rounded-xl px-4 py-3 focus:outline-none ${
+                      usernameError
+                        ? "focus:border-red-500"
+                        : "focus:border-emerald-500"
+                    } transition-colors`}
+                    placeholder="Leave blank to auto-generate"
+                  />
+                  {isCheckingUsername && (
+                    <Loader2 className="w-4 h-4 absolute right-4 top-1/2 transform -translate-y-1/2 animate-spin text-slate-500" />
+                  )}
+                </div>
+                {usernameError && (
+                  <p className="text-red-500 text-xs font-bold mt-2 flex items-center gap-1">
+                    <ShieldCheck
+                      size={
+                        14
+                      }
+                    />{" "}
+                    {
+                      usernameError
+                    }
+                  </p>
+                )}
               </div>
 
               <div className="bg-black/50 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
@@ -471,7 +534,9 @@ const FanProfile =
               <button
                 type="submit"
                 disabled={
-                  saving
+                  saving ||
+                  !!usernameError ||
+                  isCheckingUsername
                 }
                 className="w-full bg-emerald-500 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 transition-all flex justify-center items-center gap-2 disabled:opacity-50"
               >

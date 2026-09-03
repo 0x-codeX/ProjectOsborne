@@ -2,7 +2,6 @@
 const express = require("express");
 const router =
   express.Router();
-
 const {
   registerUser,
   loginUser,
@@ -11,17 +10,24 @@ const {
   linkEmailToAccount,
   linkWalletToAccount,
   getMe,
-  googleAuth, 
+  googleAuth,
+  resetPassword,
+  forgotPassword,
+  verifyOtp,
 } = require("../controllers/authController");
-
 const {
   startKycSession,
   kycWebhook,
 } = require("../controllers/kycController");
-
 const {
   requireAuth,
 } = require("../middleware/authMiddleware");
+const {
+  checkUsernameAvailability,
+} = require("../controllers/userController");
+
+
+
 
 // --- STANDARD AUTH ---
 router.post(
@@ -74,6 +80,12 @@ router.post(
 router.post(
   "/google",
   googleAuth,
+);
+
+router.get(
+  "/check-username",
+  requireAuth,
+  checkUsernameAvailability,
 );
 
 module.exports =

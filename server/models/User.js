@@ -48,7 +48,9 @@ const userSchema =
       phone:
         {
           type: String,
+          unique: true,
           sparse: true,
+          trim: true,
         },
       gender:
         {
@@ -59,6 +61,25 @@ const userSchema =
           type: String,
           default:
             "Nigeria",
+        },
+      // --- SECURITY & OTP TRACKING (ADD THESE NEW FIELDS) ---
+      emailVerificationOtp:
+        {
+          type: String,
+          select: false, // Prevents OTP from leaking in standard API responses
+        },
+      otpExpires:
+        {
+          type: Date,
+        },
+      resetPasswordToken:
+        {
+          type: String,
+          select: false,
+        },
+      resetPasswordExpires:
+        {
+          type: Date,
         },
 
       // THE FIX: Universal Display Currency
